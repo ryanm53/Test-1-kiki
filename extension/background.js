@@ -9,7 +9,8 @@ const SYSTEM_PROMPT = `You are a browser automation assistant. You will be given
 
 Decide the single best next action to take to progress toward the goal.
 
-Respond with ONLY valid JSON — no markdown fences, no explanation, nothing else:
+YOUR ENTIRE RESPONSE MUST BE A SINGLE JSON OBJECT — no words before it, no words after it, no markdown, no explanation, no analysis. Just the raw JSON.
+
 {"action":"click"|"fill"|"drag"|"none","index":<int|null>,"sourceIndex":<int|null>,"targetIndex":<int|null>,"value":<string|null>,"reasoning":<string>}
 
 Rules:
