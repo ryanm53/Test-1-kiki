@@ -1,9 +1,8 @@
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 const MAX_RETRIES = 1;
 
-const SYSTEM_PROMPT = `Output ONLY a raw JSON object — no markdown, no text before or after.
-{"action":"click"|"fill"|"drag"|"none","index":<int|null>,"sourceIndex":<int|null>,"targetIndex":<int|null>,"value":<string|null>}
-Rules: click/fill→set index. drag→set sourceIndex+targetIndex. fill→set value. Never invent an index. Use "none" if goal met.`;
+const SYSTEM_PROMPT = `Output ONLY: {"action":"click","index":<number>} or {"action":"none"}
+Pick the index of the correct answer from the elements list. Never invent an index.`;
 
 async function callClaude(apiKey, goal, pageText, elements, refTexts = []) {
   const elementList = elements
@@ -41,7 +40,7 @@ ${elementList || '(none found)'}`;
     },
     body: JSON.stringify({
       model: CLAUDE_MODEL,
-      max_tokens: 100,
+      max_tokens: 40,
       temperature: 0,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userContent }]
@@ -89,24 +88,13 @@ ${elementList || '(none found)'}`;
     throw new Error(`Claude returned invalid JSON: ${cleaned.slice(0, 300)}`);
   }
 
-  // Validate shape
-  if (!['click', 'fill', 'drag', 'none'].includes(parsed.action)) {
-    throw new Error(`Unexpected action value: ${JSON.stringify(parsed.action)}`);
+  if (!['click', 'none'].includes(parsed.action)) {
+    throw new Error(`Unexpected action: ${JSON.stringify(parsed.action)}`);
   }
-  if (parsed.action === 'drag') {
-    if (typeof parsed.sourceIndex !== 'number' || typeof parsed.targetIndex !== 'number') {
-      throw new Error('Drag action requires numeric sourceIndex and targetIndex');
-    }
-  } else if (parsed.action !== 'none') {
-    if (typeof parsed.index !== 'number') {
-      throw new Error(`Action "${parsed.action}" requires a numeric index, got: ${JSON.stringify(parsed.index)}`);
-    }
-  }
-  if (parsed.action === 'fill' && parsed.value == null) {
-    throw new Error('Fill action requires a non-null value');
+  if (parsed.action === 'click' && typeof parsed.index !== 'number') {
+    throw new Error(`click requires a numeric index, got: ${JSON.stringify(parsed.index)}`);
   }
 
-  parsed.reasoning = parsed.reasoning ?? '';
   return parsed;
 }
 
