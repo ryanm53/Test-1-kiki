@@ -471,27 +471,36 @@ async function execute(action) {
   let loopPaused    = false;
   let loopCount     = 0;
 
-  // Load saved settings on init
+  // Load saved settings on init; default to full preset if nothing saved yet
   chrome.storage.local.get(['lastGoal', 'lastPostClicks', 'successMsg'], ({ lastGoal, lastPostClicks, successMsg }) => {
-    if (lastGoal)      { savedGoal = lastGoal; goalInput.value = lastGoal; }
-    if (lastPostClicks) { savedPostClicks = lastPostClicks; }
-    if (successMsg)    { customMsg = successMsg; msgInput.value = successMsg; }
+    if (lastGoal) {
+      savedGoal = lastGoal;
+      goalInput.value = lastGoal;
+      savedPostClicks = Array.isArray(lastPostClicks) ? lastPostClicks : PRESETS[0].postClicks;
+    } else {
+      // First run — auto-load the full preset
+      savedGoal = PRESETS[0].goal;
+      savedPostClicks = PRESETS[0].postClicks;
+      goalInput.value = savedGoal;
+      chrome.storage.local.set({ lastGoal: savedGoal, lastPostClicks: savedPostClicks });
+    }
+    if (successMsg) { customMsg = successMsg; msgInput.value = successMsg; }
   });
 
   // ── Presets dropdown ─────────────────────────────────────────────────────
   const presetSelect = shadow.getElementById('presetSelect');
   const PRESETS = [
     {
-      label: 'McGraw Hill - Answer + Confidence + Next',
-      goal: 'Click the correct answer for this multiple choice question.',
+      label: 'McGraw Hill — Full (Answer + Confidence + Next)',
+      goal: 'Look at the question and all the answer choices on this page. Click the single best correct answer.',
       postClicks: [
         { label: 'High Confidence', candidates: [{ selector: '[data-automation-id="confidence-buttons--high_confidence"]' }, { ariaLabel: 'High Confidence' }] },
-        { label: 'Next Question',   candidates: [{ selector: '.next-button' }, { text: 'Next Question' }] }
+        { label: 'Next Question',   candidates: [{ selector: '.next-button' }, { text: 'Next Question' }, { text: 'Next' }] }
       ]
     },
     {
-      label: 'McGraw Hill - Answer only',
-      goal: 'Click the correct answer for this multiple choice question.',
+      label: 'McGraw Hill — Answer only',
+      goal: 'Look at the question and all the answer choices on this page. Click the single best correct answer.',
       postClicks: []
     }
   ];
