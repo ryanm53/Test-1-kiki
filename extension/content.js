@@ -250,7 +250,7 @@ async function execute(action) {
   #fab.running { opacity: 0.7; animation: pulse 1s infinite; cursor: default; }
   @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.55; } }
 
-  #editBtn {
+  #editBtn, #loopBtn {
     width: 30px; height: 30px;
     background: #1c1507;
     border: 1px solid #38BDF8;
@@ -263,8 +263,14 @@ async function execute(action) {
     transition: color 0.15s, background 0.15s;
     flex-shrink: 0;
   }
-  #editBtn:hover { color: #38BDF8; background: #241e0c; }
+  #editBtn:hover, #loopBtn:hover { color: #38BDF8; background: #241e0c; }
   #editBtn.active { color: #38BDF8; }
+  #loopBtn.active {
+    color: #fff;
+    background: #0284C7;
+    border-color: #38BDF8;
+    box-shadow: 0 0 10px rgba(56,189,248,0.5);
+  }
 
   /* Toast */
   #toast {
@@ -419,6 +425,7 @@ async function execute(action) {
 
 <div id="btnRow">
   <button id="editBtn" title="Edit saved goal">✎</button>
+  <button id="loopBtn" title="Loop mode: auto-run on each new question">↺</button>
   <button id="fab" title="Run saved goal">⚡</button>
 </div>
 
@@ -434,6 +441,7 @@ async function execute(action) {
 
   const fab          = shadow.getElementById('fab');
   const editBtn      = shadow.getElementById('editBtn');
+  const loopBtn      = shadow.getElementById('loopBtn');
   const panel        = shadow.getElementById('panel');
   const goalInput    = shadow.getElementById('goalInput');
   const msgInput     = shadow.getElementById('msgInput');
@@ -447,6 +455,8 @@ async function execute(action) {
   let isRunning  = false;
   let savedGoal  = '';
   let customMsg  = '';
+  let loopMode   = false;
+  let loopCount  = 0;
 
   // Load saved settings on init
   chrome.storage.local.get(['lastGoal', 'successMsg'], ({ lastGoal, successMsg }) => {
@@ -521,6 +531,14 @@ async function execute(action) {
 
   stuckOk.addEventListener('click', () => stuckOverlay.classList.remove('visible'));
 
+  loopBtn.addEventListener('click', () => {
+    loopMode = !loopMode;
+    loopCount = 0;
+    loopBtn.classList.toggle('active', loopMode);
+    showToast('running', loopMode ? 'Loop ON — will auto-continue' : 'Loop OFF');
+    setTimeout(() => hideToast(), 1800);
+  });
+
   function setRunning(on) {
     isRunning = on;
     fab.classList.toggle('running', on);
@@ -562,8 +580,14 @@ async function execute(action) {
       return;
     }
     if (result.success) {
-      showToast('success', customMsg || 'Done!');
-      toastTimer = setTimeout(() => hideToast(), 2500);
+      loopCount++;
+      if (loopMode) {
+        showToast('success', `Done #${loopCount} — next in 2s…`);
+        toastTimer = setTimeout(() => triggerRun(), 2000);
+      } else {
+        showToast('success', customMsg || 'Done!');
+        toastTimer = setTimeout(() => hideToast(), 2500);
+      }
     } else {
       const err = result.error ?? 'Unknown error.';
       if (err.includes('Rate limit')) {
