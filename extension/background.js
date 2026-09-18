@@ -5,6 +5,7 @@ const SYSTEM_PROMPT = `You are a browser automation assistant. You will be given
 1. A user goal
 2. The visible text of the current web page (truncated)
 3. A numbered list of interactive elements visible on screen right now
+4. (Optional) Reference material scraped from tabs the user designated as sources — use this to answer questions correctly
 
 Decide the single best next action to take to progress toward the goal.
 
@@ -19,7 +20,7 @@ Rules:
 - NEVER invent an index that is not in the provided list
 - Use "none" if the goal is already met or no valid action exists`;
 
-async function callClaude(apiKey, goal, pageText, elements) {
+async function callClaude(apiKey, goal, pageText, elements, refTexts = []) {
   const elementList = elements
     .map((el, i) => {
       const parts = [`[${i}]`, el.tag];
@@ -32,10 +33,15 @@ async function callClaude(apiKey, goal, pageText, elements) {
     })
     .join('\n');
 
+  const refSection = refTexts.length
+    ? '\n\nReference material from your designated tabs:\n' +
+      refTexts.map(r => `--- ${r.url} ---\n${r.text}`).join('\n\n')
+    : '';
+
   const userContent = `Goal: ${goal}
 
 Page text (truncated to 3000 chars):
-${pageText.slice(0, 3000)}
+${pageText.slice(0, 3000)}${refSection}
 
 Interactive elements visible on screen (use the bracketed index):
 ${elementList || '(none found)'}`;
@@ -91,6 +97,31 @@ ${elementList || '(none found)'}`;
   return parsed;
 }
 
+// Find open tabs matching the saved reference URLs and scrape their text.
+// Matches by checking if a tab's URL starts with the stored URL string,
+// so "https://example.com/chapter1" matches that page and any sub-path.
+async function getReferenceContent(refUrls) {
+  if (!refUrls || refUrls.length === 0) return [];
+
+  const allTabs = await chrome.tabs.query({});
+  const results = [];
+
+  for (const refUrl of refUrls) {
+    const match = allTabs.find(t => t.url && t.url.startsWith(refUrl));
+    if (!match) continue;
+    try {
+      const data = await sendToTab(match.id, { type: 'SCRAPE' });
+      if (data?.text) {
+        results.push({ url: match.url, text: data.text.slice(0, 2000) });
+      }
+    } catch (_) {
+      // Tab might not have content script (e.g. chrome:// page) — skip silently
+    }
+  }
+
+  return results;
+}
+
 function sendToTab(tabId, msg) {
   return new Promise((resolve, reject) => {
     chrome.tabs.sendMessage(tabId, msg, response => {
@@ -103,18 +134,21 @@ function sendToTab(tabId, msg) {
   });
 }
 
-async function runGoal(apiKey, goal, tabId) {
+async function runGoal(apiKey, goal, tabId, refUrls = []) {
   let lastError = 'Unknown error';
+
+  // Scrape reference tabs once — their content doesn't change question-to-question
+  const refTexts = await getReferenceContent(refUrls);
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      // Re-scrape on every attempt so Claude always sees current DOM state
+      // Re-scrape the active page on every attempt so Claude sees current DOM state
       const pageData = await sendToTab(tabId, { type: 'SCRAPE' });
       if (!pageData || pageData.error) {
         throw new Error(pageData?.error ?? 'No response from content script');
       }
 
-      const action = await callClaude(apiKey, goal, pageData.text, pageData.elements);
+      const action = await callClaude(apiKey, goal, pageData.text, pageData.elements, refTexts);
 
       if (action.action === 'none') {
         return { success: true, action, message: action.reasoning };
@@ -152,7 +186,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       sendResponse({ success: false, error: 'No API key saved. Enter it in the popup and click Save.' });
       return;
     }
-    const result = await runGoal(apiKey, msg.goal, msg.tabId);
+    const result = await runGoal(apiKey, msg.goal, msg.tabId, msg.refUrls ?? []);
     sendResponse(result);
   })();
 

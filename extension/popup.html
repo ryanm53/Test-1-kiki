@@ -116,6 +116,68 @@
       margin-bottom: 4px;
     }
 
+    /* Reference tabs */
+    .ref-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+    }
+    .ref-header label { cursor: pointer; margin: 0; }
+    .ref-toggle {
+      font-size: 10px;
+      color: #555;
+      transition: transform 0.15s;
+    }
+    .ref-toggle.open { transform: rotate(180deg); }
+    .ref-body { margin-top: 8px; }
+    .ref-add-row { display: flex; gap: 6px; margin-bottom: 6px; }
+    .ref-add-row input { flex: 1; font-size: 12px; }
+    #addRef {
+      background: #25252a;
+      color: #999;
+      flex-shrink: 0;
+      font-size: 12px;
+      padding: 6px 10px;
+    }
+    #addRef:hover { background: #2e2e35; color: #ccc; }
+    .ref-list { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+    .ref-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: #1a1a1d;
+      border: 1px solid #2e2e32;
+      border-radius: 5px;
+      padding: 5px 8px;
+      font-size: 11px;
+      color: #888;
+    }
+    .ref-item span {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .ref-item button {
+      background: none;
+      color: #555;
+      font-size: 14px;
+      padding: 0 2px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .ref-item button:hover { color: #f87171; }
+    .ref-empty { font-size: 11px; color: #444; font-style: italic; }
+    .ref-count {
+      font-size: 10px;
+      color: #555;
+      font-weight: normal;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
     /* Stuck modal */
     #stuckOverlay {
       display: none;
@@ -172,6 +234,22 @@
   <div class="row">
     <label>Goal</label>
     <textarea id="goal" rows="3" placeholder='e.g. "click the login button"'></textarea>
+  </div>
+
+  <div class="row">
+    <div class="ref-header" id="refToggleBtn">
+      <label>Reference Tabs <span class="ref-count" id="refCount"></span></label>
+      <span class="ref-toggle" id="refArrow">▲</span>
+    </div>
+    <div class="ref-body" id="refBody">
+      <div class="ref-add-row">
+        <input type="url" id="refUrl" placeholder="https://…" spellcheck="false" />
+        <button id="addRef">Add</button>
+      </div>
+      <ul class="ref-list" id="refList">
+        <li class="ref-empty" id="refEmpty">No reference tabs added yet.</li>
+      </ul>
+    </div>
   </div>
 
   <button id="runBtn">Run</button>

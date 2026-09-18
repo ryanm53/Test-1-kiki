@@ -7,9 +7,69 @@ const stuckOverlay = document.getElementById('stuckOverlay');
 const stuckReason  = document.getElementById('stuckReason');
 const stuckOk      = document.getElementById('stuckOk');
 
+// Reference tabs
+const refToggleBtn = document.getElementById('refToggleBtn');
+const refBody      = document.getElementById('refBody');
+const refArrow     = document.getElementById('refArrow');
+const refUrlInput  = document.getElementById('refUrl');
+const addRefBtn    = document.getElementById('addRef');
+const refList      = document.getElementById('refList');
+const refEmpty     = document.getElementById('refEmpty');
+const refCount     = document.getElementById('refCount');
+
+let refUrls = [];
+let refOpen = true;
+
+function renderRefList() {
+  // Remove all items except the empty placeholder
+  Array.from(refList.querySelectorAll('.ref-item')).forEach(el => el.remove());
+  refEmpty.style.display = refUrls.length ? 'none' : '';
+  refCount.textContent = refUrls.length ? `(${refUrls.length})` : '';
+
+  refUrls.forEach((url, i) => {
+    const li = document.createElement('li');
+    li.className = 'ref-item';
+    li.innerHTML = `<span title="${esc(url)}">${esc(url)}</span><button data-i="${i}" title="Remove">×</button>`;
+    li.querySelector('button').addEventListener('click', () => {
+      refUrls.splice(i, 1);
+      chrome.storage.local.set({ refUrls });
+      renderRefList();
+    });
+    refList.appendChild(li);
+  });
+}
+
+function addRefUrl() {
+  const url = refUrlInput.value.trim();
+  if (!url) return;
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    showStatus('error', 'URL must start with http:// or https://');
+    return;
+  }
+  if (refUrls.includes(url)) { refUrlInput.value = ''; return; }
+  refUrls.push(url);
+  chrome.storage.local.set({ refUrls });
+  renderRefList();
+  refUrlInput.value = '';
+}
+
+addRefBtn.addEventListener('click', addRefUrl);
+refUrlInput.addEventListener('keydown', e => { if (e.key === 'Enter') addRefUrl(); });
+
+refToggleBtn.addEventListener('click', () => {
+  refOpen = !refOpen;
+  refBody.style.display = refOpen ? '' : 'none';
+  refArrow.classList.toggle('open', refOpen);
+});
+
+// Load saved reference URLs
+chrome.storage.local.get('refUrls', ({ refUrls: saved }) => {
+  if (Array.isArray(saved)) refUrls = saved;
+  renderRefList();
+});
+
 stuckOk.addEventListener('click', () => {
   stuckOverlay.classList.remove('visible');
-  // Run button is already re-enabled at this point; user just hits Run again
 });
 
 // Restore saved API key on open
@@ -46,7 +106,7 @@ runBtn.addEventListener('click', async () => {
   setRunning(true);
   showStatus('running', 'Scraping page and consulting Claude…');
 
-  chrome.runtime.sendMessage({ type: 'RUN_GOAL', goal, tabId: tab.id }, result => {
+  chrome.runtime.sendMessage({ type: 'RUN_GOAL', goal, tabId: tab.id, refUrls }, result => {
     setRunning(false);
 
     if (chrome.runtime.lastError) {
