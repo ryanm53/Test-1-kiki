@@ -732,41 +732,53 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'SHOW_TOAST') {
+    showToast('running', msg.text);
+    sendResponse({});
+    return false;
+  }
+
   if (msg.type === 'CLICK_TEXT') {
-    const candidates = msg.candidates || [];
-    const all = Array.from(document.querySelectorAll('button, [role="button"], a'));
-    let found = null;
-    for (const c of candidates) {
-      if (c.selector) {
-        const el = document.querySelector(c.selector);
-        if (el && isVisible(el)) { found = el; break; }
+    // Poll until the button appears and is not disabled (up to 5s)
+    (async () => {
+      const candidates = msg.candidates || [];
+      const deadline = Date.now() + 5000;
+
+      function findIt() {
+        const all = Array.from(document.querySelectorAll('button, [role="button"], a'));
+        for (const c of candidates) {
+          let el = null;
+          if (c.selector) el = document.querySelector(c.selector);
+          else if (c.ariaLabel) el = all.find(b => (b.getAttribute('aria-label') || '').toLowerCase().includes(c.ariaLabel.toLowerCase()));
+          else if (c.text) el = all.find(b => (b.innerText || b.textContent || '').trim().toLowerCase().includes(c.text.toLowerCase()));
+          if (el && isVisible(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true') return el;
+        }
+        return null;
       }
-      if (c.ariaLabel) {
-        const el = all.find(b => (b.getAttribute('aria-label') || '').toLowerCase().includes(c.ariaLabel.toLowerCase()) && isVisible(b));
-        if (el) { found = el; break; }
+
+      let found = null;
+      while (!found && Date.now() < deadline) {
+        found = findIt();
+        if (!found) await new Promise(r => setTimeout(r, 150));
       }
-      if (c.text) {
-        const el = all.find(b => (b.innerText || b.textContent || '').trim().toLowerCase().includes(c.text.toLowerCase()) && isVisible(b));
-        if (el) { found = el; break; }
+
+      if (!found) {
+        sendResponse({ success: false, error: 'Button not found after 5s' });
+        return;
       }
-    }
-    if (found) {
+
       found.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      // Dispatch full pointer+mouse+click chain so Angular registers the event
+      await new Promise(r => setTimeout(r, 80));
       const rect = found.getBoundingClientRect();
       const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
-      const opts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy };
-      found.dispatchEvent(new PointerEvent('pointerover',  { ...opts, isPrimary: true }));
-      found.dispatchEvent(new MouseEvent('mouseover',  opts));
-      found.dispatchEvent(new PointerEvent('pointerdown', { ...opts, isPrimary: true }));
-      found.dispatchEvent(new MouseEvent('mousedown',  { ...opts, buttons: 1 }));
-      found.dispatchEvent(new PointerEvent('pointerup',   { ...opts, isPrimary: true }));
-      found.dispatchEvent(new MouseEvent('mouseup',    opts));
+      const mo = { bubbles: true, cancelable: true, clientX: cx, clientY: cy };
+      found.dispatchEvent(new PointerEvent('pointerdown', { ...mo, isPrimary: true }));
+      found.dispatchEvent(new MouseEvent('mousedown', { ...mo, buttons: 1 }));
+      found.dispatchEvent(new PointerEvent('pointerup', { ...mo, isPrimary: true }));
+      found.dispatchEvent(new MouseEvent('mouseup', mo));
       found.click();
       sendResponse({ success: true });
-    } else {
-      sendResponse({ success: false, error: 'Button not found' });
-    }
-    return false;
+    })();
+    return true; // async response
   }
 });
