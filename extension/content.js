@@ -150,7 +150,12 @@ async function execute(action) {
       const tag = el.tagName.toLowerCase();
 
       if (tag === 'select') {
-        el.value = action.value;
+        // AI sees display text, not value attributes — match by text first
+        const opt = Array.from(el.options).find(
+          o => o.textContent.trim() === action.value || o.value === action.value
+        );
+        if (opt) el.value = opt.value;
+        else el.value = action.value;
         el.dispatchEvent(new Event('change', { bubbles: true }));
       } else {
         // Use the native prototype setter so React/Vue/Angular frameworks detect the change.

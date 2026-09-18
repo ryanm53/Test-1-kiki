@@ -1,4 +1,4 @@
-const GEMINI_MODEL = 'gemini-3.6-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash';
 const MAX_RETRIES = 2;
 
 const SYSTEM_PROMPT = `You are a browser automation assistant. You will be given:
@@ -65,7 +65,7 @@ ${elementList || '(none found)'}`;
   const data = await response.json();
   const raw = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 
-  // Strip any markdown code fences Claude might add despite instructions
+  // Strip any markdown code fences Gemini might add despite instructions
   const cleaned = raw
     .replace(/^```(?:json)?\s*/im, '')
     .replace(/\s*```\s*$/im, '')
@@ -75,7 +75,7 @@ ${elementList || '(none found)'}`;
   try {
     parsed = JSON.parse(cleaned);
   } catch (_) {
-    throw new Error(`Claude returned invalid JSON: ${cleaned.slice(0, 300)}`);
+    throw new Error(`Gemini returned invalid JSON: ${cleaned.slice(0, 300)}`);
   }
 
   // Validate shape
