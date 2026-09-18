@@ -27,6 +27,7 @@ async function callClaude(apiKey, goal, pageText, elements) {
       if (el.text) parts.push(`"${el.text.slice(0, 80)}"`);
       if (el.placeholder) parts.push(`placeholder="${el.placeholder}"`);
       if (el.name) parts.push(`name="${el.name}"`);
+      if (el.question) parts.push(`(question: "${el.question.slice(0, 120)}")`);
       return parts.join(' ');
     })
     .join('\n');

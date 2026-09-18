@@ -27,24 +27,88 @@ function isVisible(el) {
   return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
 }
 
+// Resolve an element's accessible label, including aria-labelledby chains.
+// Many platforms (e.g. Angular quiz apps) store the visible answer text in a
+// separate <span> pointed to by aria-labelledby rather than inside the input.
+function accessibleText(el) {
+  // 1. aria-labelledby — follow every referenced ID and join their text
+  const labelledBy = el.getAttribute('aria-labelledby');
+  if (labelledBy) {
+    const text = labelledBy.split(/\s+/)
+      .map(id => document.getElementById(id)?.innerText?.trim() ?? '')
+      .filter(Boolean)
+      .join(' ');
+    if (text) return text;
+  }
+  // 2. aria-label attribute
+  const ariaLabel = el.getAttribute('aria-label');
+  if (ariaLabel?.trim()) return ariaLabel.trim();
+  // 3. <label for="..."> element
+  if (el.id) {
+    const label = document.querySelector(`label[for="${el.id.replace(/"/g, '\\"')}"]`);
+    if (label) return label.innerText.trim();
+  }
+  // 4. Ancestor <label> (inputs nested inside their label)
+  const ancestorLabel = el.closest('label');
+  if (ancestorLabel) return ancestorLabel.innerText.trim();
+  // 5. Element's own visible text
+  return (el.innerText || el.getAttribute('title') || '').trim();
+}
+
+// Find the question text a radio/checkbox belongs to.
+// For fieldsets, the legend's aria-labelledby usually points to the prompt element.
+function nearestQuestionText(el) {
+  const fieldset = el.closest('fieldset');
+  if (fieldset) {
+    const legend = fieldset.querySelector('legend');
+    if (legend) {
+      // Follow aria-labelledby on the legend to the prompt element
+      const promptId = legend.getAttribute('aria-labelledby');
+      if (promptId) {
+        const promptEl = document.getElementById(promptId);
+        const t = promptEl?.innerText?.trim();
+        if (t) return t.slice(0, 200);
+      }
+      // Fallback: use the legend text itself if it's meaningful
+      const legendText = legend.innerText?.trim();
+      if (legendText && legendText.length > 5) return legendText.slice(0, 200);
+    }
+  }
+  // Generic fallback: walk up looking for a .prompt or similar container
+  let node = el.parentElement;
+  for (let i = 0; i < 8 && node; i++) {
+    const prompt = node.querySelector('.prompt, [class*="question-text"], [class*="questionText"]');
+    if (prompt) {
+      const t = prompt.innerText?.trim();
+      if (t) return t.slice(0, 200);
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
+
 function describeEl(el) {
+  const question = nearestQuestionText(el);
   return {
     tag: el.tagName.toLowerCase(),
     type: el.getAttribute('type') || null,
-    text: (el.innerText || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim().slice(0, 100),
+    text: accessibleText(el).slice(0, 100),
     placeholder: el.getAttribute('placeholder') || null,
-    name: el.getAttribute('name') || null
+    name: el.getAttribute('name') || null,
+    question: question || null
   };
 }
 
 function scrape() {
-  const text = document.body?.innerText ?? '';
+  // Prefer the main content area to skip nav/header/footer noise
+  const root = document.querySelector('[role="main"], main, article, form')
+             ?? document.body;
 
   const all = Array.from(document.querySelectorAll(INTERACTIVE_SEL));
   _lastElements = all.filter(isVisible).slice(0, 100);
 
   return {
-    text: text.slice(0, 5000),
+    text: (root.innerText ?? '').slice(0, 5000),
     elements: _lastElements.map(describeEl)
   };
 }
