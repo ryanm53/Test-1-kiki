@@ -168,10 +168,10 @@ async function runGoal(apiKey, goal, tabId, refUrls = []) {
       lastError = result?.error ?? 'Execution returned failure without an error message';
     } catch (e) {
       lastError = e.message;
+      if (e.message.startsWith('Rate limit')) break;
     }
 
     if (attempt < MAX_RETRIES) {
-      // Back-off between retries
       await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
     }
   }
