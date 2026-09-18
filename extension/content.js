@@ -473,7 +473,8 @@ async function execute(action) {
   // ── Presets ──────────────────────────────────────────────────────────────
   const presetsDiv = shadow.getElementById('presets');
   const DEFAULT_PRESETS = [
-    { label: 'McGraw Hill - Answer', goal: 'Look at the question on the page and click the correct answer' }
+    { label: 'McGraw Hill - Answer', goal: 'Click the correct answer for this question, then click High Confidence, then click Next Question. If the answer was wrong, still click Next Question.' },
+    { label: 'McGraw Hill - Answer only', goal: 'Look at the question on the page and click the correct answer' }
   ];
   let presets = [];
   let activePresetIdx = null;

@@ -145,47 +145,56 @@ function sendToTab(tabId, msg) {
   });
 }
 
-async function runGoal(apiKey, goal, tabId, refUrls = []) {
-  let lastError = 'Unknown error';
+const MAX_STEPS = 6; // max sequential actions per run (answer + confidence + next + buffer)
 
-  // Scrape reference tabs once — their content doesn't change question-to-question
+async function runGoal(apiKey, goal, tabId, refUrls = []) {
   const refTexts = await getReferenceContent(refUrls);
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      // Re-scrape the active page on every attempt so Claude sees current DOM state
-      const pageData = await sendToTab(tabId, { type: 'SCRAPE' });
-      if (!pageData || pageData.error) {
-        throw new Error(pageData?.error ?? 'No response from content script');
+  for (let step = 0; step < MAX_STEPS; step++) {
+    let lastError = 'Unknown error';
+    let stepDone = false;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const pageData = await sendToTab(tabId, { type: 'SCRAPE' });
+        if (!pageData || pageData.error) {
+          throw new Error(pageData?.error ?? 'No response from content script');
+        }
+
+        const action = await callClaude(apiKey, goal, pageData.text, pageData.elements, refTexts);
+
+        if (action.action === 'none') {
+          return { success: true, action, message: action.reasoning };
+        }
+
+        const result = await sendToTab(tabId, { type: 'EXECUTE', action });
+
+        if (result?.success) {
+          stepDone = true;
+          // Wait for page to update before next action
+          await new Promise(r => setTimeout(r, 600));
+          break;
+        }
+
+        lastError = result?.error ?? 'Execution returned failure without an error message';
+      } catch (e) {
+        lastError = e.message;
+        if (e.message.startsWith('Rate limit')) {
+          return { success: false, error: lastError };
+        }
       }
 
-      const action = await callClaude(apiKey, goal, pageData.text, pageData.elements, refTexts);
-
-      if (action.action === 'none') {
-        return { success: true, action, message: action.reasoning };
+      if (attempt < MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
       }
-
-      const result = await sendToTab(tabId, { type: 'EXECUTE', action });
-
-      if (result?.success) {
-        return { success: true, action, message: action.reasoning };
-      }
-
-      lastError = result?.error ?? 'Execution returned failure without an error message';
-    } catch (e) {
-      lastError = e.message;
-      if (e.message.startsWith('Rate limit')) break;
     }
 
-    if (attempt < MAX_RETRIES) {
-      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    if (!stepDone) {
+      return { success: false, error: `Stuck on step ${step + 1}. Last error: ${lastError}` };
     }
   }
 
-  return {
-    success: false,
-    error: `Failed after ${MAX_RETRIES + 1} attempt${MAX_RETRIES > 0 ? 's' : ''}. Last error: ${lastError}`
-  };
+  return { success: true, message: 'Done' };
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
