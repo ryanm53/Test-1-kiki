@@ -76,8 +76,9 @@ chrome.storage.local.get('refUrls', ({ refUrls: saved }) => {
 
 // ── API key ───────────────────────────────────────────────────────────────────
 
-chrome.storage.local.get('apiKey', ({ apiKey }) => {
+chrome.storage.local.get(['apiKey', 'lastGoal'], ({ apiKey, lastGoal }) => {
   if (apiKey) apiKeyInput.value = apiKey;
+  if (lastGoal) goalInput.value = lastGoal;
 });
 
 saveKeyBtn.addEventListener('click', () => {
@@ -109,6 +110,7 @@ runBtn.addEventListener('click', async () => {
     return;
   }
 
+  chrome.storage.local.set({ lastGoal: goal });
   setRunning(true);
   showStatus('running', '<div class="status-label">Working</div>Consulting Gemini…', true);
 
