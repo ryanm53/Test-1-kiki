@@ -25,16 +25,40 @@ except as a request header to `api.anthropic.com`.
 
 ## Usage
 
-1. Navigate to any web page
-2. Click the extension icon
-3. Type a natural-language goal, for example:
-   - `click the Sign In button`
-   - `fill the search box with "climate change"`
-   - `click the first result link`
-4. Press **Run** (or Ctrl/Cmd+Enter inside the goal box)
+### Floating button (recommended for quizzes / surveys)
 
-The extension scrapes the page, asks Claude what to do, executes the action, and
-shows Claude's reasoning below the button.
+Every page gets a small **⚡ button** injected in the bottom-right corner. Click it to
+open a mini panel, type your goal, and hit **Run** — no need to open the extension
+popup. The panel stays on screen while you work through questions, and it remembers
+your last goal between page loads.
+
+- The FAB pulses while Claude is working
+- On success it shows Claude's reasoning inline
+- On failure it shows the **Got stuck** modal — click **OK** to dismiss and try again
+
+### Extension popup
+
+Click the toolbar icon to open the full popup. Same goal box and Run button, plus the
+API key field and the Reference Tabs manager.
+
+---
+
+## Reference Tabs
+
+If your study material (textbook, notes, slides) is open in another browser tab, you
+can tell the extension to read it:
+
+1. Open the reference page in a tab
+2. Click the extension icon → expand **Reference Tabs** → paste the URL → **Add**
+3. The URL is saved permanently — you only need to do this once per source
+
+When you hit Run, the extension finds those open tabs, scrapes their text, and includes
+it in the Claude prompt as reference material. Claude can then use that content to
+answer questions correctly.
+
+**URL matching:** the stored URL is used as a prefix, so saving
+`https://example.com/chapter1` will match that page and any sub-path beneath it.
+Up to 2 000 characters are scraped per reference tab.
 
 ---
 
@@ -54,11 +78,29 @@ This extension avoids that entirely:
 2. It filters the result to only elements **visible on screen** (non-zero bounding box,
    inside the viewport, not hidden by CSS `display`/`visibility`/`opacity`).
 3. Each surviving element is assigned an integer index (0, 1, 2 …) and described in
-   plain text (`tag`, `type`, label text, `placeholder`, `name`).
+   plain text (`tag`, `type`, label text, `placeholder`, `name`, and the question it
+   belongs to).
 4. The model is instructed to respond with **only that index** — nothing freeform.
 
 Because Claude can only pick from the list it was given, it cannot hallucinate a
 reference to an element that doesn't exist.
+
+### aria-labelledby resolution
+
+Many quiz / learning platforms (Angular-based apps in particular) put the visible
+answer text in a separate `<span>` linked to the input via `aria-labelledby` rather
+than inside the input itself. The scraper follows those references so Claude sees
+`"Liabilities"` rather than a blank label, and can pick the correct answer.
+
+### Question context
+
+For radio/checkbox groups the scraper walks up to the enclosing `<fieldset>` and
+follows the legend's `aria-labelledby` attribute to find the question prompt. Each
+answer choice is annotated with its question, e.g.:
+
+```
+[2] input type="radio" "Liabilities" (question: "Assets = ______ + Stockholders' Equity.")
+```
 
 ### Visibility filtering
 
@@ -68,37 +110,18 @@ Elements pass the visibility check only if all of these hold:
 - The bounding box overlaps the current viewport (not scrolled off-screen)
 - Computed CSS `display !== none`, `visibility !== hidden`, `opacity !== 0`
 
-This prevents the agent from targeting off-screen nav drawers, hidden modals, or
-zero-size placeholders that are technically in the DOM but invisible to the user.
-
 ### React / Vue / Angular compatibility for `fill` actions
 
-Single-page apps typically override `HTMLInputElement.prototype.value` with a setter
-that triggers their internal reactivity system. Simply assigning `el.value = text`
-bypasses that override, and the framework never learns the value changed.
-
-The extension instead:
-
-1. Reads the **native** setter from the prototype (`Object.getOwnPropertyDescriptor`)
-   and calls it directly on the element
-2. Dispatches `InputEvent('input', { bubbles: true })` and `Event('change', { bubbles: true })`
-
-This causes React's synthetic event system (and Vue/Angular's equivalents) to pick up
-the new value exactly as if a user had typed it.
+The extension uses the native `HTMLInputElement.prototype.value` setter and dispatches
+`InputEvent('input')` + `Event('change')` with `bubbles: true` so framework reactivity
+triggers as if a user typed the value.
 
 ### Retry loop
 
-If execution fails (element removed from the DOM after the scrape, a click raises an
-exception, etc.) the background worker:
-
-1. **Re-scrapes the page** — the DOM may have changed since the previous attempt
-2. **Asks Claude again** with the fresh element list
-3. Attempts to execute the new action
-
-The loop runs up to **3 times total** (initial attempt + 2 retries) with a short
-back-off between tries (700 ms, then 1 400 ms). Re-scraping on each retry means Claude
-always reasons about the *current* state of the page rather than a stale snapshot from
-before a navigation or DOM mutation.
+If execution fails the background worker re-scrapes the page (DOM may have changed),
+asks Claude again with the fresh element list, and retries up to **3 times total**
+with 700 ms / 1 400 ms back-off. A "Got stuck" modal appears when all retries are
+exhausted — click **OK** then **Run** again.
 
 ---
 
@@ -106,8 +129,8 @@ before a navigation or DOM mutation.
 
 | File | Purpose |
 |------|---------|
-| `manifest.json` | Manifest V3 declaration: permissions, content script, service worker |
-| `background.js` | Service worker: calls Claude API, owns the retry loop |
-| `content.js` | Injected into every page: scrapes elements, executes actions |
+| `manifest.json` | Manifest V3: permissions, content script, service worker |
+| `background.js` | Service worker: Claude API calls, retry loop, reference tab scraping |
+| `content.js` | Injected on every page: scrapes elements, executes actions, floating widget |
 | `popup.html` | Extension popup UI |
-| `popup.js` | Popup logic: API key persistence, sends goal to background |
+| `popup.js` | Popup: API key, goal input, reference URL manager |

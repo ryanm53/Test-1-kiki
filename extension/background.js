@@ -177,16 +177,29 @@ async function runGoal(apiKey, goal, tabId, refUrls = []) {
   };
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type !== 'RUN_GOAL') return;
 
   (async () => {
     const { apiKey } = await chrome.storage.local.get('apiKey');
     if (!apiKey) {
-      sendResponse({ success: false, error: 'No API key saved. Enter it in the popup and click Save.' });
+      sendResponse({ success: false, error: 'No API key saved. Enter it in the extension popup and click Save.' });
       return;
     }
-    const result = await runGoal(apiKey, msg.goal, msg.tabId, msg.refUrls ?? []);
+
+    // Popup sends msg.tabId; floating widget (content script) uses sender.tab.id
+    const tabId = msg.tabId ?? sender.tab?.id;
+    if (!tabId) {
+      sendResponse({ success: false, error: 'Could not determine tab ID.' });
+      return;
+    }
+
+    // Popup sends refUrls; floating widget loads them from storage
+    const refUrls = msg.refUrls
+      ?? (await chrome.storage.local.get('refUrls')).refUrls
+      ?? [];
+
+    const result = await runGoal(apiKey, msg.goal, tabId, refUrls);
     sendResponse(result);
   })();
 
