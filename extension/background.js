@@ -190,7 +190,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type !== 'RUN_GOAL') return;
 
   (async () => {
-    const { apiKey } = await chrome.storage.local.get('apiKey');
+    const { apiKey: rawKey } = await chrome.storage.local.get('apiKey');
+    const apiKey = rawKey ? rawKey.replace(/[^\x20-\x7E]/g, '').trim() : '';
     if (!apiKey) {
       sendResponse({ success: false, error: 'No API key saved. Enter it in the extension popup and click Save.' });
       return;
