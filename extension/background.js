@@ -1,26 +1,9 @@
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 const MAX_RETRIES = 1;
 
-const SYSTEM_PROMPT = `You are a browser automation assistant. You will be given:
-1. A user goal
-2. The visible text of the current web page (truncated)
-3. A numbered list of interactive elements visible on screen right now
-4. (Optional) Reference material scraped from tabs the user designated as sources — use this to answer questions correctly
-
-Decide the single best next action to take to progress toward the goal.
-
-YOUR ENTIRE RESPONSE MUST BE A SINGLE JSON OBJECT — no words before it, no words after it, no markdown, no explanation, no analysis. Just the raw JSON.
-
+const SYSTEM_PROMPT = `Output ONLY a raw JSON object — no markdown, no text before or after.
 {"action":"click"|"fill"|"drag"|"none","index":<int|null>,"sourceIndex":<int|null>,"targetIndex":<int|null>,"value":<string|null>,"reasoning":<string>}
-
-Rules:
-- "action" must be exactly "click", "fill", "drag", or "none"
-- For click or fill: set "index" to the element number; sourceIndex and targetIndex must be null
-- For drag: set "sourceIndex" (element to grab) and "targetIndex" (drop destination); index must be null
-- "value" is the string to type for fill; null otherwise
-- "reasoning" is one short sentence explaining your choice — keep it SHORT (under 12 words)
-- NEVER invent an index not in the provided list
-- Use "none" if the goal is already met or no valid action exists`;
+Rules: click/fill→set index. drag→set sourceIndex+targetIndex. fill→set value. reasoning≤5 words. Never invent an index. Use "none" if goal met.`;
 
 async function callClaude(apiKey, goal, pageText, elements, refTexts = []) {
   const elementList = elements
@@ -42,10 +25,10 @@ async function callClaude(apiKey, goal, pageText, elements, refTexts = []) {
 
   const userContent = `Goal: ${goal}
 
-Page text (truncated to 3000 chars):
-${pageText.slice(0, 3000)}${refSection}
+Page text:
+${pageText.slice(0, 800)}${refSection}
 
-Interactive elements visible on screen (use the bracketed index):
+Elements (click by index):
 ${elementList || '(none found)'}`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -58,7 +41,7 @@ ${elementList || '(none found)'}`;
     },
     body: JSON.stringify({
       model: CLAUDE_MODEL,
-      max_tokens: 256,
+      max_tokens: 150,
       temperature: 0,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userContent }]

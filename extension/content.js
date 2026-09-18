@@ -109,7 +109,7 @@ function scrape() {
              ?? document.body;
 
   const all = Array.from(document.querySelectorAll(INTERACTIVE_SEL));
-  _lastElements = all.filter(isVisible).slice(0, 100);
+  _lastElements = all.filter(isVisible).slice(0, 25);
 
   return {
     text: (root.innerText ?? '').slice(0, 5000),
