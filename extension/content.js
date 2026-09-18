@@ -196,19 +196,19 @@ async function execute(action) {
 
   #fab {
     width: 46px; height: 46px;
-    background: #7c3aed;
+    background: linear-gradient(135deg, #38BDF8, #0284C7);
     color: #fff;
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
     font-size: 18px;
     font-family: sans-serif;
-    box-shadow: 0 2px 14px rgba(0,0,0,0.45);
+    box-shadow: 0 2px 14px rgba(56,189,248,0.4);
     user-select: none;
-    transition: transform 0.15s, background 0.15s;
+    transition: transform 0.15s, opacity 0.15s;
   }
-  #fab:hover { background: #6d28d9; transform: scale(1.07); }
-  #fab.running { background: #4c1d95; animation: pulse 1s infinite; }
+  #fab:hover { opacity: 0.88; transform: scale(1.07); }
+  #fab.running { opacity: 0.7; animation: pulse 1s infinite; }
   @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
 
   #panel {
@@ -242,23 +242,24 @@ async function execute(action) {
     padding: 7px 9px; outline: none; resize: vertical;
     min-height: 54px; font-family: inherit;
   }
-  textarea:focus { border-color: #7c3aed; }
+  textarea:focus { border-color: #38BDF8; }
 
   #runBtn {
     width: 100%; margin-top: 8px; padding: 8px;
-    background: #7c3aed; color: #fff; border: none;
+    background: linear-gradient(135deg, #38BDF8, #0284C7); color: #fff; border: none;
     border-radius: 6px; cursor: pointer; font-size: 13px;
     font-weight: 500; font-family: inherit;
-    transition: background 0.15s;
+    transition: opacity 0.15s;
+    box-shadow: 0 1px 8px rgba(56,189,248,0.3);
   }
-  #runBtn:hover:not(:disabled) { background: #6d28d9; }
+  #runBtn:hover:not(:disabled) { opacity: 0.88; }
   #runBtn:disabled { background: #25252a; color: #555; cursor: default; }
 
   #status {
     display: none; margin-top: 8px; font-size: 11px; line-height: 1.5;
     padding: 7px 9px; border-radius: 6px; word-break: break-word;
   }
-  #status.running { background: #12122a; color: #818cf8; border: 1px solid #2a2a50; }
+  #status.running { background: rgba(56,189,248,0.08); color: #7DD3FC; border: 1px solid rgba(56,189,248,0.2); }
   #status.success { background: #0a1f12; color: #4ade80; border: 1px solid #14532d; }
 
   #stuckOverlay {
@@ -274,11 +275,12 @@ async function execute(action) {
   #stuckTitle { font-size: 13px; color: #f87171; font-weight: 600; margin-bottom: 6px; }
   #stuckMsg { font-size: 11px; color: #888; margin-bottom: 12px; line-height: 1.4; word-break: break-word; }
   #stuckOk {
-    background: #7c3aed; color: #fff; border: none;
+    background: linear-gradient(135deg, #38BDF8, #0284C7); color: #fff; border: none;
     border-radius: 6px; padding: 6px 22px;
     cursor: pointer; font-size: 12px; font-family: inherit;
+    box-shadow: 0 1px 8px rgba(56,189,248,0.3);
   }
-  #stuckOk:hover { background: #6d28d9; }
+  #stuckOk:hover { opacity: 0.88; }
 </style>
 
 <div id="fab" title="Claude Page Agent">⚡</div>
