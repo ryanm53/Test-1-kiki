@@ -2,8 +2,8 @@ const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 const MAX_RETRIES = 1;
 
 const SYSTEM_PROMPT = `Output ONLY a raw JSON object — no markdown, no text before or after.
-{"action":"click"|"fill"|"drag"|"none","index":<int|null>,"sourceIndex":<int|null>,"targetIndex":<int|null>,"value":<string|null>,"reasoning":<string>}
-Rules: click/fill→set index. drag→set sourceIndex+targetIndex. fill→set value. reasoning≤5 words. Never invent an index. Use "none" if goal met.`;
+{"action":"click"|"fill"|"drag"|"none","index":<int|null>,"sourceIndex":<int|null>,"targetIndex":<int|null>,"value":<string|null>}
+Rules: click/fill→set index. drag→set sourceIndex+targetIndex. fill→set value. Never invent an index. Use "none" if goal met.`;
 
 async function callClaude(apiKey, goal, pageText, elements, refTexts = []) {
   const elementList = elements
@@ -41,7 +41,7 @@ ${elementList || '(none found)'}`;
     },
     body: JSON.stringify({
       model: CLAUDE_MODEL,
-      max_tokens: 150,
+      max_tokens: 100,
       temperature: 0,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userContent }]
@@ -106,6 +106,7 @@ ${elementList || '(none found)'}`;
     throw new Error('Fill action requires a non-null value');
   }
 
+  parsed.reasoning = parsed.reasoning ?? '';
   return parsed;
 }
 
