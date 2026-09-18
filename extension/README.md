@@ -27,14 +27,31 @@ except as a request header to `api.anthropic.com`.
 
 ### Floating button (recommended for quizzes / surveys)
 
-Every page gets a small **⚡ button** injected in the bottom-right corner. Click it to
-open a mini panel, type your goal, and hit **Run** — no need to open the extension
-popup. The panel stays on screen while you work through questions, and it remembers
-your last goal between page loads.
+Every page gets a small toolbar injected in the bottom-left corner:
+
+- **⚡** — run the saved goal once
+- **✎** — open the settings panel: pick a preset from the dropdown (or type a custom
+  goal), set an optional success message, **Save**
+- **↺** — loop mode. After each successful question, waits for the page content to
+  actually change (polls every 150ms, 5s fallback) and automatically runs again —
+  useful for working through an entire quiz unattended
+- **⏸ / ▶** — appears once loop mode is on; pauses/resumes the auto-continue
+
+The panel remembers your goal and preset between page loads.
 
 - The FAB pulses while Claude is working
-- On success it shows Claude's reasoning inline
 - On failure it shows the **Got stuck** modal — click **OK** to dismiss and try again
+- If Claude can't find a valid answer to click (e.g. an unsupported question type like
+  drag-and-drop ordering), loop mode auto-pauses and shows what happened instead of
+  silently retrying the same question forever
+
+### McGraw Hill presets
+
+The built-in presets split the work: **Claude only picks the answer** (cheapest,
+least error-prone part to leave to an LLM). Clicking **High Confidence** and
+**Next Question** afterward is handled by direct DOM lookups — a fixed
+`data-automation-id`/class selector — with no API call at all. This is both faster
+and immune to the model hallucinating the wrong button.
 
 ### Extension popup
 
@@ -110,18 +127,39 @@ Elements pass the visibility check only if all of these hold:
 - The bounding box overlaps the current viewport (not scrolled off-screen)
 - Computed CSS `display !== none`, `visibility !== hidden`, `opacity !== 0`
 
-### React / Vue / Angular compatibility for `fill` actions
+### React / Vue / Angular compatibility
 
-The extension uses the native `HTMLInputElement.prototype.value` setter and dispatches
-`InputEvent('input')` + `Event('change')` with `bubbles: true` so framework reactivity
-triggers as if a user typed the value.
+For `fill` actions, the extension uses the native `HTMLInputElement.prototype.value`
+setter and dispatches `InputEvent('input')` + `Event('change')` with `bubbles: true`
+so framework reactivity triggers as if a user typed the value.
+
+For the direct-click steps (High Confidence / Next Question), a full
+`pointerdown → mousedown → pointerup → mouseup → click` event chain is dispatched
+(with `bubbles: true`) so Angular's event system registers it reliably.
 
 ### Retry loop
 
-If execution fails the background worker re-scrapes the page (DOM may have changed),
-asks Claude again with the fresh element list, and retries up to **3 times total**
-with 700 ms / 1 400 ms back-off. A "Got stuck" modal appears when all retries are
-exhausted — click **OK** then **Run** again.
+If a step fails, the background worker re-scrapes the page (DOM may have changed),
+asks Claude again with the fresh element list, and retries once more (2 attempts
+total per step) with a 400ms back-off. A "Got stuck" modal appears if it's still
+stuck — click **OK** then **Run** again.
+
+### Forcing valid JSON output (response prefilling)
+
+Rather than just instructing Claude to "respond with only JSON" (which an LLM can
+still ignore under load), the API call prefills the assistant's turn with
+`{"action":"` before sending. Claude then can only *complete* that JSON object — it
+is structurally unable to open with prose. The prefilled prefix is stitched back
+onto the response before parsing. A bracket-counting fallback extracts the first
+complete `{...}` block in case trailing text still sneaks in after the closing brace.
+
+### Minimal token usage
+
+Since Claude's only job is picking which element index to click, the request is
+kept as small as possible: an ~50-token system prompt, page text truncated to 800
+characters, at most 25 interactive elements, and a `{"action":"click","index":N}` /
+`{"action":"none"}` response capped at 40 tokens. Confidence and Next-question
+clicks cost no tokens at all since they never touch the API.
 
 ---
 

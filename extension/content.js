@@ -322,18 +322,6 @@ async function execute(action) {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
   #panel.hidden { display: none; }
-  #renameInput {
-    width: 100%;
-    background: #130f04;
-    border: 1px solid #38BDF8;
-    border-radius: 6px;
-    color: #f0ddb0;
-    font-size: 12px;
-    padding: 6px 9px;
-    outline: none;
-    font-family: inherit;
-    margin-bottom: 2px;
-  }
 
   .plabel {
     font-size: 10px; font-weight: 600; color: #C9A96E;
@@ -654,6 +642,18 @@ async function execute(action) {
       return;
     }
     if (result.success) {
+      if (result.action?.action === 'none') {
+        // Claude found no answer to click — don't loop forever burning API calls.
+        // Likely an unsupported question type (e.g. drag-and-drop ordering).
+        if (loopMode) {
+          loopPaused = true;
+          pauseBtn.classList.add('paused');
+          pauseBtn.textContent = '▶';
+          pauseBtn.title = 'Resume loop';
+        }
+        showStuck('No clickable answer found — this may be a question type not supported yet (like drag-and-drop). Handle it manually, then press ▶ to resume.');
+        return;
+      }
       loopCount++;
       if (loopMode && !loopPaused) {
         showToast('success', `Done #${loopCount} — waiting for next…`);
