@@ -332,6 +332,26 @@ async function execute(action) {
   textarea:focus, #msgInput:focus { border-color: #38BDF8; }
   textarea::placeholder, #msgInput::placeholder { color: rgba(201,169,110,0.3); }
 
+  #presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-bottom: 2px;
+  }
+  .preset {
+    background: #130f04;
+    border: 1px solid rgba(56,189,248,0.3);
+    border-radius: 20px;
+    color: #C9A96E;
+    font-size: 11px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .preset:hover { border-color: #38BDF8; background: #1c1507; }
+  .preset.active { border-color: #38BDF8; background: #1c1507; color: #7DD3FC; }
+
   #saveGoalBtn {
     width: 100%; margin-top: 10px; padding: 8px;
     background: linear-gradient(135deg, #38BDF8, #0284C7);
@@ -374,8 +394,17 @@ async function execute(action) {
 <div id="toast"></div>
 
 <div id="panel" class="hidden">
-  <div class="plabel">Goal</div>
-  <textarea id="goalInput" rows="3" placeholder='e.g. "answer the question and click High confidence"'></textarea>
+  <div class="plabel">Quick Goals</div>
+  <div id="presets">
+    <button class="preset" data-goal="Answer the multiple choice question correctly by clicking the right option">Multiple choice</button>
+    <button class="preset" data-goal="Answer the multiple choice question correctly then click Submit">MC + Submit</button>
+    <button class="preset" data-goal="Answer the multiple choice question correctly then click High confidence">MC + High confidence</button>
+    <button class="preset" data-goal="Fill in the blank with the correct answer">Fill in blank</button>
+    <button class="preset" data-goal="Answer the question correctly then click Check Answer">Check Answer</button>
+  </div>
+  <div class="pdivider"></div>
+  <div class="plabel">Custom Goal</div>
+  <textarea id="goalInput" rows="2" placeholder='or type your own goal…'></textarea>
   <div class="pdivider"></div>
   <div class="plabel">Success Message <span>5 words max · default: Done!</span></div>
   <input type="text" id="msgInput" placeholder='e.g. Got it! or Correct!' maxlength="60" />
@@ -417,6 +446,15 @@ async function execute(action) {
   chrome.storage.local.get(['lastGoal', 'successMsg'], ({ lastGoal, successMsg }) => {
     if (lastGoal)   { savedGoal = lastGoal; goalInput.value = lastGoal; }
     if (successMsg) { customMsg = successMsg; msgInput.value = successMsg; }
+  });
+
+  // Preset goal chips
+  shadow.querySelectorAll('.preset').forEach(btn => {
+    btn.addEventListener('click', () => {
+      goalInput.value = btn.dataset.goal;
+      shadow.querySelectorAll('.preset').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
   });
 
   // Enforce 5-word limit on message input
