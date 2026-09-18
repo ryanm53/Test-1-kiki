@@ -1,4 +1,4 @@
-const GEMINI_MODEL = 'gemini-3.6-flash';
+const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 const MAX_RETRIES = 1;
 
 const SYSTEM_PROMPT = `You are a browser automation assistant. You will be given:
@@ -47,14 +47,19 @@ ${pageText.slice(0, 3000)}${refSection}
 Interactive elements visible on screen (use the bracketed index):
 ${elementList || '(none found)'}`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
+    },
     body: JSON.stringify({
-      system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-      contents: [{ role: 'user', parts: [{ text: userContent }] }],
-      generationConfig: { maxOutputTokens: 128, temperature: 0 }
+      model: CLAUDE_MODEL,
+      max_tokens: 128,
+      temperature: 0,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: userContent }]
     })
   });
 
@@ -63,13 +68,12 @@ ${elementList || '(none found)'}`;
     if (response.status === 429) {
       throw new Error('Rate limit hit — wait about a minute and try again.');
     }
-    throw new Error(`Gemini API ${response.status}: ${body.slice(0, 300)}`);
+    throw new Error(`Claude API ${response.status}: ${body.slice(0, 300)}`);
   }
 
   const data = await response.json();
-  const raw = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  const raw = data.content?.[0]?.text ?? '';
 
-  // Strip any markdown code fences Gemini might add despite instructions
   const cleaned = raw
     .replace(/^```(?:json)?\s*/im, '')
     .replace(/\s*```\s*$/im, '')
@@ -79,7 +83,7 @@ ${elementList || '(none found)'}`;
   try {
     parsed = JSON.parse(cleaned);
   } catch (_) {
-    throw new Error(`Gemini returned invalid JSON: ${cleaned.slice(0, 300)}`);
+    throw new Error(`Claude returned invalid JSON: ${cleaned.slice(0, 300)}`);
   }
 
   // Validate shape
