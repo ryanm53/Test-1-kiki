@@ -115,6 +115,47 @@
       font-size: 11px;
       margin-bottom: 4px;
     }
+
+    /* Stuck modal */
+    #stuckOverlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    #stuckOverlay.visible { display: flex; }
+    #stuckBox {
+      background: #1a1a1d;
+      border: 1px solid #7f1d1d;
+      border-radius: 10px;
+      padding: 20px 18px 16px;
+      width: 280px;
+      text-align: center;
+    }
+    #stuckBox h2 {
+      font-size: 15px;
+      color: #f87171;
+      margin-bottom: 8px;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    #stuckBox p {
+      font-size: 12px;
+      color: #888;
+      line-height: 1.5;
+      margin-bottom: 16px;
+      word-break: break-word;
+    }
+    #stuckOk {
+      background: #7c3aed;
+      color: #fff;
+      padding: 8px 28px;
+      font-size: 13px;
+    }
+    #stuckOk:hover { background: #6d28d9; }
   </style>
 </head>
 <body>
@@ -136,6 +177,15 @@
   <button id="runBtn">Run</button>
 
   <div id="status"></div>
+
+  <!-- Shown when the extension gets stuck after all retries -->
+  <div id="stuckOverlay">
+    <div id="stuckBox">
+      <h2>Got stuck</h2>
+      <p id="stuckReason"></p>
+      <button id="stuckOk">OK</button>
+    </div>
+  </div>
 
   <script src="popup.js"></script>
 </body>

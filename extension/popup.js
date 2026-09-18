@@ -1,8 +1,16 @@
-const apiKeyInput = document.getElementById('apiKey');
-const saveKeyBtn  = document.getElementById('saveKey');
-const goalInput   = document.getElementById('goal');
-const runBtn      = document.getElementById('runBtn');
-const statusDiv   = document.getElementById('status');
+const apiKeyInput  = document.getElementById('apiKey');
+const saveKeyBtn   = document.getElementById('saveKey');
+const goalInput    = document.getElementById('goal');
+const runBtn       = document.getElementById('runBtn');
+const statusDiv    = document.getElementById('status');
+const stuckOverlay = document.getElementById('stuckOverlay');
+const stuckReason  = document.getElementById('stuckReason');
+const stuckOk      = document.getElementById('stuckOk');
+
+stuckOk.addEventListener('click', () => {
+  stuckOverlay.classList.remove('visible');
+  // Run button is already re-enabled at this point; user just hits Run again
+});
 
 // Restore saved API key on open
 chrome.storage.local.get('apiKey', ({ apiKey }) => {
@@ -42,12 +50,12 @@ runBtn.addEventListener('click', async () => {
     setRunning(false);
 
     if (chrome.runtime.lastError) {
-      showStatus('error', `Extension error: ${chrome.runtime.lastError.message}`);
+      showStuck(`Extension error: ${chrome.runtime.lastError.message}`);
       return;
     }
 
     if (!result) {
-      showStatus('error', 'No response from background worker.');
+      showStuck('No response from background worker.');
       return;
     }
 
@@ -70,7 +78,7 @@ runBtn.addEventListener('click', async () => {
 
       showStatus('success', html || 'Done.', true);
     } else {
-      showStatus('error', result.error || 'Unknown error.');
+      showStuck(result.error || 'Unknown error.');
     }
   });
 });
@@ -79,6 +87,11 @@ runBtn.addEventListener('click', async () => {
 goalInput.addEventListener('keydown', e => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) runBtn.click();
 });
+
+function showStuck(msg) {
+  stuckReason.textContent = msg;
+  stuckOverlay.classList.add('visible');
+}
 
 function setRunning(on) {
   runBtn.disabled = on;
