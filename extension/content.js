@@ -297,6 +297,8 @@ async function execute(action) {
   #panel {
     position: absolute; bottom: 58px; left: 0;
     width: 260px;
+    max-height: 70vh;
+    overflow-y: auto;
     background: #1c1507;
     border: 1px solid #38BDF8;
     border-radius: 12px;
@@ -305,6 +307,18 @@ async function execute(action) {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
   #panel.hidden { display: none; }
+  #renameInput {
+    width: 100%;
+    background: #130f04;
+    border: 1px solid #38BDF8;
+    border-radius: 6px;
+    color: #f0ddb0;
+    font-size: 12px;
+    padding: 6px 9px;
+    outline: none;
+    font-family: inherit;
+    margin-bottom: 2px;
+  }
 
   .plabel {
     font-size: 10px; font-weight: 600; color: #C9A96E;
@@ -361,22 +375,7 @@ async function execute(action) {
     transition: opacity 0.15s;
   }
   .pedit:hover { opacity: 1; }
-  .preset-edit-row {
-    display: flex; gap: 4px; align-items: center; width: 100%;
-  }
-  .preset-edit-row input {
-    flex: 1; background: #130f04; border: 1px solid #38BDF8;
-    border-radius: 10px; color: #f0ddb0; font-size: 11px;
-    padding: 3px 8px; outline: none; font-family: inherit;
-  }
-  .preset-edit-row button {
-    background: #130f04; border: 1px solid rgba(56,189,248,0.4);
-    border-radius: 10px; color: #C9A96E; font-size: 11px;
-    padding: 3px 7px; cursor: pointer; font-family: inherit;
-  }
-  .preset-edit-row button:hover { border-color: #38BDF8; color: #7DD3FC; }
-  .preset-del { color: rgba(255,100,100,0.6) !important; }
-  .preset-del:hover { color: #ff6b6b !important; border-color: #ff6b6b !important; }
+  .hidden { display: none !important; }
 
   #saveGoalBtn {
     width: 100%; margin-top: 10px; padding: 8px;
@@ -422,9 +421,13 @@ async function execute(action) {
 <div id="panel" class="hidden">
   <div class="plabel">Quick Goals</div>
   <div id="presets"></div>
+  <div id="renameRow" class="hidden">
+    <div class="plabel" style="margin-top:8px">Rename preset</div>
+    <input type="text" id="renameInput" placeholder="Preset name" maxlength="40" />
+  </div>
   <div class="pdivider"></div>
-  <div class="plabel">Custom Goal</div>
-  <textarea id="goalInput" rows="2" placeholder='or type your own goal…'></textarea>
+  <div class="plabel">Goal</div>
+  <textarea id="goalInput" rows="3" placeholder='Select a preset above or type your own goal…'></textarea>
   <div class="pdivider"></div>
   <div class="plabel">Success Message <span>5 words max · default: Done!</span></div>
   <input type="text" id="msgInput" placeholder='e.g. Got it! or Correct!' maxlength="60" />
@@ -471,30 +474,42 @@ async function execute(action) {
   });
 
   // ── Presets ──────────────────────────────────────────────────────────────
-  const presetsDiv = shadow.getElementById('presets');
+  const presetsDiv  = shadow.getElementById('presets');
+  const renameRow   = shadow.getElementById('renameRow');
+  const renameInput = shadow.getElementById('renameInput');
+
   const DEFAULT_PRESETS = [
-    { label: 'McGraw Hill - Answer', goal: 'Click the correct answer for this question, then click High Confidence, then click Next Question. If the answer was wrong, still click Next Question.' },
+    { label: 'McGraw Hill - Answer', goal: 'Click the correct answer for this question. Then click the confidence button (High, High Confidence, or similar). Then click the button to go to the next question (Next, Continue, or similar). Do all three steps even if the answer was wrong.' },
     { label: 'McGraw Hill - Answer only', goal: 'Look at the question on the page and click the correct answer' }
   ];
   let presets = [];
   let activePresetIdx = null;
+  let editingPresetIdx = null;
 
-  function savePresets() {
-    chrome.storage.local.set({ presets });
-  }
+  function savePresets() { chrome.storage.local.set({ presets }); }
 
   function renderPresets() {
     presetsDiv.innerHTML = '';
-
     presets.forEach((p, i) => {
       const btn = document.createElement('button');
       btn.className = 'preset' + (activePresetIdx === i ? ' active' : '');
-      btn.innerHTML = `<span>${p.label}</span><span class="pedit" title="Edit">✎</span>`;
-
+      btn.innerHTML = `<span>${p.label}</span><span class="pedit" title="Rename / Delete">✎</span>`;
       btn.addEventListener('click', e => {
-        if (e.target.classList.contains('pedit')) { startEditPreset(i); return; }
+        if (e.target.classList.contains('pedit')) {
+          // Load this preset for editing
+          goalInput.value = p.goal;
+          activePresetIdx = i;
+          editingPresetIdx = i;
+          renameInput.value = p.label;
+          renameRow.classList.remove('hidden');
+          renameInput.focus(); renameInput.select();
+          renderPresets();
+          return;
+        }
         goalInput.value = p.goal;
         activePresetIdx = i;
+        editingPresetIdx = null;
+        renameRow.classList.add('hidden');
         renderPresets();
       });
       presetsDiv.appendChild(btn);
@@ -508,41 +523,29 @@ async function execute(action) {
       goalInput.value = '';
       goalInput.focus();
       activePresetIdx = null;
+      editingPresetIdx = null;
+      renameRow.classList.add('hidden');
       renderPresets();
     });
+
+    // Add preset button
+    const addBtn = document.createElement('button');
+    addBtn.className = 'preset custom';
+    addBtn.textContent = '＋ Add';
+    addBtn.addEventListener('click', () => {
+      presets.push({ label: 'New Preset', goal: '' });
+      activePresetIdx = presets.length - 1;
+      editingPresetIdx = activePresetIdx;
+      goalInput.value = '';
+      renameInput.value = 'New Preset';
+      renameRow.classList.remove('hidden');
+      renameInput.focus(); renameInput.select();
+      savePresets();
+      renderPresets();
+    });
+
     presetsDiv.appendChild(customBtn);
-  }
-
-  function startEditPreset(i) {
-    presetsDiv.innerHTML = '';
-    const row = document.createElement('div');
-    row.className = 'preset-edit-row';
-    row.innerHTML = `
-      <input id="peditInput" value="${presets[i].label.replace(/"/g,'&quot;')}" placeholder="Preset name" />
-      <button id="peditSave">✓</button>
-      <button id="peditDel" class="preset-del">×</button>
-    `;
-    presetsDiv.appendChild(row);
-    const inp = row.querySelector('#peditInput');
-    inp.focus(); inp.select();
-
-    row.querySelector('#peditSave').addEventListener('click', () => {
-      const newLabel = inp.value.trim();
-      if (!newLabel) return;
-      presets[i].label = newLabel;
-      if (activePresetIdx === i && goalInput.value.trim()) presets[i].goal = goalInput.value.trim();
-      savePresets();
-      renderPresets();
-    });
-    inp.addEventListener('keydown', e => { if (e.key === 'Enter') row.querySelector('#peditSave').click(); if (e.key === 'Escape') renderPresets(); });
-
-    row.querySelector('#peditDel').addEventListener('click', () => {
-      presets.splice(i, 1);
-      if (activePresetIdx === i) activePresetIdx = null;
-      else if (activePresetIdx > i) activePresetIdx--;
-      savePresets();
-      renderPresets();
-    });
+    presetsDiv.appendChild(addBtn);
   }
 
   // Enforce 5-word limit on message input
@@ -566,7 +569,15 @@ async function execute(action) {
     const words = msgInput.value.trim().split(/\s+/).filter(Boolean).slice(0, 5);
     customMsg = words.join(' ');
     msgInput.value = customMsg;
-    if (activePresetIdx !== null && presets[activePresetIdx]) {
+    if (editingPresetIdx !== null && presets[editingPresetIdx]) {
+      const newLabel = renameInput.value.trim();
+      if (newLabel) presets[editingPresetIdx].label = newLabel;
+      presets[editingPresetIdx].goal = val;
+      savePresets();
+      editingPresetIdx = null;
+      renameRow.classList.add('hidden');
+      renderPresets();
+    } else if (activePresetIdx !== null && presets[activePresetIdx]) {
       presets[activePresetIdx].goal = val;
       savePresets();
     }
@@ -575,6 +586,24 @@ async function execute(action) {
     editBtn.classList.remove('active');
     showToast('running', 'Saved');
     setTimeout(() => hideToast(), 1500);
+  });
+
+  // Delete preset from rename row
+  renameInput.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      editingPresetIdx = null;
+      renameRow.classList.add('hidden');
+      renderPresets();
+    }
+    if (e.key === 'Delete' && e.metaKey) {
+      if (editingPresetIdx !== null) {
+        presets.splice(editingPresetIdx, 1);
+        if (activePresetIdx === editingPresetIdx) { activePresetIdx = null; goalInput.value = ''; }
+        editingPresetIdx = null;
+        renameRow.classList.add('hidden');
+        savePresets(); renderPresets();
+      }
+    }
   });
 
   goalInput.addEventListener('keydown', e => {

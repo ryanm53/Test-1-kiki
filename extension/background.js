@@ -171,8 +171,7 @@ async function runGoal(apiKey, goal, tabId, refUrls = []) {
 
         if (result?.success) {
           stepDone = true;
-          // Wait for page to update before next action
-          await new Promise(r => setTimeout(r, 600));
+          await new Promise(r => setTimeout(r, 1200));
           break;
         }
 
