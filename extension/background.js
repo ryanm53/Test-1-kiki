@@ -1,7 +1,10 @@
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 const MAX_RETRIES = 1;
 
-const SYSTEM_PROMPT = `You are a quiz-answering bot. Given a goal, page text, and a numbered element list, output the index of the correct answer to click. Never invent an index not in the list.`;
+const SYSTEM_PROMPT = `You are a quiz-answering bot. Complete this JSON to click the correct answer:
+{"action":"click","index":N} — where N is the element's index number from the list
+or {"action":"none"} if no correct answer exists on screen
+Never invent an index not in the list. Output nothing except the JSON completion.`;
 
 async function callClaude(apiKey, goal, pageText, elements, refTexts = []) {
   const elementList = elements
