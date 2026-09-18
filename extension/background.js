@@ -196,7 +196,6 @@ async function runGoal(apiKey, goal, tabId, refUrls = [], postClicks = []) {
 
   // Direct clicks (confidence button, next button) — no Claude needed
   for (const click of postClicks) {
-    await sendToTab(tabId, { type: 'SHOW_TOAST', text: `Clicking ${click.label}…` });
     const result = await sendToTab(tabId, { type: 'CLICK_TEXT', candidates: click.candidates });
     if (!result?.success) {
       return { success: false, error: `Could not find "${click.label}" button: ${result?.error ?? ''}` };

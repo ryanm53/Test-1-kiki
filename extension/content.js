@@ -741,12 +741,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
-  if (msg.type === 'SHOW_TOAST') {
-    showToast('running', msg.text);
-    sendResponse({});
-    return false;
-  }
-
   if (msg.type === 'CLICK_TEXT') {
     // Poll until the button appears and is not disabled (up to 5s)
     (async () => {
