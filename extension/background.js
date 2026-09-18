@@ -1,5 +1,5 @@
 const GEMINI_MODEL = 'gemini-3.6-flash';
-const MAX_RETRIES = 2;
+const MAX_RETRIES = 1;
 
 const SYSTEM_PROMPT = `You are a browser automation assistant. You will be given:
 1. A user goal
@@ -10,14 +10,15 @@ const SYSTEM_PROMPT = `You are a browser automation assistant. You will be given
 Decide the single best next action to take to progress toward the goal.
 
 Respond with ONLY valid JSON — no markdown fences, no explanation, nothing else:
-{"action":"click"|"fill"|"none","index":<integer or null>,"value":<string or null>,"reasoning":<string>}
+{"action":"click"|"fill"|"drag"|"none","index":<int|null>,"sourceIndex":<int|null>,"targetIndex":<int|null>,"value":<string|null>,"reasoning":<string>}
 
 Rules:
-- "action" must be exactly "click", "fill", or "none"
-- "index" must be an integer from the element list (0-based), or null when action is "none"
-- "value" is the text to type for "fill" actions; null otherwise
-- "reasoning" is one short sentence explaining your choice
-- NEVER invent an index that is not in the provided list
+- "action" must be exactly "click", "fill", "drag", or "none"
+- For click or fill: set "index" to the element number; sourceIndex and targetIndex must be null
+- For drag: set "sourceIndex" (element to grab) and "targetIndex" (drop destination); index must be null
+- "value" is the string to type for fill; null otherwise
+- "reasoning" is one short sentence explaining your choice — keep it SHORT (under 12 words)
+- NEVER invent an index not in the provided list
 - Use "none" if the goal is already met or no valid action exists`;
 
 async function callClaude(apiKey, goal, pageText, elements, refTexts = []) {
@@ -53,7 +54,7 @@ ${elementList || '(none found)'}`;
     body: JSON.stringify({
       system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
       contents: [{ role: 'user', parts: [{ text: userContent }] }],
-      generationConfig: { maxOutputTokens: 256, temperature: 0.1 }
+      generationConfig: { maxOutputTokens: 128, temperature: 0 }
     })
   });
 
@@ -79,11 +80,17 @@ ${elementList || '(none found)'}`;
   }
 
   // Validate shape
-  if (!['click', 'fill', 'none'].includes(parsed.action)) {
+  if (!['click', 'fill', 'drag', 'none'].includes(parsed.action)) {
     throw new Error(`Unexpected action value: ${JSON.stringify(parsed.action)}`);
   }
-  if (parsed.action !== 'none' && typeof parsed.index !== 'number') {
-    throw new Error(`Action "${parsed.action}" requires a numeric index, got: ${JSON.stringify(parsed.index)}`);
+  if (parsed.action === 'drag') {
+    if (typeof parsed.sourceIndex !== 'number' || typeof parsed.targetIndex !== 'number') {
+      throw new Error('Drag action requires numeric sourceIndex and targetIndex');
+    }
+  } else if (parsed.action !== 'none') {
+    if (typeof parsed.index !== 'number') {
+      throw new Error(`Action "${parsed.action}" requires a numeric index, got: ${JSON.stringify(parsed.index)}`);
+    }
   }
   if (parsed.action === 'fill' && parsed.value == null) {
     throw new Error('Fill action requires a non-null value');
@@ -162,7 +169,7 @@ async function runGoal(apiKey, goal, tabId, refUrls = []) {
 
     if (attempt < MAX_RETRIES) {
       // Back-off between retries
-      await new Promise(r => setTimeout(r, 700 * (attempt + 1)));
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
     }
   }
 

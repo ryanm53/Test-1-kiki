@@ -11,6 +11,9 @@ const INTERACTIVE_SEL = [
   '[role="tab"]',
   '[role="checkbox"]',
   '[role="radio"]',
+  '[role="option"]',
+  '[role="listitem"]',
+  '[draggable="true"]',
   '[contenteditable="true"]'
 ].join(', ');
 
@@ -114,26 +117,64 @@ function scrape() {
 }
 
 async function execute(action) {
-  const { index } = action;
-
-  if (typeof index !== 'number' || index < 0 || index >= _lastElements.length) {
-    return {
-      success: false,
-      error: `Index ${index} is out of range (list has ${_lastElements.length} elements). Did you call scrape first?`
-    };
-  }
-
-  const el = _lastElements[index];
-
-  if (!document.contains(el)) {
-    return { success: false, error: `Element [${index}] is no longer in the DOM` };
-  }
-
-  // Scroll into view and give the browser a moment to settle
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  await new Promise(r => setTimeout(r, 400));
-
   try {
+    // ── Drag ───────────────────────────────────────────────────────────────
+    if (action.action === 'drag') {
+      const { sourceIndex, targetIndex } = action;
+      if (typeof sourceIndex !== 'number' || sourceIndex < 0 || sourceIndex >= _lastElements.length)
+        return { success: false, error: `Source index ${sourceIndex} out of range` };
+      if (typeof targetIndex !== 'number' || targetIndex < 0 || targetIndex >= _lastElements.length)
+        return { success: false, error: `Target index ${targetIndex} out of range` };
+
+      const src = _lastElements[sourceIndex];
+      const tgt = _lastElements[targetIndex];
+      if (!document.contains(src)) return { success: false, error: 'Source element not in DOM' };
+      if (!document.contains(tgt)) return { success: false, error: 'Target element not in DOM' };
+
+      src.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await new Promise(r => setTimeout(r, 150));
+
+      const sr = src.getBoundingClientRect(), tr = tgt.getBoundingClientRect();
+      const sx = sr.left + sr.width / 2, sy = sr.top + sr.height / 2;
+      const tx = tr.left + tr.width / 2, ty = tr.top + tr.height / 2;
+      const dt = new DataTransfer();
+
+      // HTML5 drag events (for native drag APIs)
+      src.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: sx, clientY: sy }));
+      await new Promise(r => setTimeout(r, 60));
+      tgt.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: tx, clientY: ty }));
+      tgt.dispatchEvent(new DragEvent('dragover',  { bubbles: true, cancelable: true, dataTransfer: dt, clientX: tx, clientY: ty }));
+      await new Promise(r => setTimeout(r, 60));
+      tgt.dispatchEvent(new DragEvent('drop',      { bubbles: true, cancelable: true, dataTransfer: dt, clientX: tx, clientY: ty }));
+      src.dispatchEvent(new DragEvent('dragend',   { bubbles: true, cancelable: true, dataTransfer: dt, clientX: tx, clientY: ty }));
+
+      // Pointer + mouse events (for React DnD, Sortable.js, etc.)
+      await new Promise(r => setTimeout(r, 40));
+      src.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, isPrimary: true, clientX: sx, clientY: sy }));
+      src.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, buttons: 1, clientX: sx, clientY: sy }));
+      await new Promise(r => setTimeout(r, 40));
+      document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, isPrimary: true, clientX: tx, clientY: ty }));
+      document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, buttons: 1, clientX: tx, clientY: ty }));
+      tgt.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, isPrimary: true, clientX: tx, clientY: ty }));
+      tgt.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: tx, clientY: ty }));
+
+      return { success: true };
+    }
+
+    // ── Click / Fill ───────────────────────────────────────────────────────
+    const { index } = action;
+    if (typeof index !== 'number' || index < 0 || index >= _lastElements.length) {
+      return { success: false, error: `Index ${index} out of range (${_lastElements.length} elements)` };
+    }
+
+    const el = _lastElements[index];
+    if (!document.contains(el)) {
+      return { success: false, error: `Element [${index}] is no longer in the DOM` };
+    }
+
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    await new Promise(r => setTimeout(r, 150));
+
     if (action.action === 'click') {
       el.focus();
       el.click();
@@ -141,39 +182,24 @@ async function execute(action) {
     }
 
     if (action.action === 'fill') {
-      if (action.value == null) {
-        return { success: false, error: 'Fill action missing value' };
-      }
-
+      if (action.value == null) return { success: false, error: 'Fill action missing value' };
       el.focus();
-
       const tag = el.tagName.toLowerCase();
-
       if (tag === 'select') {
-        // AI sees display text, not value attributes — match by text first
         const opt = Array.from(el.options).find(
           o => o.textContent.trim() === action.value || o.value === action.value
         );
-        if (opt) el.value = opt.value;
-        else el.value = action.value;
+        if (opt) el.value = opt.value; else el.value = action.value;
         el.dispatchEvent(new Event('change', { bubbles: true }));
       } else {
-        // Use the native prototype setter so React/Vue/Angular frameworks detect the change.
-        // (Frameworks override the property; calling the prototype setter bypasses the override
-        // and triggers their internal reconciliation when the synthetic event fires.)
         const proto = tag === 'textarea'
           ? window.HTMLTextAreaElement.prototype
           : window.HTMLInputElement.prototype;
         const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-        if (nativeSetter) {
-          nativeSetter.call(el, action.value);
-        } else {
-          el.value = action.value;
-        }
+        if (nativeSetter) nativeSetter.call(el, action.value); else el.value = action.value;
         el.dispatchEvent(new InputEvent('input', { bubbles: true, data: action.value }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
       }
-
       return { success: true };
     }
 
@@ -322,6 +348,38 @@ async function execute(action) {
     transition: opacity 0.15s;
   }
   #stuckOk:hover { opacity: 0.88; }
+
+  /* Answer result panel */
+  #result {
+    position: absolute;
+    bottom: 58px; right: 0;
+    width: 255px;
+    background: #071a0e;
+    border: 1px solid rgba(74,222,128,0.22);
+    border-radius: 10px;
+    padding: 11px 28px 11px 13px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.55);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  #result.hidden { display: none; }
+  #resultClose {
+    position: absolute; top: 7px; right: 9px;
+    background: none; border: none;
+    color: rgba(235,235,245,0.22); font-size: 15px;
+    cursor: pointer; padding: 2px 4px; line-height: 1;
+    font-family: sans-serif;
+  }
+  #resultClose:hover { color: rgba(235,235,245,0.55); }
+  #resultAnswer {
+    font-size: 14px; font-weight: 600;
+    color: #4ade80; line-height: 1.35;
+    margin-bottom: 4px;
+  }
+  #resultReason {
+    font-size: 11px;
+    color: rgba(235,235,245,0.38);
+    line-height: 1.45;
+  }
 </style>
 
 <div id="toast"></div>
@@ -330,6 +388,12 @@ async function execute(action) {
   <div id="panelLabel">Saved Goal</div>
   <textarea id="goalInput" rows="3" placeholder='e.g. "answer the question and click High confidence"'></textarea>
   <button id="saveGoalBtn">Save Goal</button>
+</div>
+
+<div id="result" class="hidden">
+  <button id="resultClose">×</button>
+  <div id="resultAnswer"></div>
+  <div id="resultReason"></div>
 </div>
 
 <div id="btnRow">
@@ -356,10 +420,15 @@ async function execute(action) {
   const stuckOverlay = shadow.getElementById('stuckOverlay');
   const stuckMsg     = shadow.getElementById('stuckMsg');
   const stuckOk      = shadow.getElementById('stuckOk');
+  const resultPanel  = shadow.getElementById('result');
+  const resultAnswer = shadow.getElementById('resultAnswer');
+  const resultReason = shadow.getElementById('resultReason');
+  const resultClose  = shadow.getElementById('resultClose');
 
-  let toastTimer = null;
-  let isRunning  = false;
-  let savedGoal  = '';
+  let toastTimer  = null;
+  let resultTimer = null;
+  let isRunning   = false;
+  let savedGoal   = '';
 
   // Load saved goal on init
   chrome.storage.local.get('lastGoal', ({ lastGoal }) => {
@@ -399,35 +468,20 @@ async function execute(action) {
   // FAB = one-tap run
   fab.addEventListener('click', () => {
     if (isRunning) return;
-
     if (!savedGoal) {
-      // No goal yet — open editor instead
       panel.classList.remove('hidden');
       editBtn.classList.add('active');
       goalInput.focus();
       return;
     }
-
-    setRunning(true);
-    showToast('running', 'Running…');
-
-    chrome.runtime.sendMessage({ type: 'RUN_GOAL', goal: savedGoal }, result => {
-      setRunning(false);
-      if (chrome.runtime.lastError || !result) {
-        showStuck(chrome.runtime.lastError?.message ?? 'No response from background.');
-        return;
-      }
-      if (result.success) {
-        const msg = result.action?.reasoning ?? 'Done.';
-        showToast('success', msg);
-        toastTimer = setTimeout(() => hideToast(), 3500);
-      } else {
-        showStuck(result.error ?? 'Unknown error.');
-      }
-    });
+    triggerRun();
   });
 
   stuckOk.addEventListener('click', () => stuckOverlay.classList.remove('visible'));
+  resultClose.addEventListener('click', () => {
+    resultPanel.classList.add('hidden');
+    clearTimeout(resultTimer);
+  });
 
   function setRunning(on) {
     isRunning = on;
@@ -445,11 +499,96 @@ async function execute(action) {
     toast.classList.remove('show');
   }
 
+  function showResult(answer, reasoning) {
+    clearTimeout(resultTimer);
+    resultAnswer.textContent = answer;
+    resultReason.textContent = reasoning || '';
+    resultPanel.classList.remove('hidden');
+    resultTimer = setTimeout(() => resultPanel.classList.add('hidden'), 8000);
+  }
+
   function showStuck(msg) {
     hideToast();
     stuckMsg.textContent = msg;
     stuckOverlay.classList.add('visible');
   }
+
+  function triggerRun() {
+    if (isRunning || !savedGoal) return;
+    setRunning(true);
+    hideToast();
+    resultPanel.classList.add('hidden');
+    showToast('running', 'Running…');
+    chrome.runtime.sendMessage({ type: 'RUN_GOAL', goal: savedGoal }, handleResult);
+  }
+
+  function handleResult(result) {
+    setRunning(false);
+    hideToast();
+    if (chrome.runtime.lastError || !result) {
+      showStuck(chrome.runtime.lastError?.message ?? 'No response from background.');
+      return;
+    }
+    if (result.success) {
+      const a = result.action;
+      let answer = 'Done';
+      if (a) {
+        if (a.action === 'click' && typeof a.index === 'number') {
+          const el = _lastElements[a.index];
+          if (el) {
+            const lbl = accessibleText(el);
+            const fs = el.closest('fieldset');
+            let num = null;
+            if (fs) {
+              const sibs = Array.from(fs.querySelectorAll('input[type="radio"],input[type="checkbox"]')).filter(isVisible);
+              const pos = sibs.indexOf(el);
+              if (pos >= 0) num = pos + 1;
+            }
+            answer = num ? `${lbl} · #${num}` : (lbl || 'Clicked');
+          }
+        } else if (a.action === 'fill') {
+          answer = `"${a.value}"`;
+        } else if (a.action === 'drag') {
+          const src = _lastElements[a.sourceIndex];
+          answer = src ? `Moved: ${accessibleText(src)}` : 'Items rearranged';
+        } else if (a.action === 'none') {
+          answer = 'Already done';
+        }
+      }
+      showResult(answer, a?.reasoning ?? '');
+    } else {
+      showStuck(result.error ?? 'Unknown error.');
+    }
+  }
+
+  // ── Auto-run on new question ─────────────────────────────────────────────
+  let lastQuestionKey = '';
+  let autoRunTimer = null;
+
+  function getQuestionKey() {
+    const root = document.querySelector('[role="main"], main, article, form') ?? document.body;
+    // Use the first significant heading/question element as the key
+    const nodes = root.querySelectorAll('h1,h2,h3,h4,[class*="question"],[class*="Question"],[class*="prompt"],[class*="Prompt"]');
+    return Array.from(nodes).map(n => n.innerText?.trim()).filter(Boolean).join('|').slice(0, 300);
+  }
+
+  function scheduleAutoRun() {
+    clearTimeout(autoRunTimer);
+    autoRunTimer = setTimeout(() => {
+      const key = getQuestionKey();
+      if (!key || key === lastQuestionKey) return;
+      lastQuestionKey = key;
+      triggerRun();
+    }, 700);
+  }
+
+  // Listen for SPA navigation events
+  window.addEventListener('popstate', scheduleAutoRun);
+  window.addEventListener('hashchange', scheduleAutoRun);
+
+  // Watch for significant DOM changes in the content area
+  const contentRoot = document.querySelector('[role="main"], main, article') ?? document.body;
+  new MutationObserver(() => scheduleAutoRun()).observe(contentRoot, { childList: true, subtree: false });
 
   document.body.appendChild(host);
 })();
