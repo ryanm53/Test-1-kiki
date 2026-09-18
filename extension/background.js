@@ -60,6 +60,9 @@ ${elementList || '(none found)'}`;
 
   if (!response.ok) {
     const body = await response.text();
+    if (response.status === 429) {
+      throw new Error('Rate limit hit — wait about a minute and try again.');
+    }
     throw new Error(`Gemini API ${response.status}: ${body.slice(0, 300)}`);
   }
 

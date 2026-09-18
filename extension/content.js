@@ -216,7 +216,7 @@ async function execute(action) {
 
   const host = document.createElement('div');
   host.id = '__cap-host';
-  host.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:2147483647;';
+  host.style.cssText = 'position:fixed;bottom:24px;left:24px;z-index:2147483647;';
 
   const shadow = host.attachShadow({ mode: 'open' });
 
@@ -228,7 +228,7 @@ async function execute(action) {
   #btnRow {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: flex-start;
     gap: 8px;
   }
 
@@ -270,7 +270,7 @@ async function execute(action) {
   /* Toast above the button row */
   #toast {
     position: absolute;
-    bottom: 58px; right: 0;
+    bottom: 58px; left: 0;
     max-width: 240px;
     padding: 8px 12px;
     border-radius: 9px;
@@ -288,7 +288,7 @@ async function execute(action) {
 
   /* Goal editor panel */
   #panel {
-    position: absolute; bottom: 58px; right: 0;
+    position: absolute; bottom: 58px; left: 0;
     width: 255px;
     background: #0f0f10;
     border: 1px solid #2e2e32;
@@ -352,7 +352,7 @@ async function execute(action) {
   /* Answer result panel */
   #result {
     position: absolute;
-    bottom: 58px; right: 0;
+    bottom: 58px; left: 0;
     width: 255px;
     background: #071a0e;
     border: 1px solid rgba(74,222,128,0.22);
@@ -515,9 +515,9 @@ async function execute(action) {
 
   function triggerRun() {
     if (isRunning || !savedGoal) return;
+    lastRunAt = Date.now();
     setRunning(true);
     hideToast();
-    resultPanel.classList.add('hidden');
     showToast('running', 'Running…');
     chrome.runtime.sendMessage({ type: 'RUN_GOAL', goal: savedGoal }, handleResult);
   }
@@ -530,65 +530,40 @@ async function execute(action) {
       return;
     }
     if (result.success) {
-      const a = result.action;
-      let answer = 'Done';
-      if (a) {
-        if (a.action === 'click' && typeof a.index === 'number') {
-          const el = _lastElements[a.index];
-          if (el) {
-            const lbl = accessibleText(el);
-            const fs = el.closest('fieldset');
-            let num = null;
-            if (fs) {
-              const sibs = Array.from(fs.querySelectorAll('input[type="radio"],input[type="checkbox"]')).filter(isVisible);
-              const pos = sibs.indexOf(el);
-              if (pos >= 0) num = pos + 1;
-            }
-            answer = num ? `${lbl} · #${num}` : (lbl || 'Clicked');
-          }
-        } else if (a.action === 'fill') {
-          answer = `"${a.value}"`;
-        } else if (a.action === 'drag') {
-          const src = _lastElements[a.sourceIndex];
-          answer = src ? `Moved: ${accessibleText(src)}` : 'Items rearranged';
-        } else if (a.action === 'none') {
-          answer = 'Already done';
-        }
-      }
-      showResult(answer, a?.reasoning ?? '');
+      showToast('success', 'Done!');
+      toastTimer = setTimeout(() => hideToast(), 2500);
     } else {
       showStuck(result.error ?? 'Unknown error.');
     }
   }
 
   // ── Auto-run on new question ─────────────────────────────────────────────
-  let lastQuestionKey = '';
+  let lastAutoUrl  = '';
   let autoRunTimer = null;
-
-  function getQuestionKey() {
-    const root = document.querySelector('[role="main"], main, article, form') ?? document.body;
-    // Use the first significant heading/question element as the key
-    const nodes = root.querySelectorAll('h1,h2,h3,h4,[class*="question"],[class*="Question"],[class*="prompt"],[class*="Prompt"]');
-    return Array.from(nodes).map(n => n.innerText?.trim()).filter(Boolean).join('|').slice(0, 300);
-  }
+  const COOLDOWN   = 5000; // minimum ms between auto-runs
+  let lastRunAt    = 0;
 
   function scheduleAutoRun() {
     clearTimeout(autoRunTimer);
     autoRunTimer = setTimeout(() => {
-      const key = getQuestionKey();
-      if (!key || key === lastQuestionKey) return;
-      lastQuestionKey = key;
+      if (isRunning || !savedGoal) return;
+      const url = location.href;
+      if (url === lastAutoUrl) return;
+      if (Date.now() - lastRunAt < COOLDOWN) return;
+      lastAutoUrl = url;
       triggerRun();
     }, 700);
   }
 
-  // Listen for SPA navigation events
+  // Native popstate/hashchange (back/forward, hash nav)
   window.addEventListener('popstate', scheduleAutoRun);
   window.addEventListener('hashchange', scheduleAutoRun);
 
-  // Watch for significant DOM changes in the content area
-  const contentRoot = document.querySelector('[role="main"], main, article') ?? document.body;
-  new MutationObserver(() => scheduleAutoRun()).observe(contentRoot, { childList: true, subtree: false });
+  // Intercept pushState/replaceState for SPA navigation
+  for (const method of ['pushState', 'replaceState']) {
+    const orig = history[method].bind(history);
+    history[method] = (...args) => { orig(...args); scheduleAutoRun(); };
+  }
 
   document.body.appendChild(host);
 })();
