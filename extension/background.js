@@ -145,11 +145,12 @@ function sendToTab(tabId, msg) {
   });
 }
 
-const MAX_STEPS = 3; // exactly one question cycle: answer + confidence + next
+const MAX_STEPS = 1; // Claude picks the answer; postClicks handle confidence + next directly
 
-async function runGoal(apiKey, goal, tabId, refUrls = []) {
+async function runGoal(apiKey, goal, tabId, refUrls = [], postClicks = []) {
   const refTexts = await getReferenceContent(refUrls);
 
+  // Claude handles the answer selection
   for (let step = 0; step < MAX_STEPS; step++) {
     let lastError = 'Unknown error';
     let stepDone = false;
@@ -171,7 +172,7 @@ async function runGoal(apiKey, goal, tabId, refUrls = []) {
 
         if (result?.success) {
           stepDone = true;
-          await new Promise(r => setTimeout(r, 1200));
+          await new Promise(r => setTimeout(r, 900));
           break;
         }
 
@@ -190,6 +191,15 @@ async function runGoal(apiKey, goal, tabId, refUrls = []) {
 
     if (!stepDone) {
       return { success: false, error: `Stuck on step ${step + 1}. Last error: ${lastError}` };
+    }
+  }
+
+  // Direct clicks (confidence button, next button) — no Claude needed
+  for (const click of postClicks) {
+    await new Promise(r => setTimeout(r, 700));
+    const result = await sendToTab(tabId, { type: 'CLICK_TEXT', candidates: click.candidates });
+    if (!result?.success) {
+      return { success: false, error: `Could not find "${click.label}" button` };
     }
   }
 
@@ -219,7 +229,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       ?? (await chrome.storage.local.get('refUrls')).refUrls
       ?? [];
 
-    const result = await runGoal(apiKey, msg.goal, tabId, refUrls);
+    const result = await runGoal(apiKey, msg.goal, tabId, refUrls, msg.postClicks ?? []);
     sendResponse(result);
   })();
 

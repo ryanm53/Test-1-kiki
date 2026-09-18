@@ -462,34 +462,51 @@ async function execute(action) {
   const stuckMsg     = shadow.getElementById('stuckMsg');
   const stuckOk      = shadow.getElementById('stuckOk');
 
-  let toastTimer = null;
-  let isRunning  = false;
-  let savedGoal  = '';
-  let customMsg  = '';
-  let loopMode   = false;
-  let loopPaused = false;
-  let loopCount  = 0;
+  let toastTimer    = null;
+  let isRunning     = false;
+  let savedGoal     = '';
+  let savedPostClicks = [];
+  let customMsg     = '';
+  let loopMode      = false;
+  let loopPaused    = false;
+  let loopCount     = 0;
 
   // Load saved settings on init
-  chrome.storage.local.get(['lastGoal', 'successMsg'], ({ lastGoal, successMsg }) => {
-    if (lastGoal)   { savedGoal = lastGoal; goalInput.value = lastGoal; }
-    if (successMsg) { customMsg = successMsg; msgInput.value = successMsg; }
+  chrome.storage.local.get(['lastGoal', 'lastPostClicks', 'successMsg'], ({ lastGoal, lastPostClicks, successMsg }) => {
+    if (lastGoal)      { savedGoal = lastGoal; goalInput.value = lastGoal; }
+    if (lastPostClicks) { savedPostClicks = lastPostClicks; }
+    if (successMsg)    { customMsg = successMsg; msgInput.value = successMsg; }
   });
 
   // ── Presets dropdown ─────────────────────────────────────────────────────
   const presetSelect = shadow.getElementById('presetSelect');
   const PRESETS = [
-    { label: 'McGraw Hill - Answer + Confidence + Next', goal: 'Step 1: Click the correct answer for this multiple choice question. Step 2: Click the button with aria-label "High Confidence" (visible text is "High") to submit your confidence rating. Step 3: Click the button whose text is "Next Question" (class "next-button") to advance. After completing all 3 steps return action "none" — do not try to answer the next question.' },
-    { label: 'McGraw Hill - Answer only', goal: 'Look at the question on the page and click the correct answer' }
+    {
+      label: 'McGraw Hill - Answer + Confidence + Next',
+      goal: 'Click the correct answer for this multiple choice question.',
+      postClicks: [
+        { label: 'High Confidence', candidates: [{ ariaLabel: 'High Confidence' }, { text: 'High Confidence' }, { text: 'High' }] },
+        { label: 'Next Question',   candidates: [{ selector: '.next-button' }, { text: 'Next Question' }] }
+      ]
+    },
+    {
+      label: 'McGraw Hill - Answer only',
+      goal: 'Click the correct answer for this multiple choice question.',
+      postClicks: []
+    }
   ];
-  PRESETS.forEach(p => {
+  PRESETS.forEach((p, i) => {
     const opt = document.createElement('option');
-    opt.value = p.goal;
+    opt.value = i;
     opt.textContent = p.label;
     presetSelect.appendChild(opt);
   });
   presetSelect.addEventListener('change', () => {
-    if (presetSelect.value) goalInput.value = presetSelect.value;
+    const preset = PRESETS[parseInt(presetSelect.value)];
+    if (preset) {
+      goalInput.value = preset.goal;
+      savedPostClicks = preset.postClicks || [];
+    }
   });
 
   // Enforce 5-word limit on message input
@@ -513,7 +530,7 @@ async function execute(action) {
     const words = msgInput.value.trim().split(/\s+/).filter(Boolean).slice(0, 5);
     customMsg = words.join(' ');
     msgInput.value = customMsg;
-    chrome.storage.local.set({ lastGoal: val, successMsg: customMsg });
+    chrome.storage.local.set({ lastGoal: val, lastPostClicks: savedPostClicks, successMsg: customMsg });
     panel.classList.add('hidden');
     editBtn.classList.remove('active');
     showToast('running', 'Saved');
@@ -615,7 +632,7 @@ async function execute(action) {
     setRunning(true);
     hideToast();
     showToast('running', 'Running…');
-    chrome.runtime.sendMessage({ type: 'RUN_GOAL', goal: savedGoal }, handleResult);
+    chrome.runtime.sendMessage({ type: 'RUN_GOAL', goal: savedGoal, postClicks: savedPostClicks }, handleResult);
   }
 
   let rateLimitTimer = null;
@@ -712,6 +729,35 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     execute(msg.action)
       .then(sendResponse)
       .catch(e => sendResponse({ success: false, error: e.message }));
-    return true; // Keep channel open for async response
+    return true;
+  }
+
+  if (msg.type === 'CLICK_TEXT') {
+    // Find and click a button directly by aria-label, text, or CSS selector
+    const candidates = msg.candidates || [];
+    const all = Array.from(document.querySelectorAll('button, [role="button"], a'));
+    let found = null;
+    for (const c of candidates) {
+      if (c.selector) {
+        const el = document.querySelector(c.selector);
+        if (el && isVisible(el)) { found = el; break; }
+      }
+      if (c.ariaLabel) {
+        const el = all.find(b => (b.getAttribute('aria-label') || '').toLowerCase().includes(c.ariaLabel.toLowerCase()) && isVisible(b));
+        if (el) { found = el; break; }
+      }
+      if (c.text) {
+        const el = all.find(b => (b.innerText || b.textContent || '').trim().toLowerCase().includes(c.text.toLowerCase()) && isVisible(b));
+        if (el) { found = el; break; }
+      }
+    }
+    if (found) {
+      found.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => { found.focus(); found.click(); }, 80);
+      sendResponse({ success: true });
+    } else {
+      sendResponse({ success: false, error: `Button not found` });
+    }
+    return false;
   }
 });
