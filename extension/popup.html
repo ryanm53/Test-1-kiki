@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Page Agent</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      width: 340px;
+      padding: 16px;
+      background: #0f0f10;
+      color: #e2e2e2;
+    }
+
+    h1 {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: #a78bfa;
+      margin-bottom: 14px;
+    }
+
+    label {
+      display: block;
+      font-size: 10px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      margin-bottom: 5px;
+    }
+
+    input, textarea {
+      width: 100%;
+      background: #1a1a1d;
+      border: 1px solid #2e2e32;
+      border-radius: 6px;
+      color: #e2e2e2;
+      font-size: 13px;
+      padding: 8px 10px;
+      outline: none;
+      font-family: inherit;
+      transition: border-color 0.15s;
+    }
+
+    input:focus, textarea:focus { border-color: #7c3aed; }
+
+    textarea { resize: vertical; min-height: 60px; }
+
+    .row { margin-bottom: 12px; }
+
+    .key-row { display: flex; gap: 6px; align-items: flex-start; }
+    .key-row input { flex: 1; }
+
+    button {
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 8px 14px;
+      font-family: inherit;
+      transition: background 0.15s;
+    }
+
+    #saveKey {
+      background: #25252a;
+      color: #999;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+    #saveKey:hover { background: #2e2e35; color: #ccc; }
+
+    #runBtn {
+      width: 100%;
+      background: #7c3aed;
+      color: #fff;
+      padding: 10px;
+      margin-top: 2px;
+      font-size: 14px;
+    }
+    #runBtn:hover:not(:disabled) { background: #6d28d9; }
+    #runBtn:disabled { background: #25252a; color: #555; cursor: default; }
+
+    #status {
+      display: none;
+      margin-top: 12px;
+      font-size: 12px;
+      line-height: 1.6;
+      padding: 10px 12px;
+      border-radius: 6px;
+      word-break: break-word;
+    }
+
+    #status.running { background: #12122a; color: #818cf8; border: 1px solid #2a2a50; }
+    #status.success { background: #0a1f12; color: #4ade80; border: 1px solid #14532d; }
+    #status.error   { background: #1f0a0a; color: #f87171; border: 1px solid #7f1d1d; }
+
+    .reasoning {
+      color: #888;
+      font-style: italic;
+      margin-top: 4px;
+    }
+
+    .action-tag {
+      display: inline-block;
+      background: #1e293b;
+      color: #94a3b8;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-family: monospace;
+      font-size: 11px;
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Claude Page Agent</h1>
+
+  <div class="row">
+    <label>Anthropic API Key</label>
+    <div class="key-row">
+      <input type="password" id="apiKey" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
+      <button id="saveKey">Save</button>
+    </div>
+  </div>
+
+  <div class="row">
+    <label>Goal</label>
+    <textarea id="goal" rows="3" placeholder='e.g. "click the login button"'></textarea>
+  </div>
+
+  <button id="runBtn">Run</button>
+
+  <div id="status"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
