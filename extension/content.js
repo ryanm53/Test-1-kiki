@@ -14,7 +14,8 @@ const INTERACTIVE_SEL = [
   '[role="option"]',
   '[role="listitem"]',
   '[draggable="true"]',
-  '[contenteditable="true"]'
+  '[contenteditable="true"]',
+  '[data-automation-id]'
 ].join(', ');
 
 // Cached element list from the last scrape — execute() uses these references
@@ -467,7 +468,7 @@ async function execute(action) {
   // ── Presets dropdown ─────────────────────────────────────────────────────
   const presetSelect = shadow.getElementById('presetSelect');
   const PRESETS = [
-    { label: 'McGraw Hill - Answer + Confidence + Next', goal: 'Click the correct answer for this question. Then click the confidence button (High, High Confidence, or similar). Then click the button to go to the next question (Next, Continue, or similar). Do all three steps even if the answer was wrong.' },
+    { label: 'McGraw Hill - Answer + Confidence + Next', goal: 'Step 1: Click the correct answer for this multiple choice question. Step 2: Click the button with aria-label "High Confidence" (its visible text is "High"). Step 3: Click the button that advances to the next question — it may say "Next", "Continue", "Next Question", or similar. Complete all 3 steps in order even if the answer was wrong.' },
     { label: 'McGraw Hill - Answer only', goal: 'Look at the question on the page and click the correct answer' }
   ];
   PRESETS.forEach(p => {
