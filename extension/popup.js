@@ -83,7 +83,7 @@ chrome.storage.local.get(['apiKey', 'lastGoal'], ({ apiKey, lastGoal }) => {
 
 saveKeyBtn.addEventListener('click', () => {
   const key = apiKeyInput.value.trim();
-  if (!key) { showStatus('error', 'Paste your Gemini API key first.'); return; }
+  if (!key) { showStatus('error', 'Paste your Anthropic API key first.'); return; }
   chrome.storage.local.set({ apiKey: key }, () => {
     showStatus('success', 'API key saved.');
   });
@@ -112,7 +112,7 @@ runBtn.addEventListener('click', async () => {
 
   chrome.storage.local.set({ lastGoal: goal });
   setRunning(true);
-  showStatus('running', '<div class="status-label">Working</div>Consulting Gemini…', true);
+  showStatus('running', '<div class="status-label">Working</div>Consulting Claude…', true);
 
   chrome.runtime.sendMessage({ type: 'RUN_GOAL', goal, tabId: tab.id, refUrls }, result => {
     setRunning(false);
