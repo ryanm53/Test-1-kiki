@@ -468,7 +468,7 @@ async function execute(action) {
   // ── Presets dropdown ─────────────────────────────────────────────────────
   const presetSelect = shadow.getElementById('presetSelect');
   const PRESETS = [
-    { label: 'McGraw Hill - Answer + Confidence + Next', goal: 'Step 1: Click the correct answer for this multiple choice question. Step 2: Click the button with aria-label "High Confidence" (its visible text is "High"). Step 3: Click the button that advances to the next question — it may say "Next", "Continue", "Next Question", or similar. Complete all 3 steps in order even if the answer was wrong.' },
+    { label: 'McGraw Hill - Answer + Confidence + Next', goal: 'Step 1: Click the correct answer for this multiple choice question. Step 2: Click the button with aria-label "High Confidence" (visible text is "High") to submit your confidence rating. Step 3: Click the button whose text is "Next Question" (it has class "next-button") to advance. Complete all 3 steps in order even if the answer was wrong.' },
     { label: 'McGraw Hill - Answer only', goal: 'Look at the question on the page and click the correct answer' }
   ];
   PRESETS.forEach(p => {
