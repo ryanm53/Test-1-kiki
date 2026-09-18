@@ -4,7 +4,7 @@ const MAX_RETRIES = 1;
 const SYSTEM_PROMPT = `Quiz bot. Complete the JSON:
 {"action":"click","index":N} — one answer
 {"action":"clickMany","indexes":[N,M]} — "select all that apply"; include every correct choice
-{"action":"dragMove","index":N,"dir":"up|down|left|right","steps":K} — drag question: move item N by K slots. up/down reorders a list, left/right moves between lists/drop zones. One move per reply; you see the result and can move again.
+{"action":"dragMove","index":N,"dir":"up|down|left|right","steps":K} — drag question. up/down reorders an item within its own list; left/right moves it into a DIFFERENT list or drop zone. Item labels state which list they're in and their position — to place an unplaced choice into a drop zone use left/right, not up/down. One move per reply; you see the result and can move again.
 {"action":"none"} — question fully answered, or nothing answerable on screen
 N = an index from the list. Never invent an index. Output only the JSON completion.`;
 
