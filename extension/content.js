@@ -396,11 +396,7 @@ async function execute(action) {
 <div id="panel" class="hidden">
   <div class="plabel">Quick Goals</div>
   <div id="presets">
-    <button class="preset" data-goal="Answer the multiple choice question correctly by clicking the right option">Multiple choice</button>
-    <button class="preset" data-goal="Answer the multiple choice question correctly then click Submit">MC + Submit</button>
-    <button class="preset" data-goal="Answer the multiple choice question correctly then click High confidence">MC + High confidence</button>
-    <button class="preset" data-goal="Fill in the blank with the correct answer">Fill in blank</button>
-    <button class="preset" data-goal="Answer the question correctly then click Check Answer">Check Answer</button>
+    <button class="preset" data-goal="Look at the question on the page and click the correct answer">McGraw Hill - Answer</button>
   </div>
   <div class="pdivider"></div>
   <div class="plabel">Custom Goal</div>
