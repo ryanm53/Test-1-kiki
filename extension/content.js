@@ -224,7 +224,6 @@ async function execute(action) {
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-  /* Button cluster: edit pencil + FAB side by side */
   #btnRow {
     display: flex;
     align-items: center;
@@ -242,40 +241,40 @@ async function execute(action) {
     cursor: pointer;
     font-size: 18px;
     font-family: sans-serif;
-    box-shadow: 0 2px 14px rgba(56,189,248,0.4);
+    box-shadow: 0 2px 16px rgba(56,189,248,0.45);
     user-select: none;
     transition: transform 0.15s, opacity 0.15s;
     flex-shrink: 0;
   }
   #fab:hover { opacity: 0.88; transform: scale(1.07); }
   #fab.running { opacity: 0.7; animation: pulse 1s infinite; cursor: default; }
-  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.55; } }
 
   #editBtn {
     width: 30px; height: 30px;
-    background: #1e1e22;
-    border: 1px solid #2e2e32;
+    background: #1c1507;
+    border: 1px solid #38BDF8;
     border-radius: 50%;
-    color: rgba(235,235,245,0.45);
+    color: #C9A96E;
     font-size: 13px;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
-    box-shadow: 0 1px 6px rgba(0,0,0,0.4);
+    box-shadow: 0 1px 8px rgba(56,189,248,0.2);
     transition: color 0.15s, background 0.15s;
     flex-shrink: 0;
   }
-  #editBtn:hover { color: #38BDF8; background: #25252a; }
-  #editBtn.active { color: #38BDF8; border-color: rgba(56,189,248,0.4); }
+  #editBtn:hover { color: #38BDF8; background: #241e0c; }
+  #editBtn.active { color: #38BDF8; }
 
-  /* Toast above the button row */
+  /* Toast */
   #toast {
     position: absolute;
     bottom: 58px; left: 0;
     max-width: 240px;
-    padding: 8px 12px;
+    padding: 8px 14px;
     border-radius: 9px;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    font-size: 12px; line-height: 1.45;
+    font-size: 13px; font-weight: 600; line-height: 1.4;
     word-break: break-word;
     pointer-events: none;
     opacity: 0;
@@ -283,117 +282,104 @@ async function execute(action) {
     transition: opacity 0.2s, transform 0.2s;
   }
   #toast.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
-  #toast.running { background: rgba(56,189,248,0.12); color: #7DD3FC; border: 1px solid rgba(56,189,248,0.25); }
-  #toast.success { background: #0a1f12; color: #4ade80; border: 1px solid #14532d; }
+  #toast.running {
+    background: rgba(28,21,7,0.96);
+    color: #7DD3FC;
+    border: 1px solid rgba(56,189,248,0.45);
+  }
+  #toast.success {
+    background: rgba(28,21,7,0.96);
+    color: #C9A96E;
+    border: 1px solid #38BDF8;
+  }
 
-  /* Goal editor panel */
+  /* Settings panel */
   #panel {
     position: absolute; bottom: 58px; left: 0;
-    width: 255px;
-    background: #0f0f10;
-    border: 1px solid #2e2e32;
-    border-radius: 10px;
-    padding: 13px 13px 11px;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.55);
+    width: 260px;
+    background: #1c1507;
+    border: 1px solid #38BDF8;
+    border-radius: 12px;
+    padding: 13px 13px 12px;
+    box-shadow: 0 4px 28px rgba(56,189,248,0.15), 0 4px 24px rgba(0,0,0,0.5);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
   #panel.hidden { display: none; }
 
-  #panelLabel {
-    font-size: 10px; font-weight: 600; color: rgba(235,235,245,0.35);
+  .plabel {
+    font-size: 10px; font-weight: 600; color: #C9A96E;
     text-transform: uppercase; letter-spacing: 0.07em;
-    margin-bottom: 7px;
+    margin-bottom: 6px;
   }
+  .plabel span {
+    font-size: 9px; color: rgba(201,169,110,0.45);
+    font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: 4px;
+  }
+  .pdivider { height: 1px; background: rgba(56,189,248,0.18); margin: 10px 0; }
 
-  textarea {
-    width: 100%; background: #1a1a1d; border: 1px solid #2e2e32;
-    border-radius: 6px; color: #e2e2e2; font-size: 12px;
-    padding: 7px 9px; outline: none; resize: vertical;
-    min-height: 54px; font-family: inherit;
+  textarea, #msgInput {
+    width: 100%;
+    background: #130f04;
+    border: 1px solid rgba(56,189,248,0.3);
+    border-radius: 6px;
+    color: #f0ddb0;
+    font-size: 12px;
+    padding: 7px 9px;
+    outline: none;
+    font-family: inherit;
   }
-  textarea:focus { border-color: #38BDF8; }
+  textarea { resize: vertical; min-height: 54px; }
+  textarea:focus, #msgInput:focus { border-color: #38BDF8; }
+  textarea::placeholder, #msgInput::placeholder { color: rgba(201,169,110,0.3); }
 
   #saveGoalBtn {
-    width: 100%; margin-top: 8px; padding: 7px;
-    background: linear-gradient(135deg, #38BDF8, #0284C7); color: #fff; border: none;
-    border-radius: 6px; cursor: pointer; font-size: 12px;
-    font-weight: 500; font-family: inherit;
+    width: 100%; margin-top: 10px; padding: 8px;
+    background: linear-gradient(135deg, #38BDF8, #0284C7);
+    color: #fff; border: none;
+    border-radius: 7px; cursor: pointer; font-size: 12px;
+    font-weight: 600; font-family: inherit; letter-spacing: 0.01em;
     transition: opacity 0.15s;
-    box-shadow: 0 1px 8px rgba(56,189,248,0.3);
+    box-shadow: 0 1px 10px rgba(56,189,248,0.35);
   }
   #saveGoalBtn:hover { opacity: 0.88; }
 
-  /* Stuck overlay inside the toast area — full-screen overlay anchored to host */
+  /* Stuck overlay */
   #stuckOverlay {
     display: none; position: fixed; inset: 0;
-    background: rgba(0,0,0,0.6);
+    background: rgba(0,0,0,0.65);
     z-index: 2147483647;
     align-items: center; justify-content: center;
   }
   #stuckOverlay.visible { display: flex; }
   #stuckBox {
-    background: #1a1a1d; border: 1px solid #7f1d1d;
-    border-radius: 12px; padding: 20px 18px; text-align: center; width: 250px;
-    box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+    background: #1c1507;
+    border: 1px solid #38BDF8;
+    border-radius: 14px; padding: 22px 20px; text-align: center; width: 260px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(56,189,248,0.1);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
   #stuckIcon { font-size: 28px; margin-bottom: 8px; }
-  #stuckTitle { font-size: 14px; color: #f87171; font-weight: 600; margin-bottom: 6px; }
-  #stuckMsg { font-size: 11.5px; color: #888; margin-bottom: 14px; line-height: 1.45; word-break: break-word; }
+  #stuckTitle { font-size: 15px; color: #C9A96E; font-weight: 600; margin-bottom: 6px; }
+  #stuckMsg { font-size: 11.5px; color: rgba(201,169,110,0.5); margin-bottom: 16px; line-height: 1.5; word-break: break-word; }
   #stuckOk {
     background: linear-gradient(135deg, #38BDF8, #0284C7); color: #fff; border: none;
-    border-radius: 8px; padding: 8px 26px;
-    cursor: pointer; font-size: 13px; font-weight: 500; font-family: inherit;
-    box-shadow: 0 1px 8px rgba(56,189,248,0.3);
+    border-radius: 8px; padding: 9px 28px;
+    cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit;
+    box-shadow: 0 1px 10px rgba(56,189,248,0.35);
     transition: opacity 0.15s;
   }
   #stuckOk:hover { opacity: 0.88; }
-
-  /* Answer result panel */
-  #result {
-    position: absolute;
-    bottom: 58px; left: 0;
-    width: 255px;
-    background: #071a0e;
-    border: 1px solid rgba(74,222,128,0.22);
-    border-radius: 10px;
-    padding: 11px 28px 11px 13px;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.55);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  }
-  #result.hidden { display: none; }
-  #resultClose {
-    position: absolute; top: 7px; right: 9px;
-    background: none; border: none;
-    color: rgba(235,235,245,0.22); font-size: 15px;
-    cursor: pointer; padding: 2px 4px; line-height: 1;
-    font-family: sans-serif;
-  }
-  #resultClose:hover { color: rgba(235,235,245,0.55); }
-  #resultAnswer {
-    font-size: 14px; font-weight: 600;
-    color: #4ade80; line-height: 1.35;
-    margin-bottom: 4px;
-  }
-  #resultReason {
-    font-size: 11px;
-    color: rgba(235,235,245,0.38);
-    line-height: 1.45;
-  }
 </style>
 
 <div id="toast"></div>
 
 <div id="panel" class="hidden">
-  <div id="panelLabel">Saved Goal</div>
+  <div class="plabel">Goal</div>
   <textarea id="goalInput" rows="3" placeholder='e.g. "answer the question and click High confidence"'></textarea>
-  <button id="saveGoalBtn">Save Goal</button>
-</div>
-
-<div id="result" class="hidden">
-  <button id="resultClose">×</button>
-  <div id="resultAnswer"></div>
-  <div id="resultReason"></div>
+  <div class="pdivider"></div>
+  <div class="plabel">Success Message <span>5 words max · default: Done!</span></div>
+  <input type="text" id="msgInput" placeholder='e.g. Got it! or Correct!' maxlength="60" />
+  <button id="saveGoalBtn">Save</button>
 </div>
 
 <div id="btnRow">
@@ -415,27 +401,28 @@ async function execute(action) {
   const editBtn      = shadow.getElementById('editBtn');
   const panel        = shadow.getElementById('panel');
   const goalInput    = shadow.getElementById('goalInput');
+  const msgInput     = shadow.getElementById('msgInput');
   const saveGoalBtn  = shadow.getElementById('saveGoalBtn');
   const toast        = shadow.getElementById('toast');
   const stuckOverlay = shadow.getElementById('stuckOverlay');
   const stuckMsg     = shadow.getElementById('stuckMsg');
   const stuckOk      = shadow.getElementById('stuckOk');
-  const resultPanel  = shadow.getElementById('result');
-  const resultAnswer = shadow.getElementById('resultAnswer');
-  const resultReason = shadow.getElementById('resultReason');
-  const resultClose  = shadow.getElementById('resultClose');
 
-  let toastTimer  = null;
-  let resultTimer = null;
-  let isRunning   = false;
-  let savedGoal   = '';
+  let toastTimer = null;
+  let isRunning  = false;
+  let savedGoal  = '';
+  let customMsg  = '';
 
-  // Load saved goal on init
-  chrome.storage.local.get('lastGoal', ({ lastGoal }) => {
-    if (lastGoal) {
-      savedGoal = lastGoal;
-      goalInput.value = lastGoal;
-    }
+  // Load saved settings on init
+  chrome.storage.local.get(['lastGoal', 'successMsg'], ({ lastGoal, successMsg }) => {
+    if (lastGoal)   { savedGoal = lastGoal; goalInput.value = lastGoal; }
+    if (successMsg) { customMsg = successMsg; msgInput.value = successMsg; }
+  });
+
+  // Enforce 5-word limit on message input
+  msgInput.addEventListener('input', () => {
+    const words = msgInput.value.trim().split(/\s+/).filter(Boolean);
+    if (words.length > 5) msgInput.value = words.slice(0, 5).join(' ');
   });
 
   // Toggle goal editor panel
@@ -445,16 +432,19 @@ async function execute(action) {
     if (!hidden) goalInput.focus();
   });
 
-  // Save goal and close panel
+  // Save goal + message and close panel
   saveGoalBtn.addEventListener('click', () => {
     const val = goalInput.value.trim();
     if (!val) return;
     savedGoal = val;
-    chrome.storage.local.set({ lastGoal: val });
+    const words = msgInput.value.trim().split(/\s+/).filter(Boolean).slice(0, 5);
+    customMsg = words.join(' ');
+    msgInput.value = customMsg;
+    chrome.storage.local.set({ lastGoal: val, successMsg: customMsg });
     panel.classList.add('hidden');
     editBtn.classList.remove('active');
-    showToast('running', `Goal saved`);
-    setTimeout(() => hideToast(), 1800);
+    showToast('running', 'Saved');
+    setTimeout(() => hideToast(), 1500);
   });
 
   goalInput.addEventListener('keydown', e => {
@@ -478,10 +468,6 @@ async function execute(action) {
   });
 
   stuckOk.addEventListener('click', () => stuckOverlay.classList.remove('visible'));
-  resultClose.addEventListener('click', () => {
-    resultPanel.classList.add('hidden');
-    clearTimeout(resultTimer);
-  });
 
   function setRunning(on) {
     isRunning = on;
@@ -497,14 +483,6 @@ async function execute(action) {
 
   function hideToast() {
     toast.classList.remove('show');
-  }
-
-  function showResult(answer, reasoning) {
-    clearTimeout(resultTimer);
-    resultAnswer.textContent = answer;
-    resultReason.textContent = reasoning || '';
-    resultPanel.classList.remove('hidden');
-    resultTimer = setTimeout(() => resultPanel.classList.add('hidden'), 8000);
   }
 
   function showStuck(msg) {
@@ -530,7 +508,7 @@ async function execute(action) {
       return;
     }
     if (result.success) {
-      showToast('success', 'Done!');
+      showToast('success', customMsg || 'Done!');
       toastTimer = setTimeout(() => hideToast(), 2500);
     } else {
       showStuck(result.error ?? 'Unknown error.');
