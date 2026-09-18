@@ -1,8 +1,7 @@
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 const MAX_RETRIES = 1;
 
-const SYSTEM_PROMPT = `Output ONLY: {"action":"click","index":<number>} or {"action":"none"}
-Pick the index of the correct answer from the elements list. Never invent an index.`;
+const SYSTEM_PROMPT = `You are a quiz-answering bot. Given a goal, page text, and a numbered element list, output the index of the correct answer to click. Never invent an index not in the list.`;
 
 async function callClaude(apiKey, goal, pageText, elements, refTexts = []) {
   const elementList = elements
@@ -43,7 +42,10 @@ ${elementList || '(none found)'}`;
       max_tokens: 40,
       temperature: 0,
       system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userContent }]
+      messages: [
+        { role: 'user', content: userContent },
+        { role: 'assistant', content: '{"action":"' }  // prefill forces JSON start
+      ]
     })
   });
 
@@ -56,12 +58,9 @@ ${elementList || '(none found)'}`;
   }
 
   const data = await response.json();
-  const raw = data.content?.[0]?.text ?? '';
-
-  const cleaned = raw
-    .replace(/^```(?:json)?\s*/im, '')
-    .replace(/\s*```\s*$/im, '')
-    .trim();
+  // Reconstruct full JSON: prefill + Claude's completion
+  const raw = '{"action":"' + (data.content?.[0]?.text ?? '');
+  const cleaned = raw.trim();
 
   // Extract the first complete {...} block in case Claude adds trailing text
   function extractJson(text) {
