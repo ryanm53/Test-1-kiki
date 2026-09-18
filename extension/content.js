@@ -344,13 +344,39 @@ async function execute(action) {
     border-radius: 20px;
     color: #C9A96E;
     font-size: 11px;
-    padding: 4px 10px;
+    padding: 4px 8px 4px 10px;
     cursor: pointer;
     font-family: inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     transition: border-color 0.15s, background 0.15s;
   }
   .preset:hover { border-color: #38BDF8; background: #1c1507; }
   .preset.active { border-color: #38BDF8; background: #1c1507; color: #7DD3FC; }
+  .preset.custom { color: rgba(201,169,110,0.5); border-style: dashed; }
+  .pedit {
+    font-size: 10px; opacity: 0.4; line-height: 1;
+    padding: 1px 2px; border-radius: 3px;
+    transition: opacity 0.15s;
+  }
+  .pedit:hover { opacity: 1; }
+  .preset-edit-row {
+    display: flex; gap: 4px; align-items: center; width: 100%;
+  }
+  .preset-edit-row input {
+    flex: 1; background: #130f04; border: 1px solid #38BDF8;
+    border-radius: 10px; color: #f0ddb0; font-size: 11px;
+    padding: 3px 8px; outline: none; font-family: inherit;
+  }
+  .preset-edit-row button {
+    background: #130f04; border: 1px solid rgba(56,189,248,0.4);
+    border-radius: 10px; color: #C9A96E; font-size: 11px;
+    padding: 3px 7px; cursor: pointer; font-family: inherit;
+  }
+  .preset-edit-row button:hover { border-color: #38BDF8; color: #7DD3FC; }
+  .preset-del { color: rgba(255,100,100,0.6) !important; }
+  .preset-del:hover { color: #ff6b6b !important; border-color: #ff6b6b !important; }
 
   #saveGoalBtn {
     width: 100%; margin-top: 10px; padding: 8px;
@@ -395,9 +421,7 @@ async function execute(action) {
 
 <div id="panel" class="hidden">
   <div class="plabel">Quick Goals</div>
-  <div id="presets">
-    <button class="preset" data-goal="Look at the question on the page and click the correct answer">McGraw Hill - Answer</button>
-  </div>
+  <div id="presets"></div>
   <div class="pdivider"></div>
   <div class="plabel">Custom Goal</div>
   <textarea id="goalInput" rows="2" placeholder='or type your own goal…'></textarea>
@@ -439,19 +463,86 @@ async function execute(action) {
   let customMsg  = '';
 
   // Load saved settings on init
-  chrome.storage.local.get(['lastGoal', 'successMsg'], ({ lastGoal, successMsg }) => {
+  chrome.storage.local.get(['lastGoal', 'successMsg', 'presets'], ({ lastGoal, successMsg, presets: saved }) => {
+    presets = Array.isArray(saved) && saved.length ? saved : [...DEFAULT_PRESETS];
+    renderPresets();
     if (lastGoal)   { savedGoal = lastGoal; goalInput.value = lastGoal; }
     if (successMsg) { customMsg = successMsg; msgInput.value = successMsg; }
   });
 
-  // Preset goal chips
-  shadow.querySelectorAll('.preset').forEach(btn => {
-    btn.addEventListener('click', () => {
-      goalInput.value = btn.dataset.goal;
-      shadow.querySelectorAll('.preset').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+  // ── Presets ──────────────────────────────────────────────────────────────
+  const presetsDiv = shadow.getElementById('presets');
+  const DEFAULT_PRESETS = [
+    { label: 'McGraw Hill - Answer', goal: 'Look at the question on the page and click the correct answer' }
+  ];
+  let presets = [];
+  let activePresetIdx = null;
+
+  function savePresets() {
+    chrome.storage.local.set({ presets });
+  }
+
+  function renderPresets() {
+    presetsDiv.innerHTML = '';
+
+    presets.forEach((p, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'preset' + (activePresetIdx === i ? ' active' : '');
+      btn.innerHTML = `<span>${p.label}</span><span class="pedit" title="Edit">✎</span>`;
+
+      btn.addEventListener('click', e => {
+        if (e.target.classList.contains('pedit')) { startEditPreset(i); return; }
+        goalInput.value = p.goal;
+        activePresetIdx = i;
+        renderPresets();
+      });
+      presetsDiv.appendChild(btn);
     });
-  });
+
+    // Custom chip
+    const customBtn = document.createElement('button');
+    customBtn.className = 'preset custom' + (activePresetIdx === null ? ' active' : '');
+    customBtn.textContent = '+ Custom';
+    customBtn.addEventListener('click', () => {
+      goalInput.value = '';
+      goalInput.focus();
+      activePresetIdx = null;
+      renderPresets();
+    });
+    presetsDiv.appendChild(customBtn);
+  }
+
+  function startEditPreset(i) {
+    presetsDiv.innerHTML = '';
+    const row = document.createElement('div');
+    row.className = 'preset-edit-row';
+    row.innerHTML = `
+      <input id="peditInput" value="${presets[i].label.replace(/"/g,'&quot;')}" placeholder="Preset name" />
+      <button id="peditSave">✓</button>
+      <button id="peditDel" class="preset-del">×</button>
+    `;
+    presetsDiv.appendChild(row);
+    const inp = row.querySelector('#peditInput');
+    inp.focus(); inp.select();
+
+    row.querySelector('#peditSave').addEventListener('click', () => {
+      const newLabel = inp.value.trim();
+      if (!newLabel) return;
+      presets[i].label = newLabel;
+      if (activePresetIdx === i && goalInput.value.trim()) presets[i].goal = goalInput.value.trim();
+      savePresets();
+      renderPresets();
+    });
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') row.querySelector('#peditSave').click(); if (e.key === 'Escape') renderPresets(); });
+
+    row.querySelector('#peditDel').addEventListener('click', () => {
+      presets.splice(i, 1);
+      if (activePresetIdx === i) activePresetIdx = null;
+      else if (activePresetIdx > i) activePresetIdx--;
+      savePresets();
+      renderPresets();
+    });
+  }
 
   // Enforce 5-word limit on message input
   msgInput.addEventListener('input', () => {
@@ -474,6 +565,10 @@ async function execute(action) {
     const words = msgInput.value.trim().split(/\s+/).filter(Boolean).slice(0, 5);
     customMsg = words.join(' ');
     msgInput.value = customMsg;
+    if (activePresetIdx !== null && presets[activePresetIdx]) {
+      presets[activePresetIdx].goal = val;
+      savePresets();
+    }
     chrome.storage.local.set({ lastGoal: val, successMsg: customMsg });
     panel.classList.add('hidden');
     editBtn.classList.remove('active');
