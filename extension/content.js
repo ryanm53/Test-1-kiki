@@ -500,6 +500,8 @@ async function execute(action) {
     chrome.runtime.sendMessage({ type: 'RUN_GOAL', goal: savedGoal }, handleResult);
   }
 
+  let rateLimitTimer = null;
+
   function handleResult(result) {
     setRunning(false);
     hideToast();
@@ -511,8 +513,28 @@ async function execute(action) {
       showToast('success', customMsg || 'Done!');
       toastTimer = setTimeout(() => hideToast(), 2500);
     } else {
-      showStuck(result.error ?? 'Unknown error.');
+      const err = result.error ?? 'Unknown error.';
+      if (err.includes('Rate limit')) {
+        startRateLimitCountdown();
+      } else {
+        showStuck(err);
+      }
     }
+  }
+
+  function startRateLimitCountdown() {
+    clearTimeout(rateLimitTimer);
+    let secs = 65;
+    function tick() {
+      showToast('running', `Rate limited — retrying in ${secs}s…`);
+      if (secs <= 0) {
+        triggerRun();
+        return;
+      }
+      secs--;
+      rateLimitTimer = setTimeout(tick, 1000);
+    }
+    tick();
   }
 
   // ── Auto-run on new question ─────────────────────────────────────────────
