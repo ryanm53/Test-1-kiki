@@ -592,6 +592,23 @@ async function execute(action) {
     stuckOverlay.classList.add('visible');
   }
 
+  // Poll until page content changes (new question loaded), then fire.
+  // Falls back after 5s so we never hang forever.
+  function waitForPageChange(snapText) {
+    const deadline = Date.now() + 5000;
+    function check() {
+      if (loopPaused || !loopMode) return;
+      const root = document.querySelector('[role="main"], main, article, form') ?? document.body;
+      const now = (root.innerText ?? '').slice(0, 400);
+      if (now !== snapText || Date.now() > deadline) {
+        triggerRun();
+      } else {
+        setTimeout(check, 150);
+      }
+    }
+    setTimeout(check, 150);
+  }
+
   function triggerRun() {
     if (isRunning || !savedGoal) return;
     lastRunAt = Date.now();
@@ -613,10 +630,10 @@ async function execute(action) {
     if (result.success) {
       loopCount++;
       if (loopMode && !loopPaused) {
-        showToast('success', `Done #${loopCount} — next in 2s…`);
-        toastTimer = setTimeout(() => {
-          if (!loopPaused) triggerRun();
-        }, 2000);
+        showToast('success', `Done #${loopCount} — waiting for next…`);
+        const root = document.querySelector('[role="main"], main, article, form') ?? document.body;
+        const snapText = (root.innerText ?? '').slice(0, 400);
+        waitForPageChange(snapText);
       } else if (loopMode && loopPaused) {
         showToast('running', `Done #${loopCount} — paused`);
       } else {
