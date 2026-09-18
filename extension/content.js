@@ -162,6 +162,32 @@ async function execute(action) {
       return { success: true };
     }
 
+    // ── Multi-select ───────────────────────────────────────────────────────
+    if (action.action === 'clickMany') {
+      const { indexes } = action;
+      if (!Array.isArray(indexes) || indexes.length === 0) {
+        return { success: false, error: 'clickMany requires a non-empty indexes array' };
+      }
+      for (const idx of indexes) {
+        if (typeof idx !== 'number' || idx < 0 || idx >= _lastElements.length) {
+          return { success: false, error: `Index ${idx} out of range (${_lastElements.length} elements)` };
+        }
+        const el = _lastElements[idx];
+        if (!document.contains(el)) {
+          return { success: false, error: `Element [${idx}] is no longer in the DOM` };
+        }
+        // Skip choices already selected, so we never toggle one back off
+        if (el.checked === true || el.getAttribute('aria-checked') === 'true') continue;
+
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await new Promise(r => setTimeout(r, 120));
+        el.focus();
+        el.click();
+        await new Promise(r => setTimeout(r, 250));
+      }
+      return { success: true };
+    }
+
     // ── Click / Fill ───────────────────────────────────────────────────────
     const { index } = action;
     if (typeof index !== 'number' || index < 0 || index >= _lastElements.length) {
@@ -454,24 +480,34 @@ async function execute(action) {
   let isRunning     = false;
   let savedGoal     = '';
   let savedPostClicks = [];
+  let savedPresetIndex = null; // null = user typed a custom goal
   let customMsg     = '';
   let loopMode      = false;
   let loopPaused    = false;
   let loopCount     = 0;
 
-  // Load saved settings on init; default to full preset if nothing saved yet
-  chrome.storage.local.get(['lastGoal', 'lastPostClicks', 'successMsg'], ({ lastGoal, lastPostClicks, successMsg }) => {
-    if (lastGoal) {
+  // Load saved settings on init. If a preset was selected (rather than a custom
+  // goal typed by hand), read it fresh from PRESETS so preset improvements reach
+  // existing installs without needing to re-save.
+  chrome.storage.local.get(['lastGoal', 'lastPostClicks', 'lastPresetIndex', 'successMsg'], ({ lastGoal, lastPostClicks, lastPresetIndex, successMsg }) => {
+    const preset = PRESETS[lastPresetIndex];
+    if (preset) {
+      savedPresetIndex = lastPresetIndex;
+      savedGoal = preset.goal;
+      savedPostClicks = preset.postClicks;
+      presetSelect.value = String(lastPresetIndex);
+    } else if (lastGoal) {
       savedGoal = lastGoal;
-      goalInput.value = lastGoal;
-      savedPostClicks = Array.isArray(lastPostClicks) ? lastPostClicks : PRESETS[0].postClicks;
+      savedPostClicks = Array.isArray(lastPostClicks) ? lastPostClicks : [];
     } else {
-      // First run — auto-load the full preset
+      // First run — default to the full preset
+      savedPresetIndex = 0;
       savedGoal = PRESETS[0].goal;
       savedPostClicks = PRESETS[0].postClicks;
-      goalInput.value = savedGoal;
-      chrome.storage.local.set({ lastGoal: savedGoal, lastPostClicks: savedPostClicks });
+      presetSelect.value = '0';
+      chrome.storage.local.set({ lastPresetIndex: 0 });
     }
+    goalInput.value = savedGoal;
     if (successMsg) { customMsg = successMsg; msgInput.value = successMsg; }
   });
 
@@ -480,7 +516,7 @@ async function execute(action) {
   const PRESETS = [
     {
       label: 'McGraw Hill — Full (Answer + Confidence + Next)',
-      goal: 'Look at the question and all the answer choices on this page. Click the single best correct answer.',
+      goal: 'Answer the question. Click the correct choice — or if it says "select all that apply", select every correct choice.',
       postClicks: [
         { label: 'High Confidence', candidates: [{ selector: '[data-automation-id="confidence-buttons--high_confidence"]' }, { ariaLabel: 'High Confidence' }] },
         { label: 'Next Question',   candidates: [{ selector: '.next-button' }, { text: 'Next Question' }, { text: 'Next' }] }
@@ -488,7 +524,7 @@ async function execute(action) {
     },
     {
       label: 'McGraw Hill — Answer only',
-      goal: 'Look at the question and all the answer choices on this page. Click the single best correct answer.',
+      goal: 'Answer the question. Click the correct choice — or if it says "select all that apply", select every correct choice.',
       postClicks: []
     }
   ];
@@ -499,8 +535,10 @@ async function execute(action) {
     presetSelect.appendChild(opt);
   });
   presetSelect.addEventListener('change', () => {
-    const preset = PRESETS[parseInt(presetSelect.value)];
+    const i = parseInt(presetSelect.value);
+    const preset = PRESETS[i];
     if (preset) {
+      savedPresetIndex = i;
       goalInput.value = preset.goal;
       savedPostClicks = preset.postClicks || [];
     }
@@ -524,10 +562,20 @@ async function execute(action) {
     const val = goalInput.value.trim();
     if (!val) return;
     savedGoal = val;
+    // If the text still matches its preset, keep tracking the preset so future
+    // preset updates apply automatically. If edited, treat it as a custom goal.
+    if (savedPresetIndex !== null && PRESETS[savedPresetIndex]?.goal !== val) {
+      savedPresetIndex = null;
+    }
     const words = msgInput.value.trim().split(/\s+/).filter(Boolean).slice(0, 5);
     customMsg = words.join(' ');
     msgInput.value = customMsg;
-    chrome.storage.local.set({ lastGoal: val, lastPostClicks: savedPostClicks, successMsg: customMsg });
+    chrome.storage.local.set({
+      lastGoal: val,
+      lastPostClicks: savedPostClicks,
+      lastPresetIndex: savedPresetIndex,
+      successMsg: customMsg
+    });
     panel.classList.add('hidden');
     editBtn.classList.remove('active');
     showToast('running', 'Saved');

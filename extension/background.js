@@ -1,10 +1,11 @@
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 const MAX_RETRIES = 1;
 
-const SYSTEM_PROMPT = `You are a quiz-answering bot. Complete this JSON to click the correct answer:
-{"action":"click","index":N} — where N is the element's index number from the list
-or {"action":"none"} if no correct answer exists on screen
-Never invent an index not in the list. Output nothing except the JSON completion.`;
+const SYSTEM_PROMPT = `Quiz bot. Complete the JSON:
+{"action":"click","index":N} — one answer
+{"action":"clickMany","indexes":[N,M]} — "select all that apply"; include every correct choice
+{"action":"none"} — no answer on screen
+N = an index from the list. Never invent an index. Output only the JSON completion.`;
 
 async function callClaude(apiKey, goal, pageText, elements, refTexts = []) {
   const elementList = elements
@@ -42,7 +43,7 @@ ${elementList || '(none found)'}`;
     },
     body: JSON.stringify({
       model: CLAUDE_MODEL,
-      max_tokens: 40,
+      max_tokens: 60,
       temperature: 0,
       system: SYSTEM_PROMPT,
       messages: [
@@ -90,11 +91,19 @@ ${elementList || '(none found)'}`;
     throw new Error(`Claude returned invalid JSON: ${cleaned.slice(0, 300)}`);
   }
 
-  if (!['click', 'none'].includes(parsed.action)) {
+  if (!['click', 'clickMany', 'none'].includes(parsed.action)) {
     throw new Error(`Unexpected action: ${JSON.stringify(parsed.action)}`);
   }
   if (parsed.action === 'click' && typeof parsed.index !== 'number') {
     throw new Error(`click requires a numeric index, got: ${JSON.stringify(parsed.index)}`);
+  }
+  if (parsed.action === 'clickMany') {
+    const ok = Array.isArray(parsed.indexes)
+      && parsed.indexes.length > 0
+      && parsed.indexes.every(n => typeof n === 'number');
+    if (!ok) {
+      throw new Error(`clickMany requires a non-empty numeric indexes array, got: ${JSON.stringify(parsed.indexes)}`);
+    }
   }
 
   return parsed;
