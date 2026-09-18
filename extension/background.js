@@ -1,4 +1,4 @@
-const GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_MODEL = 'gemini-3.6-flash';
 const MAX_RETRIES = 2;
 
 const SYSTEM_PROMPT = `You are a browser automation assistant. You will be given:
