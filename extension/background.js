@@ -58,7 +58,7 @@ ${elementList || '(none found)'}`;
     },
     body: JSON.stringify({
       model: CLAUDE_MODEL,
-      max_tokens: 128,
+      max_tokens: 256,
       temperature: 0,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userContent }]
@@ -81,10 +81,28 @@ ${elementList || '(none found)'}`;
     .replace(/\s*```\s*$/im, '')
     .trim();
 
-  let parsed;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch (_) {
+  // Extract the first complete {...} block in case Claude adds trailing text
+  function extractJson(text) {
+    try { return JSON.parse(text); } catch (_) {}
+    const start = text.indexOf('{');
+    if (start === -1) return null;
+    let depth = 0, inStr = false, esc = false;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (esc) { esc = false; continue; }
+      if (ch === '\\' && inStr) { esc = true; continue; }
+      if (ch === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (ch === '{') depth++;
+      if (ch === '}' && --depth === 0) {
+        try { return JSON.parse(text.slice(start, i + 1)); } catch (_) { return null; }
+      }
+    }
+    return null;
+  }
+
+  const parsed = extractJson(cleaned);
+  if (!parsed) {
     throw new Error(`Claude returned invalid JSON: ${cleaned.slice(0, 300)}`);
   }
 
