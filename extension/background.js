@@ -145,7 +145,7 @@ function sendToTab(tabId, msg) {
   });
 }
 
-const MAX_STEPS = 6; // max sequential actions per run (answer + confidence + next + buffer)
+const MAX_STEPS = 3; // exactly one question cycle: answer + confidence + next
 
 async function runGoal(apiKey, goal, tabId, refUrls = []) {
   const refTexts = await getReferenceContent(refUrls);

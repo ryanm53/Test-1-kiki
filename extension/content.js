@@ -251,7 +251,7 @@ async function execute(action) {
   #fab.running { opacity: 0.7; animation: pulse 1s infinite; cursor: default; }
   @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.55; } }
 
-  #editBtn, #loopBtn {
+  #editBtn, #loopBtn, #pauseBtn {
     width: 30px; height: 30px;
     background: #1c1507;
     border: 1px solid #38BDF8;
@@ -264,13 +264,21 @@ async function execute(action) {
     transition: color 0.15s, background 0.15s;
     flex-shrink: 0;
   }
-  #editBtn:hover, #loopBtn:hover { color: #38BDF8; background: #241e0c; }
+  #editBtn:hover, #loopBtn:hover, #pauseBtn:hover { color: #38BDF8; background: #241e0c; }
   #editBtn.active { color: #38BDF8; }
   #loopBtn.active {
     color: #fff;
     background: #0284C7;
     border-color: #38BDF8;
     box-shadow: 0 0 10px rgba(56,189,248,0.5);
+  }
+  #pauseBtn { display: none; }
+  #pauseBtn.visible { display: flex; }
+  #pauseBtn.paused {
+    color: #fff;
+    background: #b45309;
+    border-color: #f59e0b;
+    box-shadow: 0 0 10px rgba(245,158,11,0.5);
   }
 
   /* Toast */
@@ -427,6 +435,7 @@ async function execute(action) {
 <div id="btnRow">
   <button id="editBtn" title="Edit saved goal">✎</button>
   <button id="loopBtn" title="Loop mode: auto-run on each new question">↺</button>
+  <button id="pauseBtn" title="Pause / resume loop">⏸</button>
   <button id="fab" title="Run saved goal">⚡</button>
 </div>
 
@@ -443,6 +452,7 @@ async function execute(action) {
   const fab          = shadow.getElementById('fab');
   const editBtn      = shadow.getElementById('editBtn');
   const loopBtn      = shadow.getElementById('loopBtn');
+  const pauseBtn     = shadow.getElementById('pauseBtn');
   const panel        = shadow.getElementById('panel');
   const goalInput    = shadow.getElementById('goalInput');
   const msgInput     = shadow.getElementById('msgInput');
@@ -457,6 +467,7 @@ async function execute(action) {
   let savedGoal  = '';
   let customMsg  = '';
   let loopMode   = false;
+  let loopPaused = false;
   let loopCount  = 0;
 
   // Load saved settings on init
@@ -468,7 +479,7 @@ async function execute(action) {
   // ── Presets dropdown ─────────────────────────────────────────────────────
   const presetSelect = shadow.getElementById('presetSelect');
   const PRESETS = [
-    { label: 'McGraw Hill - Answer + Confidence + Next', goal: 'Step 1: Click the correct answer for this multiple choice question. Step 2: Click the button with aria-label "High Confidence" (visible text is "High") to submit your confidence rating. Step 3: Click the button whose text is "Next Question" (it has class "next-button") to advance. Complete all 3 steps in order even if the answer was wrong.' },
+    { label: 'McGraw Hill - Answer + Confidence + Next', goal: 'Step 1: Click the correct answer for this multiple choice question. Step 2: Click the button with aria-label "High Confidence" (visible text is "High") to submit your confidence rating. Step 3: Click the button whose text is "Next Question" (class "next-button") to advance. After completing all 3 steps return action "none" — do not try to answer the next question.' },
     { label: 'McGraw Hill - Answer only', goal: 'Look at the question on the page and click the correct answer' }
   ];
   PRESETS.forEach(p => {
@@ -535,9 +546,28 @@ async function execute(action) {
   loopBtn.addEventListener('click', () => {
     loopMode = !loopMode;
     loopCount = 0;
+    loopPaused = false;
     loopBtn.classList.toggle('active', loopMode);
+    pauseBtn.classList.toggle('visible', loopMode);
+    pauseBtn.classList.remove('paused');
+    pauseBtn.title = 'Pause loop';
+    pauseBtn.textContent = '⏸';
     showToast('running', loopMode ? 'Loop ON — will auto-continue' : 'Loop OFF');
     setTimeout(() => hideToast(), 1800);
+  });
+
+  pauseBtn.addEventListener('click', () => {
+    loopPaused = !loopPaused;
+    pauseBtn.classList.toggle('paused', loopPaused);
+    pauseBtn.textContent = loopPaused ? '▶' : '⏸';
+    pauseBtn.title = loopPaused ? 'Resume loop' : 'Pause loop';
+    if (loopPaused) {
+      clearTimeout(toastTimer);
+      showToast('running', 'Loop paused — press ▶ to resume');
+    } else {
+      showToast('running', 'Resuming…');
+      setTimeout(() => triggerRun(), 500);
+    }
   });
 
   function setRunning(on) {
@@ -582,9 +612,13 @@ async function execute(action) {
     }
     if (result.success) {
       loopCount++;
-      if (loopMode) {
+      if (loopMode && !loopPaused) {
         showToast('success', `Done #${loopCount} — next in 2s…`);
-        toastTimer = setTimeout(() => triggerRun(), 2000);
+        toastTimer = setTimeout(() => {
+          if (!loopPaused) triggerRun();
+        }, 2000);
+      } else if (loopMode && loopPaused) {
+        showToast('running', `Done #${loopCount} — paused`);
       } else {
         showToast('success', customMsg || 'Done!');
         toastTimer = setTimeout(() => hideToast(), 2500);
