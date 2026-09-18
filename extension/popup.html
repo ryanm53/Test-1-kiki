@@ -5,262 +5,402 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Page Agent</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      width: 340px;
-      padding: 16px;
-      background: #0f0f10;
-      color: #e2e2e2;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+      width: 360px;
+      background: #1c1c1e;
+      color: #f5f5f7;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
     }
 
-    h1 {
-      font-size: 13px;
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 18px 18px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+    }
+    .header-icon {
+      width: 32px; height: 32px;
+      background: linear-gradient(145deg, #7c3aed, #5b21b6);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+      box-shadow: 0 2px 8px rgba(124,58,237,0.4);
+    }
+    .header-text h1 {
+      font-size: 15px;
       font-weight: 600;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      color: #a78bfa;
-      margin-bottom: 14px;
+      color: #f5f5f7;
+      letter-spacing: -0.01em;
+    }
+    .header-text p {
+      font-size: 11px;
+      color: rgba(235,235,245,0.4);
+      margin-top: 1px;
+      letter-spacing: 0;
     }
 
-    label {
-      display: block;
-      font-size: 10px;
-      color: #666;
+    /* ── Main content ── */
+    .content { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+
+    /* ── Section labels ── */
+    .field-label {
+      font-size: 11px;
+      font-weight: 500;
+      color: rgba(235,235,245,0.5);
       text-transform: uppercase;
       letter-spacing: 0.07em;
-      margin-bottom: 5px;
+      margin-bottom: 6px;
     }
 
-    input, textarea {
-      width: 100%;
-      background: #1a1a1d;
-      border: 1px solid #2e2e32;
-      border-radius: 6px;
-      color: #e2e2e2;
-      font-size: 13px;
-      padding: 8px 10px;
-      outline: none;
-      font-family: inherit;
-      transition: border-color 0.15s;
+    /* ── Input card style ── */
+    .input-card {
+      background: #2c2c2e;
+      border-radius: 12px;
+      overflow: hidden;
     }
 
-    input:focus, textarea:focus { border-color: #7c3aed; }
-
-    textarea { resize: vertical; min-height: 60px; }
-
-    .row { margin-bottom: 12px; }
-
-    .key-row { display: flex; gap: 6px; align-items: flex-start; }
-    .key-row input { flex: 1; }
-
-    button {
+    /* API key row */
+    .key-row {
+      display: flex;
+      align-items: center;
+    }
+    .key-row input {
+      flex: 1;
+      background: transparent;
       border: none;
-      border-radius: 6px;
-      cursor: pointer;
+      outline: none;
+      color: #f5f5f7;
+      font-size: 13px;
+      font-family: 'SF Mono', ui-monospace, monospace;
+      padding: 11px 12px;
+      letter-spacing: 0.02em;
+    }
+    .key-row input::placeholder { color: rgba(235,235,245,0.25); letter-spacing: 0; }
+    .key-divider { width: 1px; height: 20px; background: rgba(255,255,255,0.08); flex-shrink: 0; }
+    #saveKey {
+      background: transparent;
+      border: none;
+      color: #7c5af6;
       font-size: 13px;
       font-weight: 500;
-      padding: 8px 14px;
       font-family: inherit;
-      transition: background 0.15s;
-    }
-
-    #saveKey {
-      background: #25252a;
-      color: #999;
-      flex-shrink: 0;
+      padding: 11px 14px;
+      cursor: pointer;
       white-space: nowrap;
+      transition: color 0.15s;
     }
-    #saveKey:hover { background: #2e2e35; color: #ccc; }
+    #saveKey:hover { color: #9f7ffe; }
 
-    #runBtn {
+    /* Goal textarea */
+    textarea {
       width: 100%;
-      background: #7c3aed;
-      color: #fff;
-      padding: 10px;
-      margin-top: 2px;
-      font-size: 14px;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: #f5f5f7;
+      font-size: 13.5px;
+      font-family: inherit;
+      line-height: 1.55;
+      padding: 11px 12px;
+      resize: none;
+      min-height: 72px;
     }
-    #runBtn:hover:not(:disabled) { background: #6d28d9; }
-    #runBtn:disabled { background: #25252a; color: #555; cursor: default; }
+    textarea::placeholder { color: rgba(235,235,245,0.25); }
 
-    #status {
-      display: none;
-      margin-top: 12px;
-      font-size: 12px;
-      line-height: 1.6;
-      padding: 10px 12px;
-      border-radius: 6px;
-      word-break: break-word;
-    }
-
-    #status.running { background: #12122a; color: #818cf8; border: 1px solid #2a2a50; }
-    #status.success { background: #0a1f12; color: #4ade80; border: 1px solid #14532d; }
-    #status.error   { background: #1f0a0a; color: #f87171; border: 1px solid #7f1d1d; }
-
-    .reasoning {
-      color: #888;
-      font-style: italic;
-      margin-top: 4px;
-    }
-
-    .action-tag {
-      display: inline-block;
-      background: #1e293b;
-      color: #94a3b8;
-      border-radius: 4px;
-      padding: 1px 6px;
-      font-family: monospace;
-      font-size: 11px;
-      margin-bottom: 4px;
-    }
-
-    /* Reference tabs */
+    /* ── Reference tabs section ── */
     .ref-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       cursor: pointer;
       user-select: none;
+      padding: 2px 0;
     }
-    .ref-header label { cursor: pointer; margin: 0; }
-    .ref-toggle {
+    .ref-header-left { display: flex; align-items: center; gap: 6px; }
+    .ref-header .field-label { margin: 0; }
+    .ref-badge {
+      background: rgba(124,90,246,0.25);
+      color: #9f7ffe;
       font-size: 10px;
-      color: #555;
-      transition: transform 0.15s;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 20px;
     }
-    .ref-toggle.open { transform: rotate(180deg); }
-    .ref-body { margin-top: 8px; }
-    .ref-add-row { display: flex; gap: 6px; margin-bottom: 6px; }
-    .ref-add-row input { flex: 1; font-size: 12px; }
-    #addRef {
-      background: #25252a;
-      color: #999;
-      flex-shrink: 0;
+    .ref-chevron {
+      font-size: 11px;
+      color: rgba(235,235,245,0.3);
+      transition: transform 0.2s;
+    }
+    .ref-chevron.open { transform: rotate(180deg); }
+
+    .ref-body { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+
+    .ref-add-row { display: flex; gap: 6px; }
+    .ref-add-row .input-card { flex: 1; }
+    .ref-add-row input {
+      background: transparent;
+      border: none;
+      outline: none;
+      width: 100%;
+      color: #f5f5f7;
       font-size: 12px;
-      padding: 6px 10px;
+      font-family: 'SF Mono', ui-monospace, monospace;
+      padding: 9px 11px;
     }
-    #addRef:hover { background: #2e2e35; color: #ccc; }
-    .ref-list { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+    .ref-add-row input::placeholder { color: rgba(235,235,245,0.25); letter-spacing: 0; font-family: inherit; }
+    #addRef {
+      background: #2c2c2e;
+      border: none;
+      border-radius: 10px;
+      color: #7c5af6;
+      font-size: 13px;
+      font-weight: 500;
+      font-family: inherit;
+      padding: 9px 14px;
+      cursor: pointer;
+      transition: color 0.15s, background 0.15s;
+      white-space: nowrap;
+    }
+    #addRef:hover { color: #9f7ffe; background: #38383a; }
+
+    .ref-list { display: flex; flex-direction: column; gap: 4px; list-style: none; }
     .ref-item {
       display: flex;
       align-items: center;
-      gap: 6px;
-      background: #1a1a1d;
-      border: 1px solid #2e2e32;
-      border-radius: 5px;
-      padding: 5px 8px;
-      font-size: 11px;
-      color: #888;
+      gap: 8px;
+      background: #2c2c2e;
+      border-radius: 9px;
+      padding: 8px 10px 8px 12px;
     }
     .ref-item span {
       flex: 1;
+      font-size: 11.5px;
+      font-family: 'SF Mono', ui-monospace, monospace;
+      color: rgba(235,235,245,0.55);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .ref-item button {
       background: none;
-      color: #555;
-      font-size: 14px;
-      padding: 0 2px;
+      border: none;
+      color: rgba(235,235,245,0.25);
+      font-size: 16px;
       line-height: 1;
+      cursor: pointer;
+      padding: 0 2px;
+      transition: color 0.15s;
       flex-shrink: 0;
     }
-    .ref-item button:hover { color: #f87171; }
-    .ref-empty { font-size: 11px; color: #444; font-style: italic; }
-    .ref-count {
-      font-size: 10px;
-      color: #555;
-      font-weight: normal;
-      text-transform: none;
-      letter-spacing: 0;
+    .ref-item button:hover { color: #ff6b6b; }
+    .ref-empty {
+      font-size: 12px;
+      color: rgba(235,235,245,0.25);
+      text-align: center;
+      padding: 6px 0 2px;
     }
 
-    /* Stuck modal */
+    /* ── Run button ── */
+    #runBtn {
+      width: 100%;
+      background: linear-gradient(135deg, #7c3aed, #6d28d9);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 13px;
+      font-size: 15px;
+      font-weight: 600;
+      font-family: inherit;
+      letter-spacing: -0.01em;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+      box-shadow: 0 2px 12px rgba(124,58,237,0.35);
+    }
+    #runBtn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+    #runBtn:active:not(:disabled) { transform: translateY(0); opacity: 0.95; }
+    #runBtn:disabled {
+      background: #2c2c2e;
+      color: rgba(235,235,245,0.25);
+      box-shadow: none;
+      cursor: default;
+      transform: none;
+    }
+
+    /* ── Status pill ── */
+    #status {
+      display: none;
+      font-size: 12.5px;
+      line-height: 1.5;
+      padding: 10px 13px;
+      border-radius: 10px;
+      word-break: break-word;
+    }
+    #status.running {
+      background: rgba(99,102,241,0.12);
+      color: #a5b4fc;
+      border: 1px solid rgba(99,102,241,0.2);
+    }
+    #status.success {
+      background: rgba(52,199,89,0.1);
+      color: #34c759;
+      border: 1px solid rgba(52,199,89,0.2);
+    }
+    #status.error {
+      background: rgba(255,69,58,0.1);
+      color: #ff453a;
+      border: 1px solid rgba(255,69,58,0.2);
+    }
+
+    .status-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      opacity: 0.7;
+      margin-bottom: 3px;
+    }
+    .action-chip {
+      display: inline-block;
+      background: rgba(255,255,255,0.08);
+      border-radius: 5px;
+      padding: 1px 7px;
+      font-family: 'SF Mono', ui-monospace, monospace;
+      font-size: 11px;
+      margin-bottom: 4px;
+    }
+    .reasoning { opacity: 0.75; font-style: italic; }
+
+    /* ── Stuck modal ── */
     #stuckOverlay {
       display: none;
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.7);
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
       z-index: 100;
       align-items: center;
       justify-content: center;
+      padding: 20px;
     }
     #stuckOverlay.visible { display: flex; }
+
     #stuckBox {
-      background: #1a1a1d;
-      border: 1px solid #7f1d1d;
-      border-radius: 10px;
-      padding: 20px 18px 16px;
-      width: 280px;
+      background: #2c2c2e;
+      border-radius: 16px;
+      padding: 22px 20px 18px;
+      width: 100%;
       text-align: center;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+    .stuck-icon {
+      font-size: 32px;
+      margin-bottom: 10px;
     }
     #stuckBox h2 {
-      font-size: 15px;
-      color: #f87171;
-      margin-bottom: 8px;
-      text-transform: none;
-      letter-spacing: 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: #f5f5f7;
+      margin-bottom: 6px;
+      letter-spacing: -0.01em;
     }
-    #stuckBox p {
+    #stuckReason {
       font-size: 12px;
-      color: #888;
+      color: rgba(235,235,245,0.45);
       line-height: 1.5;
-      margin-bottom: 16px;
+      margin-bottom: 18px;
       word-break: break-word;
     }
     #stuckOk {
-      background: #7c3aed;
+      background: linear-gradient(135deg, #7c3aed, #6d28d9);
       color: #fff;
-      padding: 8px 28px;
-      font-size: 13px;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 32px;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      box-shadow: 0 2px 12px rgba(124,58,237,0.35);
     }
-    #stuckOk:hover { background: #6d28d9; }
+    #stuckOk:hover { opacity: 0.88; }
   </style>
 </head>
 <body>
-  <h1>Claude Page Agent</h1>
 
-  <div class="row">
-    <label>Gemini API Key</label>
-    <div class="key-row">
-      <input type="password" id="apiKey" placeholder="AIza…" autocomplete="off" spellcheck="false" />
-      <button id="saveKey">Save</button>
+  <!-- Header -->
+  <div class="header">
+    <div class="header-icon">⚡</div>
+    <div class="header-text">
+      <h1>Page Agent</h1>
+      <p>Powered by Gemini</p>
     </div>
   </div>
 
-  <div class="row">
-    <label>Goal</label>
-    <textarea id="goal" rows="3" placeholder='e.g. "click the login button"'></textarea>
-  </div>
+  <div class="content">
 
-  <div class="row">
-    <div class="ref-header" id="refToggleBtn">
-      <label>Reference Tabs <span class="ref-count" id="refCount"></span></label>
-      <span class="ref-toggle" id="refArrow">▲</span>
-    </div>
-    <div class="ref-body" id="refBody">
-      <div class="ref-add-row">
-        <input type="url" id="refUrl" placeholder="https://…" spellcheck="false" />
-        <button id="addRef">Add</button>
+    <!-- API Key -->
+    <div>
+      <div class="field-label">API Key</div>
+      <div class="input-card key-row">
+        <input type="password" id="apiKey" placeholder="AIza…" autocomplete="off" spellcheck="false" />
+        <div class="key-divider"></div>
+        <button id="saveKey">Save</button>
       </div>
-      <ul class="ref-list" id="refList">
-        <li class="ref-empty" id="refEmpty">No reference tabs added yet.</li>
-      </ul>
     </div>
+
+    <!-- Goal -->
+    <div>
+      <div class="field-label">Goal</div>
+      <div class="input-card">
+        <textarea id="goal" rows="3" placeholder="e.g. answer this multiple choice question correctly, then click High confidence"></textarea>
+      </div>
+    </div>
+
+    <!-- Reference Tabs -->
+    <div>
+      <div class="ref-header" id="refToggleBtn">
+        <div class="ref-header-left">
+          <span class="field-label">Reference Tabs</span>
+          <span class="ref-badge" id="refBadge" style="display:none">0</span>
+        </div>
+        <span class="ref-chevron" id="refArrow">▾</span>
+      </div>
+      <div id="refBody">
+        <div class="ref-add-row">
+          <div class="input-card">
+            <input type="url" id="refUrl" placeholder="https://…" spellcheck="false" />
+          </div>
+          <button id="addRef">Add</button>
+        </div>
+        <ul class="ref-list" id="refList">
+          <li class="ref-empty" id="refEmpty">No reference tabs added yet.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Run -->
+    <button id="runBtn">Run</button>
+
+    <!-- Status -->
+    <div id="status"></div>
+
   </div>
 
-  <button id="runBtn">Run</button>
-
-  <div id="status"></div>
-
-  <!-- Shown when the extension gets stuck after all retries -->
+  <!-- Stuck modal -->
   <div id="stuckOverlay">
     <div id="stuckBox">
-      <h2>Got stuck</h2>
-      <p id="stuckReason"></p>
+      <div class="stuck-icon">⚠️</div>
+      <h2>Couldn't complete that</h2>
+      <div id="stuckReason"></div>
       <button id="stuckOk">OK</button>
     </div>
   </div>
