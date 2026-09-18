@@ -10,7 +10,7 @@
     "tabs"
   ],
   "host_permissions": [
-    "https://api.anthropic.com/*",
+    "https://generativelanguage.googleapis.com/*",
     "<all_urls>"
   ],
   "background": {

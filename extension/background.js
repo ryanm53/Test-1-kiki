@@ -1,4 +1,4 @@
-const CLAUDE_MODEL = 'claude-sonnet-4-6';
+const GEMINI_MODEL = 'gemini-2.0-flash';
 const MAX_RETRIES = 2;
 
 const SYSTEM_PROMPT = `You are a browser automation assistant. You will be given:
@@ -46,29 +46,24 @@ ${pageText.slice(0, 3000)}${refSection}
 Interactive elements visible on screen (use the bracketed index):
 ${elementList || '(none found)'}`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: 256,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userContent }]
+      system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+      contents: [{ role: 'user', parts: [{ text: userContent }] }],
+      generationConfig: { maxOutputTokens: 256, temperature: 0.1 }
     })
   });
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`Claude API ${response.status}: ${body.slice(0, 300)}`);
+    throw new Error(`Gemini API ${response.status}: ${body.slice(0, 300)}`);
   }
 
   const data = await response.json();
-  const raw = data.content?.[0]?.text ?? '';
+  const raw = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 
   // Strip any markdown code fences Claude might add despite instructions
   const cleaned = raw
