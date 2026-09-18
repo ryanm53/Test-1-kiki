@@ -117,6 +117,16 @@ function scrape() {
   };
 }
 
+// Dispatch a keydown that libraries reading the legacy `keyCode` still see.
+// The KeyboardEvent constructor ignores keyCode/which in its init dict, so they
+// have to be defined onto the event afterward.
+function sendKey(el, key, code, keyCode) {
+  const ev = new KeyboardEvent('keydown', { key, code, bubbles: true, cancelable: true });
+  Object.defineProperty(ev, 'keyCode', { get: () => keyCode });
+  Object.defineProperty(ev, 'which',   { get: () => keyCode });
+  el.dispatchEvent(ev);
+}
+
 async function execute(action) {
   try {
     // ── Drag ───────────────────────────────────────────────────────────────
@@ -158,6 +168,44 @@ async function execute(action) {
       document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, buttons: 1, clientX: tx, clientY: ty }));
       tgt.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, isPrimary: true, clientX: tx, clientY: ty }));
       tgt.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: tx, clientY: ty }));
+
+      return { success: true };
+    }
+
+    // ── Drag via keyboard (react-beautiful-dnd) ────────────────────────────
+    // rbd ships an accessible keyboard drag: focus the handle, Space to lift,
+    // arrows to move, Space to drop. Far more reliable than faking mouse drags,
+    // which rbd gates behind movement thresholds and rAF timing.
+    if (action.action === 'dragMove') {
+      const { index, dir } = action;
+      if (typeof index !== 'number' || index < 0 || index >= _lastElements.length) {
+        return { success: false, error: `Index ${index} out of range (${_lastElements.length} elements)` };
+      }
+      const arrow = { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight' }[dir];
+      if (!arrow) return { success: false, error: `Bad dir "${dir}"` };
+      const keyCodes = { ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39 };
+      const steps = Number.isInteger(action.steps) && action.steps > 0 ? action.steps : 1;
+
+      const el = _lastElements[index];
+      if (!document.contains(el)) {
+        return { success: false, error: `Element [${index}] is no longer in the DOM` };
+      }
+      // The drag handle may be the element itself or an ancestor
+      const handle = el.closest('[data-rbd-drag-handle-draggable-id], [data-react-beautiful-dnd-drag-handle]') || el;
+
+      handle.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await new Promise(r => setTimeout(r, 150));
+      handle.focus();
+      await new Promise(r => setTimeout(r, 120));
+
+      sendKey(handle, ' ', 'Space', 32);              // lift
+      await new Promise(r => setTimeout(r, 250));
+      for (let i = 0; i < steps; i++) {
+        sendKey(handle, arrow, arrow, keyCodes[arrow]);
+        await new Promise(r => setTimeout(r, 200));
+      }
+      sendKey(handle, ' ', 'Space', 32);              // drop
+      await new Promise(r => setTimeout(r, 350));
 
       return { success: true };
     }
@@ -516,7 +564,7 @@ async function execute(action) {
   const PRESETS = [
     {
       label: 'McGraw Hill — Full (Answer + Confidence + Next)',
-      goal: 'Answer the question. Click the correct choice — or if it says "select all that apply", select every correct choice.',
+      goal: 'Answer the question: click the correct choice, select every choice if it says "select all that apply", or for drag questions move items into place one move at a time.',
       postClicks: [
         { label: 'High Confidence', candidates: [{ selector: '[data-automation-id="confidence-buttons--high_confidence"]' }, { ariaLabel: 'High Confidence' }] },
         { label: 'Next Question',   candidates: [{ selector: '.next-button' }, { text: 'Next Question' }, { text: 'Next' }] }
@@ -524,7 +572,7 @@ async function execute(action) {
     },
     {
       label: 'McGraw Hill — Answer only',
-      goal: 'Answer the question. Click the correct choice — or if it says "select all that apply", select every correct choice.',
+      goal: 'Answer the question: click the correct choice, select every choice if it says "select all that apply", or for drag questions move items into place one move at a time.',
       postClicks: []
     }
   ];
@@ -690,7 +738,7 @@ async function execute(action) {
       return;
     }
     if (result.success) {
-      if (result.action?.action === 'none') {
+      if (result.noAnswer) {
         // Claude found no answer to click — don't loop forever burning API calls.
         // Likely an unsupported question type (e.g. drag-and-drop ordering).
         if (loopMode) {

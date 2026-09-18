@@ -4,7 +4,8 @@ const MAX_RETRIES = 1;
 const SYSTEM_PROMPT = `Quiz bot. Complete the JSON:
 {"action":"click","index":N} — one answer
 {"action":"clickMany","indexes":[N,M]} — "select all that apply"; include every correct choice
-{"action":"none"} — no answer on screen
+{"action":"dragMove","index":N,"dir":"up|down|left|right","steps":K} — drag question: move item N by K slots. up/down reorders a list, left/right moves between lists/drop zones. One move per reply; you see the result and can move again.
+{"action":"none"} — question fully answered, or nothing answerable on screen
 N = an index from the list. Never invent an index. Output only the JSON completion.`;
 
 async function callClaude(apiKey, goal, pageText, elements, refTexts = []) {
@@ -91,7 +92,7 @@ ${elementList || '(none found)'}`;
     throw new Error(`Claude returned invalid JSON: ${cleaned.slice(0, 300)}`);
   }
 
-  if (!['click', 'clickMany', 'none'].includes(parsed.action)) {
+  if (!['click', 'clickMany', 'dragMove', 'none'].includes(parsed.action)) {
     throw new Error(`Unexpected action: ${JSON.stringify(parsed.action)}`);
   }
   if (parsed.action === 'click' && typeof parsed.index !== 'number') {
@@ -103,6 +104,14 @@ ${elementList || '(none found)'}`;
       && parsed.indexes.every(n => typeof n === 'number');
     if (!ok) {
       throw new Error(`clickMany requires a non-empty numeric indexes array, got: ${JSON.stringify(parsed.indexes)}`);
+    }
+  }
+  if (parsed.action === 'dragMove') {
+    if (typeof parsed.index !== 'number') {
+      throw new Error(`dragMove requires a numeric index, got: ${JSON.stringify(parsed.index)}`);
+    }
+    if (!['up', 'down', 'left', 'right'].includes(parsed.dir)) {
+      throw new Error(`dragMove requires dir up/down/left/right, got: ${JSON.stringify(parsed.dir)}`);
     }
   }
 
@@ -146,15 +155,22 @@ function sendToTab(tabId, msg) {
   });
 }
 
-const MAX_STEPS = 1; // Claude picks the answer; postClicks handle confidence + next directly
+// Click / clickMany answer a question in a single call. Drag questions need
+// several sequential moves, so the budget is raised only once a drag actually
+// starts — multiple choice still costs exactly one API call.
+const MAX_STEPS_SIMPLE = 1;
+const MAX_STEPS_DRAG   = 8;
 
 async function runGoal(apiKey, goal, tabId, refUrls = [], postClicks = []) {
   const refTexts = await getReferenceContent(refUrls);
 
-  // Claude handles the answer selection
-  for (let step = 0; step < MAX_STEPS; step++) {
+  let budget = MAX_STEPS_SIMPLE;
+  let completed = 0;
+
+  for (let step = 0; step < budget; step++) {
     let lastError = 'Unknown error';
     let stepDone = false;
+    let finished = false;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
@@ -166,14 +182,22 @@ async function runGoal(apiKey, goal, tabId, refUrls = [], postClicks = []) {
         const action = await callClaude(apiKey, goal, pageData.text, pageData.elements, refTexts);
 
         if (action.action === 'none') {
-          return { success: true, action, message: action.reasoning };
+          // Before any action: nothing on screen is answerable.
+          // After a move: the drag arrangement is complete.
+          if (completed === 0) return { success: true, action, noAnswer: true };
+          finished = true;
+          stepDone = true;
+          break;
         }
+
+        if (action.action === 'dragMove') budget = MAX_STEPS_DRAG;
 
         const result = await sendToTab(tabId, { type: 'EXECUTE', action });
 
         if (result?.success) {
           stepDone = true;
-          await new Promise(r => setTimeout(r, 900));
+          completed++;
+          await new Promise(r => setTimeout(r, action.action === 'dragMove' ? 500 : 900));
           break;
         }
 
@@ -193,6 +217,7 @@ async function runGoal(apiKey, goal, tabId, refUrls = [], postClicks = []) {
     if (!stepDone) {
       return { success: false, error: `Stuck on step ${step + 1}. Last error: ${lastError}` };
     }
+    if (finished) break;
   }
 
   // Direct clicks (confidence button, next button) — no Claude needed
