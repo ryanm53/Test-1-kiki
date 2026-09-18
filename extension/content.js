@@ -485,7 +485,7 @@ async function execute(action) {
       label: 'McGraw Hill - Answer + Confidence + Next',
       goal: 'Click the correct answer for this multiple choice question.',
       postClicks: [
-        { label: 'High Confidence', candidates: [{ ariaLabel: 'High Confidence' }, { text: 'High Confidence' }, { text: 'High' }] },
+        { label: 'High Confidence', candidates: [{ selector: '[data-automation-id="confidence-buttons--high_confidence"]' }, { ariaLabel: 'High Confidence' }] },
         { label: 'Next Question',   candidates: [{ selector: '.next-button' }, { text: 'Next Question' }] }
       ]
     },
@@ -733,7 +733,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === 'CLICK_TEXT') {
-    // Find and click a button directly by aria-label, text, or CSS selector
     const candidates = msg.candidates || [];
     const all = Array.from(document.querySelectorAll('button, [role="button"], a'));
     let found = null;
@@ -753,10 +752,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
     if (found) {
       found.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setTimeout(() => { found.focus(); found.click(); }, 80);
+      // Dispatch full pointer+mouse+click chain so Angular registers the event
+      const rect = found.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+      const opts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy };
+      found.dispatchEvent(new PointerEvent('pointerover',  { ...opts, isPrimary: true }));
+      found.dispatchEvent(new MouseEvent('mouseover',  opts));
+      found.dispatchEvent(new PointerEvent('pointerdown', { ...opts, isPrimary: true }));
+      found.dispatchEvent(new MouseEvent('mousedown',  { ...opts, buttons: 1 }));
+      found.dispatchEvent(new PointerEvent('pointerup',   { ...opts, isPrimary: true }));
+      found.dispatchEvent(new MouseEvent('mouseup',    opts));
+      found.click();
       sendResponse({ success: true });
     } else {
-      sendResponse({ success: false, error: `Button not found` });
+      sendResponse({ success: false, error: 'Button not found' });
     }
     return false;
   }
