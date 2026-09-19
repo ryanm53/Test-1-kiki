@@ -117,48 +117,61 @@ function scrape() {
   };
 }
 
+// Set a field's value so framework bindings notice. Assigning .value directly
+// is invisible to React (it tracks the last value it set), so go through the
+// native prototype setter and then fire the events the frameworks listen for.
+function setFieldValue(el, value) {
+  el.focus();
+  const tag = el.tagName.toLowerCase();
+
+  if (tag === 'select') {
+    const opt = Array.from(el.options).find(
+      o => o.textContent.trim().toLowerCase() === value.toLowerCase() || o.value === value
+    );
+    el.value = opt ? opt.value : value;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return;
+  }
+
+  if (el.isContentEditable) {
+    el.textContent = value;
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, data: value }));
+    return;
+  }
+
+  const proto = tag === 'textarea'
+    ? window.HTMLTextAreaElement.prototype
+    : window.HTMLInputElement.prototype;
+  const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+  if (nativeSetter) nativeSetter.call(el, value); else el.value = value;
+
+  el.dispatchEvent(new InputEvent('input', { bubbles: true, data: value }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  el.dispatchEvent(new FocusEvent('blur', { bubbles: false }));
+}
+
 async function execute(action) {
   try {
-    // ── Drag ───────────────────────────────────────────────────────────────
-    if (action.action === 'drag') {
-      const { sourceIndex, targetIndex } = action;
-      if (typeof sourceIndex !== 'number' || sourceIndex < 0 || sourceIndex >= _lastElements.length)
-        return { success: false, error: `Source index ${sourceIndex} out of range` };
-      if (typeof targetIndex !== 'number' || targetIndex < 0 || targetIndex >= _lastElements.length)
-        return { success: false, error: `Target index ${targetIndex} out of range` };
-
-      const src = _lastElements[sourceIndex];
-      const tgt = _lastElements[targetIndex];
-      if (!document.contains(src)) return { success: false, error: 'Source element not in DOM' };
-      if (!document.contains(tgt)) return { success: false, error: 'Target element not in DOM' };
-
-      src.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      await new Promise(r => setTimeout(r, 150));
-
-      const sr = src.getBoundingClientRect(), tr = tgt.getBoundingClientRect();
-      const sx = sr.left + sr.width / 2, sy = sr.top + sr.height / 2;
-      const tx = tr.left + tr.width / 2, ty = tr.top + tr.height / 2;
-      const dt = new DataTransfer();
-
-      // HTML5 drag events (for native drag APIs)
-      src.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: sx, clientY: sy }));
-      await new Promise(r => setTimeout(r, 60));
-      tgt.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: tx, clientY: ty }));
-      tgt.dispatchEvent(new DragEvent('dragover',  { bubbles: true, cancelable: true, dataTransfer: dt, clientX: tx, clientY: ty }));
-      await new Promise(r => setTimeout(r, 60));
-      tgt.dispatchEvent(new DragEvent('drop',      { bubbles: true, cancelable: true, dataTransfer: dt, clientX: tx, clientY: ty }));
-      src.dispatchEvent(new DragEvent('dragend',   { bubbles: true, cancelable: true, dataTransfer: dt, clientX: tx, clientY: ty }));
-
-      // Pointer + mouse events (for React DnD, Sortable.js, etc.)
-      await new Promise(r => setTimeout(r, 40));
-      src.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, isPrimary: true, clientX: sx, clientY: sy }));
-      src.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, buttons: 1, clientX: sx, clientY: sy }));
-      await new Promise(r => setTimeout(r, 40));
-      document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, isPrimary: true, clientX: tx, clientY: ty }));
-      document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, buttons: 1, clientX: tx, clientY: ty }));
-      tgt.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, isPrimary: true, clientX: tx, clientY: ty }));
-      tgt.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: tx, clientY: ty }));
-
+    // ── Fill in the blank(s) ───────────────────────────────────────────────
+    if (action.action === 'fill') {
+      const { fills } = action;
+      if (!Array.isArray(fills) || fills.length === 0) {
+        return { success: false, error: 'fill requires a non-empty fills array' };
+      }
+      for (const f of fills) {
+        const i = f?.index;
+        if (typeof i !== 'number' || i < 0 || i >= _lastElements.length) {
+          return { success: false, error: `Index ${i} out of range (${_lastElements.length} elements)` };
+        }
+        const el = _lastElements[i];
+        if (!document.contains(el)) {
+          return { success: false, error: `Element [${i}] is no longer in the DOM` };
+        }
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await new Promise(r => setTimeout(r, 120));
+        setFieldValue(el, String(f.value ?? ''));
+        await new Promise(r => setTimeout(r, 200));
+      }
       return { success: true };
     }
 
@@ -188,45 +201,20 @@ async function execute(action) {
       return { success: true };
     }
 
-    // ── Click / Fill ───────────────────────────────────────────────────────
-    const { index } = action;
-    if (typeof index !== 'number' || index < 0 || index >= _lastElements.length) {
-      return { success: false, error: `Index ${index} out of range (${_lastElements.length} elements)` };
-    }
-
-    const el = _lastElements[index];
-    if (!document.contains(el)) {
-      return { success: false, error: `Element [${index}] is no longer in the DOM` };
-    }
-
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    await new Promise(r => setTimeout(r, 150));
-
+    // ── Single click ───────────────────────────────────────────────────────
     if (action.action === 'click') {
+      const { index } = action;
+      if (typeof index !== 'number' || index < 0 || index >= _lastElements.length) {
+        return { success: false, error: `Index ${index} out of range (${_lastElements.length} elements)` };
+      }
+      const el = _lastElements[index];
+      if (!document.contains(el)) {
+        return { success: false, error: `Element [${index}] is no longer in the DOM` };
+      }
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await new Promise(r => setTimeout(r, 150));
       el.focus();
       el.click();
-      return { success: true };
-    }
-
-    if (action.action === 'fill') {
-      if (action.value == null) return { success: false, error: 'Fill action missing value' };
-      el.focus();
-      const tag = el.tagName.toLowerCase();
-      if (tag === 'select') {
-        const opt = Array.from(el.options).find(
-          o => o.textContent.trim() === action.value || o.value === action.value
-        );
-        if (opt) el.value = opt.value; else el.value = action.value;
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      } else {
-        const proto = tag === 'textarea'
-          ? window.HTMLTextAreaElement.prototype
-          : window.HTMLInputElement.prototype;
-        const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-        if (nativeSetter) nativeSetter.call(el, action.value); else el.value = action.value;
-        el.dispatchEvent(new InputEvent('input', { bubbles: true, data: action.value }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      }
       return { success: true };
     }
 
@@ -516,7 +504,7 @@ async function execute(action) {
   const PRESETS = [
     {
       label: 'McGraw Hill — Full (Answer + Confidence + Next)',
-      goal: 'Answer the question: click the correct choice, select every choice if it says "select all that apply", or for drag questions move items into place one move at a time.',
+      goal: 'Answer the question: click the correct choice, select every choice if it says "select all that apply", type the answer into any blanks, or for drag questions move items into place one move at a time.',
       postClicks: [
         { label: 'High Confidence', candidates: [{ selector: '[data-automation-id="confidence-buttons--high_confidence"]' }, { ariaLabel: 'High Confidence' }] },
         { label: 'Next Question',   candidates: [{ selector: '.next-button' }, { text: 'Next Question' }, { text: 'Next' }] }
@@ -524,7 +512,7 @@ async function execute(action) {
     },
     {
       label: 'McGraw Hill — Answer only',
-      goal: 'Answer the question: click the correct choice, select every choice if it says "select all that apply", or for drag questions move items into place one move at a time.',
+      goal: 'Answer the question: click the correct choice, select every choice if it says "select all that apply", type the answer into any blanks, or for drag questions move items into place one move at a time.',
       postClicks: []
     }
   ];

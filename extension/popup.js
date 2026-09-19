@@ -131,17 +131,10 @@ runBtn.addEventListener('click', async () => {
       let html = '<div class="status-label">Done</div>';
 
       if (a && a.action !== 'none') {
-        const label = a.action === 'fill'
-          ? `fill [${a.index}] → "${esc(String(a.value ?? ''))}"`
-          : `${a.action} [${a.index}]`;
-        html += `<span class="action-chip">${label}</span><br>`;
+        html += `<span class="action-chip">${esc(describeAction(a))}</span><br>`;
       }
 
-      if (a?.reasoning) {
-        html += `<div class="reasoning">${esc(a.reasoning)}</div>`;
-      } else if (result.message) {
-        html += esc(result.message);
-      }
+      if (result.message) html += esc(result.message);
 
       showStatus('success', html, true);
     } else {
@@ -170,6 +163,16 @@ function showStatus(type, content, isHtml = false) {
 function showStuck(msg) {
   stuckReason.textContent = msg;
   stuckOverlay.classList.add('visible');
+}
+
+function describeAction(a) {
+  switch (a.action) {
+    case 'click':     return `click [${a.index}]`;
+    case 'clickMany': return `selected ${a.indexes?.length ?? 0} choices`;
+    case 'fill':      return `filled ${a.fills?.length ?? 0} blank(s)`;
+    case 'dragMove':  return `drag [${a.index}] ${a.dir} ×${a.steps ?? 1}`;
+    default:          return a.action;
+  }
 }
 
 function esc(str) {

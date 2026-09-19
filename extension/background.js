@@ -5,6 +5,7 @@ const SYSTEM_PROMPT = `Quiz bot. Complete the JSON:
 {"action":"click","index":N} — one answer
 {"action":"clickMany","indexes":[N,M]} — "select all that apply"; include every correct choice
 {"action":"dragMove","index":N,"dir":"up|down|left|right","steps":K} — drag question. up/down reorders an item within its own list; left/right moves it into a DIFFERENT list or drop zone. Item labels state which list they're in and their position — to place an unplaced choice into a drop zone use left/right, not up/down. One move per reply; you see the result and can move again.
+{"action":"fill","fills":[{"index":N,"value":"answer"}]} — fill in the blank(s); one entry per input box, fill every blank in the question
 {"action":"none"} — question fully answered, or nothing answerable on screen
 N = an index from the list. Never invent an index. Output only the JSON completion.`;
 
@@ -44,7 +45,7 @@ ${elementList || '(none found)'}`;
     },
     body: JSON.stringify({
       model: CLAUDE_MODEL,
-      max_tokens: 60,
+      max_tokens: 150,
       temperature: 0,
       system: SYSTEM_PROMPT,
       messages: [
@@ -92,8 +93,16 @@ ${elementList || '(none found)'}`;
     throw new Error(`Claude returned invalid JSON: ${cleaned.slice(0, 300)}`);
   }
 
-  if (!['click', 'clickMany', 'dragMove', 'none'].includes(parsed.action)) {
+  if (!['click', 'clickMany', 'fill', 'dragMove', 'none'].includes(parsed.action)) {
     throw new Error(`Unexpected action: ${JSON.stringify(parsed.action)}`);
+  }
+  if (parsed.action === 'fill') {
+    const ok = Array.isArray(parsed.fills)
+      && parsed.fills.length > 0
+      && parsed.fills.every(f => f && typeof f.index === 'number' && f.value != null);
+    if (!ok) {
+      throw new Error(`fill requires a non-empty fills array of {index,value}, got: ${JSON.stringify(parsed.fills)}`);
+    }
   }
   if (parsed.action === 'click' && typeof parsed.index !== 'number') {
     throw new Error(`click requires a numeric index, got: ${JSON.stringify(parsed.index)}`);
