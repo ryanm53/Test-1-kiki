@@ -117,16 +117,6 @@ function scrape() {
   };
 }
 
-// Dispatch a keydown that libraries reading the legacy `keyCode` still see.
-// The KeyboardEvent constructor ignores keyCode/which in its init dict, so they
-// have to be defined onto the event afterward.
-function sendKey(el, key, code, keyCode) {
-  const ev = new KeyboardEvent('keydown', { key, code, bubbles: true, cancelable: true });
-  Object.defineProperty(ev, 'keyCode', { get: () => keyCode });
-  Object.defineProperty(ev, 'which',   { get: () => keyCode });
-  el.dispatchEvent(ev);
-}
-
 async function execute(action) {
   try {
     // ── Drag ───────────────────────────────────────────────────────────────
@@ -168,44 +158,6 @@ async function execute(action) {
       document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, buttons: 1, clientX: tx, clientY: ty }));
       tgt.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, isPrimary: true, clientX: tx, clientY: ty }));
       tgt.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: tx, clientY: ty }));
-
-      return { success: true };
-    }
-
-    // ── Drag via keyboard (react-beautiful-dnd) ────────────────────────────
-    // rbd ships an accessible keyboard drag: focus the handle, Space to lift,
-    // arrows to move, Space to drop. Far more reliable than faking mouse drags,
-    // which rbd gates behind movement thresholds and rAF timing.
-    if (action.action === 'dragMove') {
-      const { index, dir } = action;
-      if (typeof index !== 'number' || index < 0 || index >= _lastElements.length) {
-        return { success: false, error: `Index ${index} out of range (${_lastElements.length} elements)` };
-      }
-      const arrow = { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight' }[dir];
-      if (!arrow) return { success: false, error: `Bad dir "${dir}"` };
-      const keyCodes = { ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39 };
-      const steps = Number.isInteger(action.steps) && action.steps > 0 ? action.steps : 1;
-
-      const el = _lastElements[index];
-      if (!document.contains(el)) {
-        return { success: false, error: `Element [${index}] is no longer in the DOM` };
-      }
-      // The drag handle may be the element itself or an ancestor
-      const handle = el.closest('[data-rbd-drag-handle-draggable-id], [data-react-beautiful-dnd-drag-handle]') || el;
-
-      handle.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      await new Promise(r => setTimeout(r, 150));
-      handle.focus();
-      await new Promise(r => setTimeout(r, 120));
-
-      sendKey(handle, ' ', 'Space', 32);              // lift
-      await new Promise(r => setTimeout(r, 250));
-      for (let i = 0; i < steps; i++) {
-        sendKey(handle, arrow, arrow, keyCodes[arrow]);
-        await new Promise(r => setTimeout(r, 200));
-      }
-      sendKey(handle, ' ', 'Space', 32);              // drop
-      await new Promise(r => setTimeout(r, 350));
 
       return { success: true };
     }
@@ -834,6 +786,35 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     execute(msg.action)
       .then(sendResponse)
       .catch(e => sendResponse({ success: false, error: e.message }));
+    return true;
+  }
+
+  if (msg.type === 'FOCUS_DRAG') {
+    // Focus the drag card so the real keystrokes the background sends next
+    // (via the debugger protocol) land on the right element.
+    (async () => {
+      const { index } = msg;
+      if (typeof index !== 'number' || index < 0 || index >= _lastElements.length) {
+        sendResponse({ success: false, error: `Index ${index} out of range (${_lastElements.length} elements)` });
+        return;
+      }
+      const el = _lastElements[index];
+      if (!document.contains(el)) {
+        sendResponse({ success: false, error: `Element [${index}] is no longer in the DOM` });
+        return;
+      }
+      const handle = el.closest('[data-rbd-drag-handle-draggable-id], [data-react-beautiful-dnd-drag-handle]') || el;
+      handle.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await new Promise(r => setTimeout(r, 200));
+      handle.focus();
+      await new Promise(r => setTimeout(r, 120));
+
+      if (document.activeElement !== handle && !handle.contains(document.activeElement)) {
+        sendResponse({ success: false, error: 'Could not focus the drag item' });
+        return;
+      }
+      sendResponse({ success: true });
+    })();
     return true;
   }
 

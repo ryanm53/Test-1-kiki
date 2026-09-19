@@ -5,6 +5,7 @@
   "description": "Type a goal; Claude clicks and fills the current page for you.",
   "permissions": [
     "activeTab",
+    "debugger",
     "scripting",
     "storage",
     "tabs"

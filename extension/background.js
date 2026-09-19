@@ -143,6 +143,69 @@ async function getReferenceContent(refUrls) {
   return results;
 }
 
+// ── Trusted input via the Chrome debugger protocol ───────────────────────────
+// react-beautiful-dnd ignores synthetic events (they reach the page but never
+// satisfy its drag state machine), so drag moves are driven with real input
+// events instead. These arrive with isTrusted=true, indistinguishable from a
+// person pressing the keys.
+
+const attachedTabs = new Set();
+
+chrome.debugger.onDetach.addListener(source => attachedTabs.delete(source.tabId));
+
+async function attachDebugger(tabId) {
+  if (attachedTabs.has(tabId)) return;
+  try {
+    await chrome.debugger.attach({ tabId }, '1.3');
+    attachedTabs.add(tabId);
+  } catch (e) {
+    const msg = String(e?.message ?? e);
+    if (msg.includes('Another debugger') || msg.includes('already attached')) {
+      throw new Error('Close DevTools on this tab — drag questions need the debugger, and only one can attach at a time.');
+    }
+    throw new Error(`Could not attach debugger: ${msg}`);
+  }
+}
+
+async function detachDebugger(tabId) {
+  if (!attachedTabs.has(tabId)) return;
+  attachedTabs.delete(tabId);
+  try { await chrome.debugger.detach({ tabId }); } catch (_) {}
+}
+
+const KEYS = {
+  space: { key: ' ',          code: 'Space',      vk: 32, text: ' ' },
+  up:    { key: 'ArrowUp',    code: 'ArrowUp',    vk: 38 },
+  down:  { key: 'ArrowDown',  code: 'ArrowDown',  vk: 40 },
+  left:  { key: 'ArrowLeft',  code: 'ArrowLeft',  vk: 37 },
+  right: { key: 'ArrowRight', code: 'ArrowRight', vk: 39 }
+};
+
+async function pressKey(tabId, name) {
+  const k = KEYS[name];
+  const base = { key: k.key, code: k.code, windowsVirtualKeyCode: k.vk, nativeVirtualKeyCode: k.vk };
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
+    // printable keys need text so a keypress is generated; arrows don't
+    type: k.text ? 'keyDown' : 'rawKeyDown',
+    ...base,
+    ...(k.text ? { text: k.text, unmodifiedText: k.text } : {})
+  });
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', { type: 'keyUp', ...base });
+}
+
+// rbd keyboard drag: Space lifts, arrows move, Space drops.
+async function trustedKeyDrag(tabId, dir, steps) {
+  await attachDebugger(tabId);
+  await pressKey(tabId, 'space');
+  await new Promise(r => setTimeout(r, 300));
+  for (let i = 0; i < steps; i++) {
+    await pressKey(tabId, dir);
+    await new Promise(r => setTimeout(r, 250));
+  }
+  await pressKey(tabId, 'space');
+  await new Promise(r => setTimeout(r, 400));
+}
+
 function sendToTab(tabId, msg) {
   return new Promise((resolve, reject) => {
     chrome.tabs.sendMessage(tabId, msg, response => {
@@ -190,9 +253,18 @@ async function runGoal(apiKey, goal, tabId, refUrls = [], postClicks = []) {
           break;
         }
 
-        if (action.action === 'dragMove') budget = MAX_STEPS_DRAG;
-
-        const result = await sendToTab(tabId, { type: 'EXECUTE', action });
+        let result;
+        if (action.action === 'dragMove') {
+          budget = MAX_STEPS_DRAG;
+          // Focus the card in the page, then drive real keys through the debugger
+          result = await sendToTab(tabId, { type: 'FOCUS_DRAG', index: action.index });
+          if (result?.success) {
+            const steps = Number.isInteger(action.steps) && action.steps > 0 ? action.steps : 1;
+            await trustedKeyDrag(tabId, action.dir, steps);
+          }
+        } else {
+          result = await sendToTab(tabId, { type: 'EXECUTE', action });
+        }
 
         if (result?.success) {
           stepDone = true;
@@ -255,7 +327,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       ?? (await chrome.storage.local.get('refUrls')).refUrls
       ?? [];
 
-    const result = await runGoal(apiKey, msg.goal, tabId, refUrls, msg.postClicks ?? []);
+    let result;
+    try {
+      result = await runGoal(apiKey, msg.goal, tabId, refUrls, msg.postClicks ?? []);
+    } finally {
+      // Always release the tab so the "being debugged" banner doesn't linger
+      await detachDebugger(tabId);
+    }
     sendResponse(result);
   })();
 
