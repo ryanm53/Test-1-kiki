@@ -1,81 +1,27 @@
-# Claude Page Agent
+# Page Agent — internals
 
-A personal Chrome extension that lets you type a goal and have Claude click buttons
-or fill inputs on the current page.
-
----
-
-## Loading as an unpacked extension
-
-1. Open Chrome and navigate to `chrome://extensions/`
-2. Enable **Developer mode** (toggle in the top-right corner)
-3. Click **Load unpacked**
-4. Select the `extension/` folder inside this repository
-5. The "Claude Page Agent" icon should appear in the Chrome toolbar
+A Chrome extension that answers quiz questions on the current page using Claude.
+Handles multiple choice, multi-select, fill-in-the-blank, and drag-and-drop ordering.
 
 ---
 
-## Setup
-
-Click the extension icon, paste your Anthropic API key into the top field, and click
-**Save**. The key is stored in `chrome.storage.local` — it never leaves your browser
-except as a request header to `api.anthropic.com`.
+> **Setting this up?** See the [setup guide in the root README](../README.md) — this file
+> covers how it works internally, not how to install it.
 
 ---
 
-## Usage
+## Architecture
 
-### Floating button (recommended for quizzes / surveys)
+Two scripts do the work:
 
-Every page gets a small toolbar injected in the bottom-left corner:
+- **`content.js`** runs inside the page. It scrapes the visible interactive elements,
+  executes the action Claude picks, and renders the control bar (a shadow-DOM widget so
+  page CSS can't affect it).
+- **`background.js`** is the service worker. It builds the prompt, calls the Claude API,
+  validates the response, and drives the post-answer clicks.
 
-- **⚡** — run the saved goal once
-- **✎** — open the settings panel: pick a preset from the dropdown (or type a custom
-  goal), set an optional success message, **Save**
-- **↺** — loop mode. After each successful question, waits for the page content to
-  actually change (polls every 150ms, 5s fallback) and automatically runs again —
-  useful for working through an entire quiz unattended
-- **⏸ / ▶** — appears once loop mode is on; pauses/resumes the auto-continue
-
-The panel remembers your goal and preset between page loads.
-
-- The FAB pulses while Claude is working
-- On failure it shows the **Got stuck** modal — click **OK** to dismiss and try again
-- If Claude can't find a valid answer to click (e.g. an unsupported question type like
-  drag-and-drop ordering), loop mode auto-pauses and shows what happened instead of
-  silently retrying the same question forever
-
-### McGraw Hill presets
-
-The built-in presets split the work: **Claude only picks the answer** (cheapest,
-least error-prone part to leave to an LLM). Clicking **High Confidence** and
-**Next Question** afterward is handled by direct DOM lookups — a fixed
-`data-automation-id`/class selector — with no API call at all. This is both faster
-and immune to the model hallucinating the wrong button.
-
-### Extension popup
-
-Click the toolbar icon to open the full popup. Same goal box and Run button, plus the
-API key field and the Reference Tabs manager.
-
----
-
-## Reference Tabs
-
-If your study material (textbook, notes, slides) is open in another browser tab, you
-can tell the extension to read it:
-
-1. Open the reference page in a tab
-2. Click the extension icon → expand **Reference Tabs** → paste the URL → **Add**
-3. The URL is saved permanently — you only need to do this once per source
-
-When you hit Run, the extension finds those open tabs, scrapes their text, and includes
-it in the Claude prompt as reference material. Claude can then use that content to
-answer questions correctly.
-
-**URL matching:** the stored URL is used as a prefix, so saving
-`https://example.com/chapter1` will match that page and any sub-path beneath it.
-Up to 2 000 characters are scraped per reference tab.
+The split matters: only the content script can touch the page, and only the service
+worker can hold the API key and make cross-origin requests.
 
 ---
 
@@ -142,24 +88,48 @@ For the direct-click steps (High Confidence / Next Question), a full
 If a step fails, the background worker re-scrapes the page (DOM may have changed),
 asks Claude again with the fresh element list, and retries once more (2 attempts
 total per step) with a 400ms back-off. A "Got stuck" modal appears if it's still
-stuck — click **OK** then **Run** again.
+stuck, surfaced inline in the control bar.
 
-### Forcing valid JSON output (response prefilling)
+### Forcing valid JSON output
 
-Rather than just instructing Claude to "respond with only JSON" (which an LLM can
-still ignore under load), the API call prefills the assistant's turn with
-`{"action":"` before sending. Claude then can only *complete* that JSON object — it
-is structurally unable to open with prose. The prefilled prefix is stitched back
-onto the response before parsing. A bracket-counting fallback extracts the first
-complete `{...}` block in case trailing text still sneaks in after the closing brace.
+Instructing an LLM to "respond with only JSON" is not reliable under load — it will
+occasionally open with prose and break the parse. Two mechanisms prevent that, chosen
+per model in the `MODELS` table:
 
-### Minimal token usage
+- **Prefill** (Haiku 4.5): the request ends with an assistant turn containing
+  `{"action":"`, so the reply is already mid-JSON and cannot begin with prose. The
+  prefix is stitched back on before parsing.
+- **Structured outputs** (Sonnet 5, Opus 5): prefill returns a 400 on these models, so
+  they get `output_config.format` with a JSON schema instead, which constrains the whole
+  response shape rather than just its opening.
 
-Since Claude's only job is picking which element index to click, the request is
-kept as small as possible: an ~50-token system prompt, page text truncated to 800
-characters, at most 25 interactive elements, and a `{"action":"click","index":N}` /
-`{"action":"none"}` response capped at 40 tokens. Confidence and Next-question
-clicks cost no tokens at all since they never touch the API.
+Either way a bracket-counting fallback extracts the first complete `{...}` block in case
+trailing text appears after the closing brace, and the parsed action is validated against
+its required fields before execution.
+
+Two other per-model differences are handled in the same table: `temperature` is rejected
+on Sonnet 5 / Opus 5, and Opus 5 thinks by default — so it needs a larger `max_tokens`,
+runs at `effort: low`, and response parsing looks for the `text` block rather than
+`content[0]`, since thinking blocks come first.
+
+### Drag-and-drop via trusted input
+
+McGraw Hill's drag questions are built on **react-beautiful-dnd**, which ignores
+synthetic events — they reach the page but never satisfy its drag state machine.
+rbd does ship a keyboard sensor (Space to lift, arrows to move, Space to drop), so
+drag moves are driven through that, using `chrome.debugger` +
+`Input.dispatchKeyEvent` to send real `isTrusted` keystrokes. The debugger attaches
+lazily — only once a drag actually starts — so ordinary questions never trigger the
+"being debugged" banner, and it always detaches in a `finally`.
+
+### Token usage
+
+The request is kept small: a short system prompt, page text truncated to 800
+characters, at most 25 interactive elements, and a compact action object back.
+Multiple choice costs exactly one API call — the step budget only expands (to 8) once
+a drag move starts, since those need several sequential moves with a fresh look at the
+board between each. Confidence and Next-question clicks cost nothing at all, since they
+are direct DOM lookups that never touch the API.
 
 ---
 
@@ -169,6 +139,5 @@ clicks cost no tokens at all since they never touch the API.
 |------|---------|
 | `manifest.json` | Manifest V3: permissions, content script, service worker |
 | `background.js` | Service worker: Claude API calls, retry loop, reference tab scraping |
-| `content.js` | Injected on every page: scrapes elements, executes actions, floating widget |
-| `popup.html` | Extension popup UI |
-| `popup.js` | Popup: API key, goal input, reference URL manager |
+| `content.js` | Injected on every page: scrapes elements, executes actions, control bar UI |
+| `popup.html` | Static card pointing at the on-page control bar |
