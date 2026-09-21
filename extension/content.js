@@ -231,279 +231,327 @@ async function execute(action) {
 
   const host = document.createElement('div');
   host.id = '__cap-host';
-  host.style.cssText = 'position:fixed;bottom:24px;left:24px;z-index:2147483647;';
+  host.style.cssText = 'position:fixed;bottom:22px;left:22px;z-index:2147483647;';
 
   const shadow = host.attachShadow({ mode: 'open' });
+
+  const ICON_PLAY  = '<svg viewBox="0 0 24 24" width="15" height="15"><path d="M8 5.14v13.72L19 12z"/></svg>';
+  const ICON_PAUSE = '<svg viewBox="0 0 24 24" width="15" height="15"><path d="M6.5 5h3.5v14H6.5zM14 5h3.5v14H14z"/></svg>';
+  const ICON_GEAR  = '<svg viewBox="0 0 24 24" width="15" height="15"><path d="M12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7zm7.4-2.6l1.8 1.4-1.9 3.3-2.2-.7a7.8 7.8 0 0 1-1.6.9l-.4 2.2h-3.8l-.4-2.2a7.8 7.8 0 0 1-1.6-.9l-2.2.7-1.9-3.3 1.8-1.4a7.6 7.6 0 0 1 0-1.8L2.8 9.7l1.9-3.3 2.2.7a7.8 7.8 0 0 1 1.6-.9l.4-2.2h3.8l.4 2.2c.6.2 1.1.5 1.6.9l2.2-.7 1.9 3.3-1.8 1.4a7.6 7.6 0 0 1 0 1.8z"/></svg>';
 
   shadow.innerHTML = `
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-  #btnRow {
+  :host, #root {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Surfaces ── */
+  .glass {
+    background: rgba(28, 28, 30, 0.72);
+    backdrop-filter: blur(22px) saturate(180%);
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
+    border: 0.5px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.44), 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+
+  /* ── Status bar ── */
+  #bar {
     display: flex;
     align-items: center;
-    justify-content: flex-start;
-    gap: 8px;
-  }
-
-  #fab {
-    width: 46px; height: 46px;
-    background: linear-gradient(135deg, #38BDF8, #0284C7);
-    color: #fff;
-    border-radius: 50%;
-    border: none;
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer;
-    font-size: 18px;
-    font-family: sans-serif;
-    box-shadow: 0 2px 16px rgba(56,189,248,0.45);
+    gap: 10px;
+    padding: 7px 8px 7px 7px;
+    border-radius: 15px;
     user-select: none;
-    transition: transform 0.15s, opacity 0.15s;
-    flex-shrink: 0;
   }
-  #fab:hover { opacity: 0.88; transform: scale(1.07); }
-  #fab.running { opacity: 0.7; animation: pulse 1s infinite; cursor: default; }
-  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.55; } }
 
-  #editBtn, #loopBtn, #pauseBtn {
+  #go {
     width: 30px; height: 30px;
-    background: #1c1507;
-    border: 1px solid #38BDF8;
+    flex-shrink: 0;
+    border: none;
     border-radius: 50%;
-    color: #C9A96E;
-    font-size: 13px;
+    background: #0A84FF;
+    color: #fff;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
-    box-shadow: 0 1px 8px rgba(56,189,248,0.2);
-    transition: color 0.15s, background 0.15s;
+    transition: background 0.2s, transform 0.12s;
+  }
+  #go svg { fill: currentColor; display: block; }
+  #go:hover { background: #3D9EFF; }
+  #go:active { transform: scale(0.93); }
+  #go.active { background: rgba(120, 120, 128, 0.38); }
+  #go.active:hover { background: rgba(120, 120, 128, 0.5); }
+
+  #status {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 96px;
+    max-width: 230px;
+    font-size: 13px;
+    letter-spacing: -0.01em;
+    color: #f5f5f7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #statusText { overflow: hidden; text-overflow: ellipsis; }
+  #statusText.err { color: #FF9F96; white-space: normal; font-size: 12px; line-height: 1.35; }
+  #status.err { max-width: 250px; white-space: normal; }
+
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .dot.idle { background: rgba(235, 235, 245, 0.32); }
+  .dot.run  { background: #30D158; animation: breathe 1.8s ease-in-out infinite; }
+  .dot.hold { background: #FF9F0A; }
+  .dot.err  { background: #FF453A; }
+  @keyframes breathe { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  #gear {
+    width: 26px; height: 26px;
     flex-shrink: 0;
-  }
-  #editBtn:hover, #loopBtn:hover, #pauseBtn:hover { color: #38BDF8; background: #241e0c; }
-  #editBtn.active { color: #38BDF8; }
-  #loopBtn.active {
-    color: #fff;
-    background: #0284C7;
-    border-color: #38BDF8;
-    box-shadow: 0 0 10px rgba(56,189,248,0.5);
-  }
-  #pauseBtn { display: none; }
-  #pauseBtn.visible { display: flex; }
-  #pauseBtn.paused {
-    color: #fff;
-    background: #b45309;
-    border-color: #f59e0b;
-    box-shadow: 0 0 10px rgba(245,158,11,0.5);
-  }
-
-  /* Toast */
-  #toast {
-    position: absolute;
-    bottom: 58px; left: 0;
-    max-width: 240px;
-    padding: 8px 14px;
-    border-radius: 9px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    font-size: 13px; font-weight: 600; line-height: 1.4;
-    word-break: break-word;
-    pointer-events: none;
-    opacity: 0;
-    transform: translateY(4px);
-    transition: opacity 0.2s, transform 0.2s;
-  }
-  #toast.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
-  #toast.running {
-    background: rgba(28,21,7,0.96);
-    color: #7DD3FC;
-    border: 1px solid rgba(56,189,248,0.45);
-  }
-  #toast.success {
-    background: rgba(28,21,7,0.96);
-    color: #C9A96E;
-    border: 1px solid #38BDF8;
-  }
-
-  /* Settings panel */
-  #panel {
-    position: absolute; bottom: 58px; left: 0;
-    width: 260px;
-    max-height: 70vh;
-    overflow-y: auto;
-    background: #1c1507;
-    border: 1px solid #38BDF8;
-    border-radius: 12px;
-    padding: 13px 13px 12px;
-    box-shadow: 0 4px 28px rgba(56,189,248,0.15), 0 4px 24px rgba(0,0,0,0.5);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  }
-  #panel.hidden { display: none; }
-
-  .plabel {
-    font-size: 10px; font-weight: 600; color: #C9A96E;
-    text-transform: uppercase; letter-spacing: 0.07em;
-    margin-bottom: 6px;
-  }
-  .plabel span {
-    font-size: 9px; color: rgba(201,169,110,0.45);
-    font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: 4px;
-  }
-  .pdivider { height: 1px; background: rgba(56,189,248,0.18); margin: 10px 0; }
-
-  textarea, #msgInput {
-    width: 100%;
-    background: #130f04;
-    border: 1px solid rgba(56,189,248,0.3);
-    border-radius: 6px;
-    color: #f0ddb0;
-    font-size: 12px;
-    padding: 7px 9px;
-    outline: none;
-    font-family: inherit;
-  }
-  textarea { resize: vertical; min-height: 54px; }
-  textarea:focus, #msgInput:focus { border-color: #38BDF8; }
-  textarea::placeholder, #msgInput::placeholder { color: rgba(201,169,110,0.3); }
-
-  #presetSelect {
-    width: 100%;
-    background: #130f04;
-    border: 1px solid rgba(56,189,248,0.3);
-    border-radius: 6px;
-    color: #C9A96E;
-    font-size: 12px;
-    padding: 7px 9px;
-    outline: none;
-    font-family: inherit;
+    border: none;
+    background: transparent;
+    border-radius: 7px;
+    color: rgba(235, 235, 245, 0.45);
+    display: flex; align-items: center; justify-content: center;
     cursor: pointer;
-    margin-bottom: 2px;
+    transition: color 0.18s, background 0.18s;
   }
-  #presetSelect:focus { border-color: #38BDF8; }
-  .hidden { display: none !important; }
+  #gear svg { fill: currentColor; display: block; }
+  #gear:hover { color: #f5f5f7; background: rgba(120, 120, 128, 0.26); }
+  #gear.open { color: #0A84FF; }
 
-  #saveGoalBtn {
-    width: 100%; margin-top: 10px; padding: 8px;
-    background: linear-gradient(135deg, #38BDF8, #0284C7);
-    color: #fff; border: none;
-    border-radius: 7px; cursor: pointer; font-size: 12px;
-    font-weight: 600; font-family: inherit; letter-spacing: 0.01em;
-    transition: opacity 0.15s;
-    box-shadow: 0 1px 10px rgba(56,189,248,0.35);
+  /* ── Panel ── */
+  #panel {
+    position: absolute;
+    bottom: 52px; left: 0;
+    width: 318px;
+    max-height: 74vh;
+    overflow-y: auto;
+    border-radius: 17px;
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+    transform-origin: bottom left;
+    transition: opacity 0.2s cubic-bezier(0.32,0.72,0,1), transform 0.2s cubic-bezier(0.32,0.72,0,1);
+    pointer-events: none;
   }
-  #saveGoalBtn:hover { opacity: 0.88; }
+  #panel.show { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+  #panel::-webkit-scrollbar { width: 0; }
 
-  /* Stuck overlay */
-  #stuckOverlay {
-    display: none; position: fixed; inset: 0;
-    background: rgba(0,0,0,0.65);
-    z-index: 2147483647;
-    align-items: center; justify-content: center;
+  #head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 13px 14px 11px;
+    border-bottom: 0.5px solid rgba(255, 255, 255, 0.1);
+    position: sticky; top: 0;
+    background: rgba(28, 28, 30, 0.82);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+    border-radius: 17px 17px 0 0;
   }
-  #stuckOverlay.visible { display: flex; }
-  #stuckBox {
-    background: #1c1507;
-    border: 1px solid #38BDF8;
-    border-radius: 14px; padding: 22px 20px; text-align: center; width: 260px;
-    box-shadow: 0 8px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(56,189,248,0.1);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  #head span { font-size: 14px; font-weight: 600; color: #f5f5f7; letter-spacing: -0.01em; }
+  #close {
+    width: 22px; height: 22px; border: none;
+    background: rgba(120, 120, 128, 0.3);
+    border-radius: 50%; color: rgba(235, 235, 245, 0.6);
+    font-size: 13px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, color 0.15s;
   }
-  #stuckIcon { font-size: 28px; margin-bottom: 8px; }
-  #stuckTitle { font-size: 15px; color: #C9A96E; font-weight: 600; margin-bottom: 6px; }
-  #stuckMsg { font-size: 11.5px; color: rgba(201,169,110,0.5); margin-bottom: 16px; line-height: 1.5; word-break: break-word; }
-  #stuckOk {
-    background: linear-gradient(135deg, #38BDF8, #0284C7); color: #fff; border: none;
-    border-radius: 8px; padding: 9px 28px;
-    cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit;
-    box-shadow: 0 1px 10px rgba(56,189,248,0.35);
+  #close:hover { background: rgba(120, 120, 128, 0.45); color: #f5f5f7; }
+
+  #body { padding: 12px 14px 15px; }
+
+  .label {
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.05em; text-transform: uppercase;
+    color: rgba(235, 235, 245, 0.42);
+    margin: 0 0 6px 3px;
+  }
+  .label:not(:first-child) { margin-top: 15px; }
+
+  .group {
+    background: rgba(118, 118, 128, 0.18);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .row {
+    display: flex; align-items: center; gap: 9px;
+    padding: 0 11px;
+    min-height: 40px;
+  }
+  .row + .row { border-top: 0.5px solid rgba(255, 255, 255, 0.08); }
+  .row-label { flex: 1; font-size: 13.5px; color: #f5f5f7; letter-spacing: -0.01em; }
+  .row-hint { font-size: 11.5px; color: rgba(235,235,245,0.4); margin: 6px 3px 0; line-height: 1.4; }
+
+  /* Inputs */
+  select, textarea, input[type="password"], input[type="url"] {
+    width: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #f5f5f7;
+    font-family: inherit;
+    font-size: 13.5px;
+    letter-spacing: -0.01em;
+  }
+  select {
+    padding: 10px 0;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+  select option { background: #2c2c2e; color: #f5f5f7; }
+  textarea {
+    padding: 10px 11px;
+    resize: none;
+    min-height: 66px;
+    line-height: 1.45;
+  }
+  input[type="password"], input[type="url"] {
+    flex: 1;
+    padding: 10px 0;
+    font-size: 12.5px;
+  }
+  ::placeholder { color: rgba(235, 235, 245, 0.28); }
+
+  .chev {
+    flex-shrink: 0; font-size: 10px;
+    color: rgba(235, 235, 245, 0.35);
+    pointer-events: none;
+  }
+
+  .inline-btn {
+    flex-shrink: 0; border: none; background: transparent;
+    color: #0A84FF; font-family: inherit;
+    font-size: 13.5px; font-weight: 500;
+    cursor: pointer; padding: 4px 0;
     transition: opacity 0.15s;
   }
-  #stuckOk:hover { opacity: 0.88; }
+  .inline-btn:hover { opacity: 0.7; }
+  .inline-btn.done { color: #30D158; }
+
+  /* iOS switch */
+  .switch {
+    width: 40px; height: 24px; flex-shrink: 0;
+    border-radius: 999px;
+    background: rgba(120, 120, 128, 0.36);
+    position: relative; cursor: pointer;
+    transition: background 0.26s cubic-bezier(0.32,0.72,0,1);
+  }
+  .switch.on { background: #30D158; }
+  .switch::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.28);
+    transition: transform 0.26s cubic-bezier(0.32,0.72,0,1);
+  }
+  .switch.on::after { transform: translateX(16px); }
+
+  /* Reference list */
+  .ref-row span {
+    flex: 1; font-size: 12px;
+    color: rgba(235, 235, 245, 0.62);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ref-del {
+    flex-shrink: 0; border: none; background: transparent;
+    color: rgba(235, 235, 245, 0.3);
+    font-size: 15px; line-height: 1; cursor: pointer; padding: 2px 0;
+    transition: color 0.15s;
+  }
+  .ref-del:hover { color: #FF453A; }
+  .empty { font-size: 12.5px; color: rgba(235,235,245,0.3); padding: 11px; text-align: center; }
 </style>
 
-<div id="toast"></div>
+<div id="root">
+  <div id="panel" class="glass">
+    <div id="head">
+      <span>Page Agent</span>
+      <button id="close">✕</button>
+    </div>
+    <div id="body">
 
-<div id="panel" class="hidden">
-  <div class="plabel">Quick Goals</div>
-  <select id="presetSelect">
-    <option value="">— pick a preset —</option>
-  </select>
-  <div class="pdivider"></div>
-  <div class="plabel">Goal</div>
-  <textarea id="goalInput" rows="3" placeholder='Select a preset above or type your own goal…'></textarea>
-  <div class="pdivider"></div>
-  <div class="plabel">Success Message <span>5 words max · default: Done!</span></div>
-  <input type="text" id="msgInput" placeholder='e.g. Got it! or Correct!' maxlength="60" />
-  <button id="saveGoalBtn">Save</button>
-</div>
+      <div class="label">Mode</div>
+      <div class="group">
+        <div class="row">
+          <select id="preset"></select>
+          <span class="chev">▼</span>
+        </div>
+        <div class="row">
+          <span class="row-label">Auto-continue</span>
+          <div class="switch" id="autoSw"></div>
+        </div>
+      </div>
+      <div class="row-hint">Keeps going to the next question on its own.</div>
 
-<div id="btnRow">
-  <button id="editBtn" title="Edit saved goal">✎</button>
-  <button id="loopBtn" title="Loop mode: auto-run on each new question">↺</button>
-  <button id="pauseBtn" title="Pause / resume loop">⏸</button>
-  <button id="fab" title="Run saved goal">⚡</button>
-</div>
+      <div class="label">Instruction</div>
+      <div class="group">
+        <textarea id="goal" rows="3" placeholder="What should it do on each question?"></textarea>
+      </div>
 
-<div id="stuckOverlay">
-  <div id="stuckBox">
-    <div id="stuckIcon">⚠️</div>
-    <div id="stuckTitle">Got stuck</div>
-    <div id="stuckMsg"></div>
-    <button id="stuckOk">OK</button>
+      <div class="label">API Key</div>
+      <div class="group">
+        <div class="row">
+          <input type="password" id="key" placeholder="sk-ant-api03-…" autocomplete="off" spellcheck="false" />
+          <button class="inline-btn" id="saveKey">Save</button>
+        </div>
+      </div>
+
+      <div class="label">Reference Tabs</div>
+      <div class="group">
+        <div class="row">
+          <input type="url" id="refUrl" placeholder="https://…" spellcheck="false" />
+          <button class="inline-btn" id="addRef">Add</button>
+        </div>
+        <div id="refList"></div>
+      </div>
+      <div class="row-hint">Open tabs it can read as source material.</div>
+
+    </div>
+  </div>
+
+  <div id="bar" class="glass">
+    <button id="go"></button>
+    <div id="status"><span class="dot idle" id="dot"></span><span id="statusText">Ready</span></div>
+    <button id="gear"></button>
   </div>
 </div>
   `;
 
-  const fab          = shadow.getElementById('fab');
-  const editBtn      = shadow.getElementById('editBtn');
-  const loopBtn      = shadow.getElementById('loopBtn');
-  const pauseBtn     = shadow.getElementById('pauseBtn');
-  const panel        = shadow.getElementById('panel');
-  const goalInput    = shadow.getElementById('goalInput');
-  const msgInput     = shadow.getElementById('msgInput');
-  const saveGoalBtn  = shadow.getElementById('saveGoalBtn');
-  const toast        = shadow.getElementById('toast');
-  const stuckOverlay = shadow.getElementById('stuckOverlay');
-  const stuckMsg     = shadow.getElementById('stuckMsg');
-  const stuckOk      = shadow.getElementById('stuckOk');
+  const $ = id => shadow.getElementById(id);
+  const goBtn = $('go'), gear = $('gear'), panel = $('panel'), closeBtn = $('close');
+  const dot = $('dot'), statusText = $('statusText'), statusWrap = $('status');
+  const presetSel = $('preset'), goalInput = $('goal'), autoSw = $('autoSw');
+  const keyInput = $('key'), saveKeyBtn = $('saveKey');
+  const refInput = $('refUrl'), addRefBtn = $('addRef'), refList = $('refList');
 
-  let toastTimer    = null;
-  let isRunning     = false;
-  let savedGoal     = '';
+  gear.innerHTML = ICON_GEAR;
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  let savedGoal = '';
   let savedPostClicks = [];
-  let savedPresetIndex = null; // null = user typed a custom goal
-  let customMsg     = '';
-  let loopMode      = false;
-  let loopPaused    = false;
-  let loopCount     = 0;
+  let savedPresetIndex = null;
+  let autoContinue = true;
+  let refUrls = [];
 
-  // Load saved settings on init. If a preset was selected (rather than a custom
-  // goal typed by hand), read it fresh from PRESETS so preset improvements reach
-  // existing installs without needing to re-save.
-  chrome.storage.local.get(['lastGoal', 'lastPostClicks', 'lastPresetIndex', 'successMsg'], ({ lastGoal, lastPostClicks, lastPresetIndex, successMsg }) => {
-    const preset = PRESETS[lastPresetIndex];
-    if (preset) {
-      savedPresetIndex = lastPresetIndex;
-      savedGoal = preset.goal;
-      savedPostClicks = preset.postClicks;
-      presetSelect.value = String(lastPresetIndex);
-    } else if (lastGoal) {
-      savedGoal = lastGoal;
-      savedPostClicks = Array.isArray(lastPostClicks) ? lastPostClicks : [];
-    } else {
-      // First run — default to the full preset
-      savedPresetIndex = 0;
-      savedGoal = PRESETS[0].goal;
-      savedPostClicks = PRESETS[0].postClicks;
-      presetSelect.value = '0';
-      chrome.storage.local.set({ lastPresetIndex: 0 });
-    }
-    goalInput.value = savedGoal;
-    if (successMsg) { customMsg = successMsg; msgInput.value = successMsg; }
-  });
+  let isRunning = false;   // a request is in flight
+  let waiting   = false;   // between questions, watching for the page to change
+  let paused    = false;
+  let answered  = 0;
+  let errorMsg  = '';
+  let rateSecs  = 0;
 
-  // ── Presets dropdown ─────────────────────────────────────────────────────
-  const presetSelect = shadow.getElementById('presetSelect');
+  let runToken = 0;        // bumped on stop so in-flight replies are ignored
+  let pollTimer = null, rateTimer = null;
+  let lastRunAt = 0;
+
   const PRESETS = [
     {
-      label: 'McGraw Hill — Full (Answer + Confidence + Next)',
+      label: 'Full — answer, confidence, next',
       goal: 'Answer the question: click the correct choice, select every choice if it says "select all that apply", type the answer into any blanks, or for drag questions move items into place one move at a time.',
       postClicks: [
         { label: 'High Confidence', candidates: [{ selector: '[data-automation-id="confidence-buttons--high_confidence"]' }, { ariaLabel: 'High Confidence' }] },
@@ -511,232 +559,289 @@ async function execute(action) {
       ]
     },
     {
-      label: 'McGraw Hill — Answer only',
+      label: 'Answer only',
       goal: 'Answer the question: click the correct choice, select every choice if it says "select all that apply", type the answer into any blanks, or for drag questions move items into place one move at a time.',
       postClicks: []
     }
   ];
+
   PRESETS.forEach((p, i) => {
-    const opt = document.createElement('option');
-    opt.value = i;
-    opt.textContent = p.label;
-    presetSelect.appendChild(opt);
+    const o = document.createElement('option');
+    o.value = i; o.textContent = p.label;
+    presetSel.appendChild(o);
   });
-  presetSelect.addEventListener('change', () => {
-    const i = parseInt(presetSelect.value);
-    const preset = PRESETS[i];
-    if (preset) {
-      savedPresetIndex = i;
-      goalInput.value = preset.goal;
-      savedPostClicks = preset.postClicks || [];
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  function render() {
+    const active = isRunning || waiting || rateSecs > 0;
+    goBtn.innerHTML = active ? ICON_PAUSE : ICON_PLAY;
+    goBtn.classList.toggle('active', active);
+    goBtn.title = active ? 'Stop' : 'Start';
+
+    let cls = 'idle', text = 'Ready';
+    if (errorMsg)        { cls = 'err';  text = errorMsg; }
+    else if (rateSecs)   { cls = 'hold'; text = `Rate limited · ${rateSecs}s`; }
+    else if (paused)     { cls = 'hold'; text = 'Paused'; }
+    else if (isRunning)  { cls = 'run';  text = 'Answering…'; }
+    else if (waiting)    { cls = 'run';  text = 'Next question…'; }
+
+    if (answered > 0 && !errorMsg) text += ` · ${answered}`;
+
+    dot.className = 'dot ' + cls;
+    statusText.textContent = text;
+    statusText.classList.toggle('err', !!errorMsg);
+    statusWrap.classList.toggle('err', !!errorMsg);
+  }
+
+  function fail(msg) {
+    errorMsg = msg;
+    isRunning = waiting = false;
+    render();
+  }
+
+  // ── Persistence ────────────────────────────────────────────────────────────
+  chrome.storage.local.get(
+    ['lastGoal', 'lastPostClicks', 'lastPresetIndex', 'autoContinue', 'apiKey', 'refUrls'],
+    s => {
+      const preset = PRESETS[s.lastPresetIndex];
+      if (preset) {
+        savedPresetIndex = s.lastPresetIndex;
+        savedGoal = preset.goal;
+        savedPostClicks = preset.postClicks;
+        presetSel.value = String(s.lastPresetIndex);
+      } else if (s.lastGoal) {
+        savedGoal = s.lastGoal;
+        savedPostClicks = Array.isArray(s.lastPostClicks) ? s.lastPostClicks : [];
+      } else {
+        savedPresetIndex = 0;
+        savedGoal = PRESETS[0].goal;
+        savedPostClicks = PRESETS[0].postClicks;
+        presetSel.value = '0';
+        chrome.storage.local.set({ lastPresetIndex: 0 });
+      }
+      goalInput.value = savedGoal;
+
+      autoContinue = s.autoContinue !== false;
+      autoSw.classList.toggle('on', autoContinue);
+
+      if (s.apiKey) keyInput.value = s.apiKey;
+      if (Array.isArray(s.refUrls)) refUrls = s.refUrls;
+      renderRefs();
+      render();
     }
-  });
+  );
 
-  // Enforce 5-word limit on message input
-  msgInput.addEventListener('input', () => {
-    const words = msgInput.value.trim().split(/\s+/).filter(Boolean);
-    if (words.length > 5) msgInput.value = words.slice(0, 5).join(' ');
-  });
-
-  // Toggle goal editor panel
-  editBtn.addEventListener('click', () => {
-    const hidden = panel.classList.toggle('hidden');
-    editBtn.classList.toggle('active', !hidden);
-    if (!hidden) goalInput.focus();
-  });
-
-  // Save goal + message and close panel
-  saveGoalBtn.addEventListener('click', () => {
-    const val = goalInput.value.trim();
-    if (!val) return;
-    savedGoal = val;
-    // If the text still matches its preset, keep tracking the preset so future
-    // preset updates apply automatically. If edited, treat it as a custom goal.
-    if (savedPresetIndex !== null && PRESETS[savedPresetIndex]?.goal !== val) {
-      savedPresetIndex = null;
-    }
-    const words = msgInput.value.trim().split(/\s+/).filter(Boolean).slice(0, 5);
-    customMsg = words.join(' ');
-    msgInput.value = customMsg;
+  function persistGoal() {
     chrome.storage.local.set({
-      lastGoal: val,
+      lastGoal: savedGoal,
       lastPostClicks: savedPostClicks,
-      lastPresetIndex: savedPresetIndex,
-      successMsg: customMsg
+      lastPresetIndex: savedPresetIndex
     });
-    panel.classList.add('hidden');
-    editBtn.classList.remove('active');
-    showToast('running', 'Saved');
-    setTimeout(() => hideToast(), 1500);
+  }
+
+  // ── Settings wiring ────────────────────────────────────────────────────────
+  presetSel.addEventListener('change', () => {
+    const i = parseInt(presetSel.value);
+    const p = PRESETS[i];
+    if (!p) return;
+    savedPresetIndex = i;
+    savedGoal = p.goal;
+    savedPostClicks = p.postClicks || [];
+    goalInput.value = p.goal;
+    persistGoal();
   });
 
-
-  goalInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveGoalBtn.click();
-    if (e.key === 'Escape') {
-      panel.classList.add('hidden');
-      editBtn.classList.remove('active');
-    }
+  let goalDebounce = null;
+  goalInput.addEventListener('input', () => {
+    clearTimeout(goalDebounce);
+    goalDebounce = setTimeout(() => {
+      const v = goalInput.value.trim();
+      if (!v) return;
+      savedGoal = v;
+      // Edited away from the preset text? Treat it as a custom instruction.
+      if (savedPresetIndex !== null && PRESETS[savedPresetIndex]?.goal !== v) {
+        savedPresetIndex = null;
+      }
+      persistGoal();
+    }, 400);
   });
 
-  // FAB = one-tap run
-  fab.addEventListener('click', () => {
-    if (isRunning) return;
-    if (!savedGoal) {
-      panel.classList.remove('hidden');
-      editBtn.classList.add('active');
-      goalInput.focus();
+  autoSw.addEventListener('click', () => {
+    autoContinue = !autoContinue;
+    autoSw.classList.toggle('on', autoContinue);
+    chrome.storage.local.set({ autoContinue });
+  });
+
+  saveKeyBtn.addEventListener('click', () => {
+    const k = keyInput.value.trim();
+    if (!k) return;
+    chrome.storage.local.set({ apiKey: k }, () => {
+      saveKeyBtn.textContent = 'Saved';
+      saveKeyBtn.classList.add('done');
+      setTimeout(() => {
+        saveKeyBtn.textContent = 'Save';
+        saveKeyBtn.classList.remove('done');
+      }, 1600);
+    });
+  });
+  keyInput.addEventListener('keydown', e => { if (e.key === 'Enter') saveKeyBtn.click(); });
+
+  function renderRefs() {
+    refList.innerHTML = '';
+    if (!refUrls.length) {
+      const d = document.createElement('div');
+      d.className = 'empty';
+      d.textContent = 'None added';
+      refList.appendChild(d);
       return;
     }
+    refUrls.forEach((url, i) => {
+      const row = document.createElement('div');
+      row.className = 'row ref-row';
+      const s = document.createElement('span');
+      s.textContent = url.replace(/^https?:\/\//, '');
+      s.title = url;
+      const b = document.createElement('button');
+      b.className = 'ref-del';
+      b.textContent = '✕';
+      b.addEventListener('click', () => {
+        refUrls.splice(i, 1);
+        chrome.storage.local.set({ refUrls });
+        renderRefs();
+      });
+      row.append(s, b);
+      refList.appendChild(row);
+    });
+  }
+
+  function addRef() {
+    const u = refInput.value.trim();
+    if (!u) return;
+    if (!/^https?:\/\//.test(u)) { fail('URL must start with http:// or https://'); return; }
+    if (!refUrls.includes(u)) {
+      refUrls.push(u);
+      chrome.storage.local.set({ refUrls });
+      renderRefs();
+    }
+    refInput.value = '';
+  }
+  addRefBtn.addEventListener('click', addRef);
+  refInput.addEventListener('keydown', e => { if (e.key === 'Enter') addRef(); });
+
+  // ── Panel open/close ───────────────────────────────────────────────────────
+  function togglePanel(open) {
+    const show = open ?? !panel.classList.contains('show');
+    panel.classList.toggle('show', show);
+    gear.classList.toggle('open', show);
+  }
+  gear.addEventListener('click', () => togglePanel());
+  closeBtn.addEventListener('click', () => togglePanel(false));
+  shadow.addEventListener('keydown', e => { if (e.key === 'Escape') togglePanel(false); });
+
+  // ── Run control ────────────────────────────────────────────────────────────
+  goBtn.addEventListener('click', () => {
+    if (isRunning || waiting || rateSecs > 0) { stopAll(); return; }
+    errorMsg = '';
+    paused = false;
+    answered = 0;
+    if (!savedGoal) { togglePanel(true); goalInput.focus(); return; }
     triggerRun();
   });
 
-  stuckOk.addEventListener('click', () => stuckOverlay.classList.remove('visible'));
-
-  loopBtn.addEventListener('click', () => {
-    loopMode = !loopMode;
-    loopCount = 0;
-    loopPaused = false;
-    loopBtn.classList.toggle('active', loopMode);
-    pauseBtn.classList.toggle('visible', loopMode);
-    pauseBtn.classList.remove('paused');
-    pauseBtn.title = 'Pause loop';
-    pauseBtn.textContent = '⏸';
-    showToast('running', loopMode ? 'Loop ON — will auto-continue' : 'Loop OFF');
-    setTimeout(() => hideToast(), 1800);
-  });
-
-  pauseBtn.addEventListener('click', () => {
-    loopPaused = !loopPaused;
-    pauseBtn.classList.toggle('paused', loopPaused);
-    pauseBtn.textContent = loopPaused ? '▶' : '⏸';
-    pauseBtn.title = loopPaused ? 'Resume loop' : 'Pause loop';
-    if (loopPaused) {
-      clearTimeout(toastTimer);
-      showToast('running', 'Loop paused — press ▶ to resume');
-    } else {
-      showToast('running', 'Resuming…');
-      setTimeout(() => triggerRun(), 500);
-    }
-  });
-
-  function setRunning(on) {
-    isRunning = on;
-    fab.classList.toggle('running', on);
-  }
-
-  function showToast(type, text) {
-    clearTimeout(toastTimer);
-    toast.className = type;
-    toast.textContent = text;
-    toast.classList.add('show');
-  }
-
-  function hideToast() {
-    toast.classList.remove('show');
-  }
-
-  function showStuck(msg) {
-    hideToast();
-    stuckMsg.textContent = msg;
-    stuckOverlay.classList.add('visible');
-  }
-
-  // Poll until page content changes (new question loaded), then fire.
-  // Falls back after 5s so we never hang forever.
-  function waitForPageChange(snapText) {
-    const deadline = Date.now() + 5000;
-    function check() {
-      if (loopPaused || !loopMode) return;
-      const root = document.querySelector('[role="main"], main, article, form') ?? document.body;
-      const now = (root.innerText ?? '').slice(0, 400);
-      if (now !== snapText || Date.now() > deadline) {
-        triggerRun();
-      } else {
-        setTimeout(check, 150);
-      }
-    }
-    setTimeout(check, 150);
+  function stopAll() {
+    runToken++;                     // invalidates any in-flight reply
+    clearTimeout(pollTimer);
+    clearTimeout(rateTimer);
+    isRunning = waiting = false;
+    paused = false;
+    rateSecs = 0;
+    render();
   }
 
   function triggerRun() {
     if (isRunning || !savedGoal) return;
+    const token = ++runToken;
+    isRunning = true;
+    waiting = false;
+    errorMsg = '';
     lastRunAt = Date.now();
-    setRunning(true);
-    hideToast();
-    showToast('running', 'Running…');
-    chrome.runtime.sendMessage({ type: 'RUN_GOAL', goal: savedGoal, postClicks: savedPostClicks }, handleResult);
-  }
+    render();
 
-  let rateLimitTimer = null;
+    chrome.runtime.sendMessage(
+      { type: 'RUN_GOAL', goal: savedGoal, postClicks: savedPostClicks },
+      result => {
+        if (token !== runToken) return;   // stopped, or superseded
+        isRunning = false;
 
-  function handleResult(result) {
-    setRunning(false);
-    hideToast();
-    if (chrome.runtime.lastError || !result) {
-      showStuck(chrome.runtime.lastError?.message ?? 'No response from background.');
-      return;
-    }
-    if (result.success) {
-      if (result.noAnswer) {
-        // Claude found no answer to click — don't loop forever burning API calls.
-        // Likely an unsupported question type (e.g. drag-and-drop ordering).
-        if (loopMode) {
-          loopPaused = true;
-          pauseBtn.classList.add('paused');
-          pauseBtn.textContent = '▶';
-          pauseBtn.title = 'Resume loop';
+        if (chrome.runtime.lastError || !result) {
+          fail(chrome.runtime.lastError?.message ?? 'No response from background.');
+          return;
         }
-        showStuck('No clickable answer found — this may be a question type not supported yet (like drag-and-drop). Handle it manually, then press ▶ to resume.');
-        return;
-      }
-      loopCount++;
-      if (loopMode && !loopPaused) {
-        showToast('success', `Done #${loopCount} — waiting for next…`);
+
+        if (!result.success) {
+          const err = result.error ?? 'Unknown error.';
+          if (err.includes('Rate limit')) startRateCountdown();
+          else fail(err);
+          return;
+        }
+
+        if (result.noAnswer) {
+          // Nothing clickable — likely a question type we can't do yet.
+          paused = true;
+          fail("Couldn't find an answer here. Do this one yourself, then press play.");
+          return;
+        }
+
+        answered++;
+        if (!autoContinue) { render(); return; }
+
+        // Wait for the page to actually change before the next question
         const root = document.querySelector('[role="main"], main, article, form') ?? document.body;
-        const snapText = (root.innerText ?? '').slice(0, 400);
-        waitForPageChange(snapText);
-      } else if (loopMode && loopPaused) {
-        showToast('running', `Done #${loopCount} — paused`);
-      } else {
-        showToast('success', customMsg || 'Done!');
-        toastTimer = setTimeout(() => hideToast(), 2500);
+        waitForPageChange((root.innerText ?? '').slice(0, 400), token);
       }
-    } else {
-      const err = result.error ?? 'Unknown error.';
-      if (err.includes('Rate limit')) {
-        startRateLimitCountdown();
-      } else {
-        showStuck(err);
-      }
-    }
+    );
   }
 
-  function startRateLimitCountdown() {
-    clearTimeout(rateLimitTimer);
-    let secs = 65;
-    function tick() {
-      showToast('running', `Rate limited — retrying in ${secs}s…`);
-      if (secs <= 0) {
+  // Poll until the question content changes, then run again. 5s fallback so a
+  // page that re-renders identically never strands the loop.
+  function waitForPageChange(snapshot, token) {
+    waiting = true;
+    render();
+    const deadline = Date.now() + 5000;
+    (function check() {
+      if (token !== runToken) return;
+      const root = document.querySelector('[role="main"], main, article, form') ?? document.body;
+      const now = (root.innerText ?? '').slice(0, 400);
+      if (now !== snapshot || Date.now() > deadline) {
+        waiting = false;
         triggerRun();
-        return;
+      } else {
+        pollTimer = setTimeout(check, 150);
       }
-      secs--;
-      rateLimitTimer = setTimeout(tick, 1000);
-    }
-    tick();
+    })();
   }
 
-  // ── Auto-run on new question ─────────────────────────────────────────────
-  let lastAutoUrl  = '';
-  let autoRunTimer = null;
-  const COOLDOWN   = 5000; // minimum ms between auto-runs
-  let lastRunAt    = 0;
+  function startRateCountdown() {
+    const token = runToken;
+    rateSecs = 65;
+    render();
+    (function tick() {
+      if (token !== runToken) return;
+      if (rateSecs <= 0) { rateSecs = 0; triggerRun(); return; }
+      render();
+      rateSecs--;
+      rateTimer = setTimeout(tick, 1000);
+    })();
+  }
+
+  // ── Auto-run on SPA navigation ─────────────────────────────────────────────
+  let lastAutoUrl = '', autoTimer = null;
+  const COOLDOWN = 5000;
 
   function scheduleAutoRun() {
-    clearTimeout(autoRunTimer);
-    autoRunTimer = setTimeout(() => {
-      if (isRunning || !savedGoal) return;
+    clearTimeout(autoTimer);
+    autoTimer = setTimeout(() => {
+      if (isRunning || waiting || paused || !autoContinue || !savedGoal) return;
       const url = location.href;
       if (url === lastAutoUrl) return;
       if (Date.now() - lastRunAt < COOLDOWN) return;
@@ -745,16 +850,14 @@ async function execute(action) {
     }, 700);
   }
 
-  // Native popstate/hashchange (back/forward, hash nav)
   window.addEventListener('popstate', scheduleAutoRun);
   window.addEventListener('hashchange', scheduleAutoRun);
-
-  // Intercept pushState/replaceState for SPA navigation
-  for (const method of ['pushState', 'replaceState']) {
-    const orig = history[method].bind(history);
-    history[method] = (...args) => { orig(...args); scheduleAutoRun(); };
+  for (const m of ['pushState', 'replaceState']) {
+    const orig = history[m].bind(history);
+    history[m] = (...a) => { orig(...a); scheduleAutoRun(); };
   }
 
+  render();
   document.body.appendChild(host);
 })();
 

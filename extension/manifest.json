@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Claude Page Agent",
   "version": "1.0.0",
-  "description": "Type a goal; Claude clicks and fills the current page for you.",
+  "description": "Answers quiz questions on the current page with Claude.",
   "permissions": [
     "activeTab",
     "debugger",
