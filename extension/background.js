@@ -1,4 +1,37 @@
-const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
+// Per-model request differences. Prefill (seeding the reply with `{"action":"`)
+// is rejected with a 400 on Sonnet 5 / Opus 5, as is `temperature`, so those
+// models get structured outputs instead — which constrains the response to the
+// schema at the API level and is a stronger guarantee than prefill anyway.
+// Opus 5 also thinks by default, so it needs room under max_tokens.
+const MODELS = {
+  'claude-haiku-4-5': { label: 'Haiku 4.5', note: 'Fastest, cheapest', maxTokens: 200,  prefill: true, temperature: true },
+  'claude-sonnet-5':  { label: 'Sonnet 5',  note: 'Smarter, ~2x cost', maxTokens: 2048, effort: 'low' },
+  'claude-opus-5':    { label: 'Opus 5',    note: 'Smartest, ~5x cost', maxTokens: 2048, effort: 'low' }
+};
+const DEFAULT_MODEL = 'claude-haiku-4-5';
+
+const ACTION_SCHEMA = {
+  type: 'object',
+  properties: {
+    action:  { type: 'string', enum: ['click', 'clickMany', 'fill', 'dragMove', 'none'] },
+    index:   { type: 'integer' },
+    indexes: { type: 'array', items: { type: 'integer' } },
+    fills:   {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { index: { type: 'integer' }, value: { type: 'string' } },
+        required: ['index', 'value'],
+        additionalProperties: false
+      }
+    },
+    dir:     { type: 'string', enum: ['up', 'down', 'left', 'right'] },
+    steps:   { type: 'integer' }
+  },
+  required: ['action'],
+  additionalProperties: false
+};
+
 const MAX_RETRIES = 1;
 
 const SYSTEM_PROMPT = `Quiz bot. Complete the JSON:
@@ -9,7 +42,10 @@ const SYSTEM_PROMPT = `Quiz bot. Complete the JSON:
 {"action":"none"} — question fully answered, or nothing answerable on screen
 N = an index from the list. Never invent an index. Output only the JSON completion.`;
 
-async function callClaude(apiKey, goal, pageText, elements, refTexts = []) {
+async function callClaude(apiKey, goal, pageText, elements, refTexts = [], modelId = DEFAULT_MODEL) {
+  const model = MODELS[modelId] ? modelId : DEFAULT_MODEL;
+  const cfg = MODELS[model];
+
   const elementList = elements
     .map((el, i) => {
       const parts = [`[${i}]`, el.tag];
@@ -35,6 +71,24 @@ ${pageText.slice(0, 800)}${refSection}
 Elements (click by index):
 ${elementList || '(none found)'}`;
 
+  const requestBody = {
+    model,
+    max_tokens: cfg.maxTokens,
+    system: SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: userContent }]
+  };
+
+  if (cfg.temperature) requestBody.temperature = 0;
+
+  if (cfg.prefill) {
+    // Seeding the reply mid-JSON makes prose structurally impossible
+    requestBody.messages.push({ role: 'assistant', content: '{"action":"' });
+  } else {
+    // Prefill 400s on these models; constrain the response shape instead
+    requestBody.output_config = { format: { type: 'json_schema', schema: ACTION_SCHEMA } };
+    if (cfg.effort) requestBody.output_config.effort = cfg.effort;
+  }
+
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -43,16 +97,7 @@ ${elementList || '(none found)'}`;
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true'
     },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: 150,
-      temperature: 0,
-      system: SYSTEM_PROMPT,
-      messages: [
-        { role: 'user', content: userContent },
-        { role: 'assistant', content: '{"action":"' }  // prefill forces JSON start
-      ]
-    })
+    body: JSON.stringify(requestBody)
   });
 
   if (!response.ok) {
@@ -64,9 +109,10 @@ ${elementList || '(none found)'}`;
   }
 
   const data = await response.json();
-  // Reconstruct full JSON: prefill + Claude's completion
-  const raw = '{"action":"' + (data.content?.[0]?.text ?? '');
-  const cleaned = raw.trim();
+  // Find the text block specifically — thinking models emit other block types first
+  const text = data.content?.find(b => b.type === 'text')?.text ?? '';
+  // Prefill responses are only the completion, so restore the seeded prefix
+  const cleaned = (cfg.prefill ? '{"action":"' + text : text).trim();
 
   // Extract the first complete {...} block in case Claude adds trailing text
   function extractJson(text) {
@@ -233,7 +279,7 @@ function sendToTab(tabId, msg) {
 const MAX_STEPS_SIMPLE = 1;
 const MAX_STEPS_DRAG   = 8;
 
-async function runGoal(apiKey, goal, tabId, refUrls = [], postClicks = []) {
+async function runGoal(apiKey, goal, tabId, refUrls = [], postClicks = [], modelId = DEFAULT_MODEL) {
   const refTexts = await getReferenceContent(refUrls);
 
   let budget = MAX_STEPS_SIMPLE;
@@ -251,7 +297,7 @@ async function runGoal(apiKey, goal, tabId, refUrls = [], postClicks = []) {
           throw new Error(pageData?.error ?? 'No response from content script');
         }
 
-        const action = await callClaude(apiKey, goal, pageData.text, pageData.elements, refTexts);
+        const action = await callClaude(apiKey, goal, pageData.text, pageData.elements, refTexts, modelId);
 
         if (action.action === 'none') {
           // Before any action: nothing on screen is answerable.
@@ -317,7 +363,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type !== 'RUN_GOAL') return;
 
   (async () => {
-    const { apiKey: rawKey } = await chrome.storage.local.get('apiKey');
+    const { apiKey: rawKey, model: savedModel } = await chrome.storage.local.get(['apiKey', 'model']);
+    const model = MODELS[savedModel] ? savedModel : DEFAULT_MODEL;
     const apiKey = rawKey ? rawKey.replace(/[^\x20-\x7E]/g, '').trim() : '';
     if (!apiKey) {
       sendResponse({ success: false, error: 'No API key saved. Enter it in the extension popup and click Save.' });
@@ -338,7 +385,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     let result;
     try {
-      result = await runGoal(apiKey, msg.goal, tabId, refUrls, msg.postClicks ?? []);
+      result = await runGoal(apiKey, msg.goal, tabId, refUrls, msg.postClicks ?? [], model);
     } finally {
       // Always release the tab so the "being debugged" banner doesn't linger
       await detachDebugger(tabId);

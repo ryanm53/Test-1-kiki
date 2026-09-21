@@ -488,6 +488,15 @@ async function execute(action) {
       </div>
       <div class="row-hint">Keeps going to the next question on its own.</div>
 
+      <div class="label">Model</div>
+      <div class="group">
+        <div class="row">
+          <select id="model"></select>
+          <span class="chev">▼</span>
+        </div>
+      </div>
+      <div class="row-hint" id="modelHint"></div>
+
       <div class="label">Instruction</div>
       <div class="group">
         <textarea id="goal" rows="3" placeholder="What should it do on each question?"></textarea>
@@ -526,6 +535,7 @@ async function execute(action) {
   const goBtn = $('go'), gear = $('gear'), panel = $('panel'), closeBtn = $('close');
   const dot = $('dot'), statusText = $('statusText'), statusWrap = $('status');
   const presetSel = $('preset'), goalInput = $('goal'), autoSw = $('autoSw');
+  const modelSel = $('model'), modelHint = $('modelHint');
   const keyInput = $('key'), saveKeyBtn = $('saveKey');
   const refInput = $('refUrl'), addRefBtn = $('addRef'), refList = $('refList');
 
@@ -571,6 +581,29 @@ async function execute(action) {
     presetSel.appendChild(o);
   });
 
+  // Keep in sync with MODELS in background.js
+  const MODEL_LIST = [
+    { id: 'claude-haiku-4-5', label: 'Haiku 4.5', note: 'Fastest and cheapest — about $0.05 per 100 questions.' },
+    { id: 'claude-sonnet-5',  label: 'Sonnet 5',  note: 'Noticeably better at the subject matter. Roughly 2× the cost.' },
+    { id: 'claude-opus-5',    label: 'Opus 5',    note: 'Most capable, and slower. Roughly 5× the cost.' }
+  ];
+  const DEFAULT_MODEL = 'claude-haiku-4-5';
+
+  MODEL_LIST.forEach(m => {
+    const o = document.createElement('option');
+    o.value = m.id; o.textContent = m.label;
+    modelSel.appendChild(o);
+  });
+
+  function showModelHint() {
+    modelHint.textContent = MODEL_LIST.find(m => m.id === modelSel.value)?.note ?? '';
+  }
+
+  modelSel.addEventListener('change', () => {
+    chrome.storage.local.set({ model: modelSel.value });
+    showModelHint();
+  });
+
   // ── Render ─────────────────────────────────────────────────────────────────
   function render() {
     const active = isRunning || waiting || rateSecs > 0;
@@ -601,7 +634,7 @@ async function execute(action) {
 
   // ── Persistence ────────────────────────────────────────────────────────────
   chrome.storage.local.get(
-    ['lastGoal', 'lastPostClicks', 'lastPresetIndex', 'autoContinue', 'apiKey', 'refUrls'],
+    ['lastGoal', 'lastPostClicks', 'lastPresetIndex', 'autoContinue', 'apiKey', 'refUrls', 'model'],
     s => {
       const preset = PRESETS[s.lastPresetIndex];
       if (preset) {
@@ -623,6 +656,9 @@ async function execute(action) {
 
       autoContinue = s.autoContinue !== false;
       autoSw.classList.toggle('on', autoContinue);
+
+      modelSel.value = MODEL_LIST.some(m => m.id === s.model) ? s.model : DEFAULT_MODEL;
+      showModelHint();
 
       if (s.apiKey) keyInput.value = s.apiKey;
       if (Array.isArray(s.refUrls)) refUrls = s.refUrls;
