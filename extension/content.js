@@ -370,6 +370,12 @@ async function execute(action) {
     margin: 0 0 6px 3px;
   }
   .label:not(:first-child) { margin-top: 15px; }
+  .opt {
+    font-size: 10px; font-weight: 500;
+    text-transform: none; letter-spacing: 0;
+    color: rgba(235, 235, 245, 0.28);
+    margin-left: 5px;
+  }
 
   .group {
     background: rgba(118, 118, 128, 0.18);
@@ -497,10 +503,11 @@ async function execute(action) {
       </div>
       <div class="row-hint" id="modelHint"></div>
 
-      <div class="label">Instruction</div>
+      <div class="label">Notes <span class="opt">Optional</span></div>
       <div class="group">
-        <textarea id="goal" rows="3" placeholder="What should it do on each question?"></textarea>
+        <textarea id="notes" rows="3" placeholder="e.g. This is financial accounting — use GAAP conventions."></textarea>
       </div>
+      <div class="row-hint">Course context or hints. Leave blank if you don't need it.</div>
 
       <div class="label">API Key</div>
       <div class="group">
@@ -534,7 +541,7 @@ async function execute(action) {
   const $ = id => shadow.getElementById(id);
   const goBtn = $('go'), gear = $('gear'), panel = $('panel'), closeBtn = $('close');
   const dot = $('dot'), statusText = $('statusText'), statusWrap = $('status');
-  const presetSel = $('preset'), goalInput = $('goal'), autoSw = $('autoSw');
+  const presetSel = $('preset'), notesInput = $('notes'), autoSw = $('autoSw');
   const modelSel = $('model'), modelHint = $('modelHint');
   const keyInput = $('key'), saveKeyBtn = $('saveKey');
   const refInput = $('refUrl'), addRefBtn = $('addRef'), refList = $('refList');
@@ -542,11 +549,11 @@ async function execute(action) {
   gear.innerHTML = ICON_GEAR;
 
   // ── State ──────────────────────────────────────────────────────────────────
-  let savedGoal = '';
-  let savedPostClicks = [];
-  let savedPresetIndex = null;
+  let presetIndex = 0;     // which post-answer flow; also supplies postClicks
+  let notes = '';          // optional user context, sent only when non-empty
   let autoContinue = true;
   let refUrls = [];
+  let hasKey = false;
 
   let isRunning = false;   // a request is in flight
   let waiting   = false;   // between questions, watching for the page to change
@@ -561,18 +568,13 @@ async function execute(action) {
 
   const PRESETS = [
     {
-      label: 'Full — answer, confidence, next',
-      goal: 'Answer the question: click the correct choice, select every choice if it says "select all that apply", type the answer into any blanks, or for drag questions move items into place one move at a time.',
+      label: 'Answer, confidence, next',
       postClicks: [
         { label: 'High Confidence', candidates: [{ selector: '[data-automation-id="confidence-buttons--high_confidence"]' }, { ariaLabel: 'High Confidence' }] },
         { label: 'Next Question',   candidates: [{ selector: '.next-button' }, { text: 'Next Question' }, { text: 'Next' }] }
       ]
     },
-    {
-      label: 'Answer only',
-      goal: 'Answer the question: click the correct choice, select every choice if it says "select all that apply", type the answer into any blanks, or for drag questions move items into place one move at a time.',
-      postClicks: []
-    }
+    { label: 'Answer only', postClicks: [] }
   ];
 
   PRESETS.forEach((p, i) => {
@@ -634,25 +636,13 @@ async function execute(action) {
 
   // ── Persistence ────────────────────────────────────────────────────────────
   chrome.storage.local.get(
-    ['lastGoal', 'lastPostClicks', 'lastPresetIndex', 'autoContinue', 'apiKey', 'refUrls', 'model'],
+    ['lastPresetIndex', 'notes', 'autoContinue', 'apiKey', 'refUrls', 'model'],
     s => {
-      const preset = PRESETS[s.lastPresetIndex];
-      if (preset) {
-        savedPresetIndex = s.lastPresetIndex;
-        savedGoal = preset.goal;
-        savedPostClicks = preset.postClicks;
-        presetSel.value = String(s.lastPresetIndex);
-      } else if (s.lastGoal) {
-        savedGoal = s.lastGoal;
-        savedPostClicks = Array.isArray(s.lastPostClicks) ? s.lastPostClicks : [];
-      } else {
-        savedPresetIndex = 0;
-        savedGoal = PRESETS[0].goal;
-        savedPostClicks = PRESETS[0].postClicks;
-        presetSel.value = '0';
-        chrome.storage.local.set({ lastPresetIndex: 0 });
-      }
-      goalInput.value = savedGoal;
+      presetIndex = PRESETS[s.lastPresetIndex] ? s.lastPresetIndex : 0;
+      presetSel.value = String(presetIndex);
+
+      notes = s.notes ?? '';
+      notesInput.value = notes;
 
       autoContinue = s.autoContinue !== false;
       autoSw.classList.toggle('on', autoContinue);
@@ -660,45 +650,24 @@ async function execute(action) {
       modelSel.value = MODEL_LIST.some(m => m.id === s.model) ? s.model : DEFAULT_MODEL;
       showModelHint();
 
-      if (s.apiKey) keyInput.value = s.apiKey;
+      if (s.apiKey) { keyInput.value = s.apiKey; hasKey = true; }
       if (Array.isArray(s.refUrls)) refUrls = s.refUrls;
       renderRefs();
       render();
     }
   );
 
-  function persistGoal() {
-    chrome.storage.local.set({
-      lastGoal: savedGoal,
-      lastPostClicks: savedPostClicks,
-      lastPresetIndex: savedPresetIndex
-    });
-  }
-
-  // ── Settings wiring ────────────────────────────────────────────────────────
   presetSel.addEventListener('change', () => {
-    const i = parseInt(presetSel.value);
-    const p = PRESETS[i];
-    if (!p) return;
-    savedPresetIndex = i;
-    savedGoal = p.goal;
-    savedPostClicks = p.postClicks || [];
-    goalInput.value = p.goal;
-    persistGoal();
+    presetIndex = parseInt(presetSel.value) || 0;
+    chrome.storage.local.set({ lastPresetIndex: presetIndex });
   });
 
-  let goalDebounce = null;
-  goalInput.addEventListener('input', () => {
-    clearTimeout(goalDebounce);
-    goalDebounce = setTimeout(() => {
-      const v = goalInput.value.trim();
-      if (!v) return;
-      savedGoal = v;
-      // Edited away from the preset text? Treat it as a custom instruction.
-      if (savedPresetIndex !== null && PRESETS[savedPresetIndex]?.goal !== v) {
-        savedPresetIndex = null;
-      }
-      persistGoal();
+  let notesDebounce = null;
+  notesInput.addEventListener('input', () => {
+    clearTimeout(notesDebounce);
+    notesDebounce = setTimeout(() => {
+      notes = notesInput.value.trim();
+      chrome.storage.local.set({ notes });
     }, 400);
   });
 
@@ -712,6 +681,7 @@ async function execute(action) {
     const k = keyInput.value.trim();
     if (!k) return;
     chrome.storage.local.set({ apiKey: k }, () => {
+      hasKey = true;
       saveKeyBtn.textContent = 'Saved';
       saveKeyBtn.classList.add('done');
       setTimeout(() => {
@@ -780,7 +750,7 @@ async function execute(action) {
     errorMsg = '';
     paused = false;
     answered = 0;
-    if (!savedGoal) { togglePanel(true); goalInput.focus(); return; }
+    if (!hasKey) { togglePanel(true); keyInput.focus(); return; }
     triggerRun();
   });
 
@@ -795,7 +765,7 @@ async function execute(action) {
   }
 
   function triggerRun() {
-    if (isRunning || !savedGoal) return;
+    if (isRunning) return;
     const token = ++runToken;
     isRunning = true;
     waiting = false;
@@ -804,7 +774,7 @@ async function execute(action) {
     render();
 
     chrome.runtime.sendMessage(
-      { type: 'RUN_GOAL', goal: savedGoal, postClicks: savedPostClicks },
+      { type: 'RUN_GOAL', notes, postClicks: PRESETS[presetIndex].postClicks },
       result => {
         if (token !== runToken) return;   // stopped, or superseded
         isRunning = false;
@@ -877,7 +847,7 @@ async function execute(action) {
   function scheduleAutoRun() {
     clearTimeout(autoTimer);
     autoTimer = setTimeout(() => {
-      if (isRunning || waiting || paused || !autoContinue || !savedGoal) return;
+      if (isRunning || waiting || paused || !autoContinue || !hasKey) return;
       const url = location.href;
       if (url === lastAutoUrl) return;
       if (Date.now() - lastRunAt < COOLDOWN) return;

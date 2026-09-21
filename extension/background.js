@@ -34,7 +34,7 @@ const ACTION_SCHEMA = {
 
 const MAX_RETRIES = 1;
 
-const SYSTEM_PROMPT = `Quiz bot. Complete the JSON:
+const SYSTEM_PROMPT = `Answer the quiz question on screen correctly. Reply with only this JSON:
 {"action":"click","index":N} — one answer
 {"action":"clickMany","indexes":[N,M]} — "select all that apply"; include every correct choice
 {"action":"dragMove","index":N,"dir":"up|down|left|right","steps":K} — drag question. up/down reorders an item within its own list; left/right moves it into a DIFFERENT list or drop zone. Item labels state which list they're in and their position — to place an unplaced choice into a drop zone use left/right, not up/down. One move per reply; you see the result and can move again.
@@ -42,7 +42,7 @@ const SYSTEM_PROMPT = `Quiz bot. Complete the JSON:
 {"action":"none"} — question fully answered, or nothing answerable on screen
 N = an index from the list. Never invent an index. Output only the JSON completion.`;
 
-async function callClaude(apiKey, goal, pageText, elements, refTexts = [], modelId = DEFAULT_MODEL) {
+async function callClaude(apiKey, notes, pageText, elements, refTexts = [], modelId = DEFAULT_MODEL) {
   const model = MODELS[modelId] ? modelId : DEFAULT_MODEL;
   const cfg = MODELS[model];
 
@@ -63,9 +63,10 @@ async function callClaude(apiKey, goal, pageText, elements, refTexts = [], model
       refTexts.map(r => `--- ${r.url} ---\n${r.text}`).join('\n\n')
     : '';
 
-  const userContent = `Goal: ${goal}
+  // Optional user context (subject, conventions, hints) — omitted when blank
+  const notesSection = notes ? `Notes from the user: ${notes}\n\n` : '';
 
-Page text:
+  const userContent = `${notesSection}Page text:
 ${pageText.slice(0, 800)}${refSection}
 
 Elements (click by index):
@@ -279,7 +280,7 @@ function sendToTab(tabId, msg) {
 const MAX_STEPS_SIMPLE = 1;
 const MAX_STEPS_DRAG   = 8;
 
-async function runGoal(apiKey, goal, tabId, refUrls = [], postClicks = [], modelId = DEFAULT_MODEL) {
+async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], modelId = DEFAULT_MODEL) {
   const refTexts = await getReferenceContent(refUrls);
 
   let budget = MAX_STEPS_SIMPLE;
@@ -297,7 +298,7 @@ async function runGoal(apiKey, goal, tabId, refUrls = [], postClicks = [], model
           throw new Error(pageData?.error ?? 'No response from content script');
         }
 
-        const action = await callClaude(apiKey, goal, pageData.text, pageData.elements, refTexts, modelId);
+        const action = await callClaude(apiKey, notes, pageData.text, pageData.elements, refTexts, modelId);
 
         if (action.action === 'none') {
           // Before any action: nothing on screen is answerable.
@@ -385,7 +386,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     let result;
     try {
-      result = await runGoal(apiKey, msg.goal, tabId, refUrls, msg.postClicks ?? [], model);
+      result = await runGoal(apiKey, msg.notes ?? '', tabId, refUrls, msg.postClicks ?? [], model);
     } finally {
       // Always release the tab so the "being debugged" banner doesn't linger
       await detachDebugger(tabId);
