@@ -10,6 +10,22 @@ const MODELS = {
 };
 const DEFAULT_MODEL = 'claude-haiku-4-5';
 
+// Worksheets and drag questions need real reasoning — multi-step arithmetic in
+// one case, spatial planning over several moves in the other — where the cheap
+// model tends to fumble. One tier up, only for those, so ordinary multiple
+// choice keeps costing what it costs.
+const UPGRADE_TO = {
+  'claude-haiku-4-5': 'claude-sonnet-5',
+  'claude-sonnet-5':  'claude-opus-5',
+  'claude-opus-5':    'claude-opus-5'
+};
+
+function pickModel(baseModel, pageData, autoUpgrade) {
+  if (!autoUpgrade) return baseModel;
+  const hard = pageData?.isWorksheet || pageData?.isDrag;
+  return hard ? (UPGRADE_TO[baseModel] ?? baseModel) : baseModel;
+}
+
 const ACTION_SCHEMA = {
   type: 'object',
   properties: {
@@ -295,8 +311,9 @@ function sendToTab(tabId, msg) {
 const MAX_STEPS_SIMPLE = 1;
 const MAX_STEPS_DRAG   = 8;
 
-async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], modelId = DEFAULT_MODEL) {
+async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true) {
   const refTexts = await getReferenceContent(refUrls);
+  let usedModel = baseModel;   // reported back so the UI can show an upgrade
 
   let budget = MAX_STEPS_SIMPLE;
   let completed = 0;
@@ -313,12 +330,13 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], mode
           throw new Error(pageData?.error ?? 'No response from content script');
         }
 
-        const action = await callClaude(apiKey, notes, pageData.text, pageData.elements, refTexts, modelId, !!pageData.isWorksheet);
+        usedModel = pickModel(baseModel, pageData, autoUpgrade);
+        const action = await callClaude(apiKey, notes, pageData.text, pageData.elements, refTexts, usedModel, !!pageData.isWorksheet);
 
         if (action.action === 'none') {
           // Before any action: nothing on screen is answerable.
           // After a move: the drag arrangement is complete.
-          if (completed === 0) return { success: true, action, noAnswer: true };
+          if (completed === 0) return { success: true, action, noAnswer: true, usedModel };
           finished = true;
           stepDone = true;
           break;
@@ -372,15 +390,16 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], mode
     await new Promise(r => setTimeout(r, 400));
   }
 
-  return { success: true, message: 'Done' };
+  return { success: true, message: 'Done', usedModel };
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type !== 'RUN_GOAL') return;
 
   (async () => {
-    const { apiKey: rawKey, model: savedModel } = await chrome.storage.local.get(['apiKey', 'model']);
-    const model = MODELS[savedModel] ? savedModel : DEFAULT_MODEL;
+    const { apiKey: rawKey, model: savedModel, autoUpgrade } =
+      await chrome.storage.local.get(['apiKey', 'model', 'autoUpgrade']);
+    const baseModel = MODELS[savedModel] ? savedModel : DEFAULT_MODEL;
     const apiKey = rawKey ? rawKey.replace(/[^\x20-\x7E]/g, '').trim() : '';
     if (!apiKey) {
       sendResponse({ success: false, error: 'No API key saved. Enter it in the extension popup and click Save.' });
@@ -401,7 +420,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     let result;
     try {
-      result = await runGoal(apiKey, msg.notes ?? '', tabId, refUrls, msg.postClicks ?? [], model);
+      result = await runGoal(apiKey, msg.notes ?? '', tabId, refUrls, msg.postClicks ?? [], baseModel, autoUpgrade !== false);
     } finally {
       // Always release the tab so the "being debugged" banner doesn't linger
       await detachDebugger(tabId);

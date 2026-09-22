@@ -170,6 +170,11 @@ function scrape() {
   const fields = all.filter(isTableField);
   const isWorksheet = fields.length >= 4;
 
+  // Drag questions need spatial reasoning over several sequential moves
+  const isDrag = !!document.querySelector(
+    '[data-rbd-drag-handle-draggable-id], [data-react-beautiful-dnd-drag-handle]'
+  );
+
   if (isWorksheet) {
     // Put the fields first so the cap can never truncate one away, then fill the
     // remaining slots with everything else (nav, submit buttons) in page order.
@@ -182,7 +187,8 @@ function scrape() {
   return {
     text: (root.innerText ?? '').slice(0, 5000),
     elements: _lastElements.map(describeEl),
-    isWorksheet
+    isWorksheet,
+    isDrag
   };
 }
 
@@ -588,8 +594,13 @@ async function execute(action) {
           <select id="model"></select>
           <span class="chev">▼</span>
         </div>
+        <div class="row">
+          <span class="row-label">Upgrade on hard questions</span>
+          <div class="switch" id="upgradeSw"></div>
+        </div>
       </div>
       <div class="row-hint" id="modelHint"></div>
+      <div class="row-hint">Worksheets and drag questions use one tier up, where the cheap model tends to slip. Everything else stays on your pick.</div>
 
       <div class="label">Notes <span class="opt">Optional</span></div>
       <div class="group">
@@ -630,7 +641,7 @@ async function execute(action) {
   const goBtn = $('go'), gear = $('gear'), panel = $('panel'), closeBtn = $('close');
   const dot = $('dot'), statusText = $('statusText'), statusWrap = $('status');
   const presetSel = $('preset'), notesInput = $('notes'), autoSw = $('autoSw');
-  const modelSel = $('model'), modelHint = $('modelHint');
+  const modelSel = $('model'), modelHint = $('modelHint'), upgradeSw = $('upgradeSw');
   const keyInput = $('key'), saveKeyBtn = $('saveKey');
   const refInput = $('refUrl'), addRefBtn = $('addRef'), refList = $('refList');
 
@@ -640,8 +651,10 @@ async function execute(action) {
   let presetIndex = 0;     // which post-answer flow; also supplies postClicks
   let notes = '';          // optional user context, sent only when non-empty
   let autoContinue = true;
+  let autoUpgrade = true;
   let refUrls = [];
   let hasKey = false;
+  let lastModel = '';    // model the most recent question actually used
 
   let isRunning = false;   // a request is in flight
   let waiting   = false;   // between questions, watching for the page to change
@@ -709,6 +722,10 @@ async function execute(action) {
     else if (waiting)    { cls = 'run';  text = 'Next question…'; }
 
     if (answered > 0 && !errorMsg) text += ` · ${answered}`;
+    // Show the model only when it differs from the one picked in settings
+    if (lastModel && lastModel !== modelSel.value && !errorMsg) {
+      text += ` · ↑ ${MODEL_LIST.find(m => m.id === lastModel)?.label ?? lastModel}`;
+    }
 
     dot.className = 'dot ' + cls;
     statusText.textContent = text;
@@ -724,7 +741,7 @@ async function execute(action) {
 
   // ── Persistence ────────────────────────────────────────────────────────────
   chrome.storage.local.get(
-    ['lastPresetIndex', 'notes', 'autoContinue', 'apiKey', 'refUrls', 'model'],
+    ['lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'refUrls', 'model'],
     s => {
       presetIndex = PRESETS[s.lastPresetIndex] ? s.lastPresetIndex : 0;
       presetSel.value = String(presetIndex);
@@ -734,6 +751,9 @@ async function execute(action) {
 
       autoContinue = s.autoContinue !== false;
       autoSw.classList.toggle('on', autoContinue);
+
+      autoUpgrade = s.autoUpgrade !== false;
+      upgradeSw.classList.toggle('on', autoUpgrade);
 
       modelSel.value = MODEL_LIST.some(m => m.id === s.model) ? s.model : DEFAULT_MODEL;
       showModelHint();
@@ -757,6 +777,12 @@ async function execute(action) {
       notes = notesInput.value.trim();
       chrome.storage.local.set({ notes });
     }, 400);
+  });
+
+  upgradeSw.addEventListener('click', () => {
+    autoUpgrade = !autoUpgrade;
+    upgradeSw.classList.toggle('on', autoUpgrade);
+    chrome.storage.local.set({ autoUpgrade });
   });
 
   autoSw.addEventListener('click', () => {
@@ -838,6 +864,7 @@ async function execute(action) {
     errorMsg = '';
     paused = false;
     answered = 0;
+    lastModel = '';
     if (!hasKey) { togglePanel(true); keyInput.focus(); return; }
     triggerRun();
   });
@@ -886,6 +913,7 @@ async function execute(action) {
           return;
         }
 
+        lastModel = result.usedModel ?? '';
         answered++;
         if (!autoContinue) { render(); return; }
 

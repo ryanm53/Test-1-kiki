@@ -127,6 +127,7 @@ Click the **gear ⚙** to open these.
 | **Mode** | *Answer, confidence, next* does the full flow. *Answer only* stops after picking the answer, so you click through yourself |
 | **Auto-continue** | On: works through the whole quiz. Off: does one question per press of play |
 | **Model** | Which AI does the thinking. **Haiku 4.5** is the default — fastest and cheapest. **Sonnet 5** is noticeably smarter for about 2× the cost. **Opus 5** is the most capable, about 5× |
+| **Upgrade on hard questions** | On by default. Multi-blank worksheets and drag-and-drop questions need real reasoning, so those automatically use one tier up while everything else stays on your pick. When it upgrades, the status bar shows **↑ Sonnet 5** so you can see it happen. Turn this off to always use your chosen model |
 | **Notes** *(optional)* | Extra context to improve accuracy, e.g. *"This is financial accounting — use GAAP conventions."* Fine to leave blank |
 | **API Key** | Your key from Step 3 |
 | **Reference Tabs** | Paste the address of another open tab (your textbook, notes, a study guide) and it reads that as source material when answering |
