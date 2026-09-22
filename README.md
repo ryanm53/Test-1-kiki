@@ -105,6 +105,11 @@ It reads the question, picks an answer, clicks it, then clicks **High Confidence
 
 Press the same button again — it's now a **stop button ⏸** — to halt at any point.
 
+**Moving the bar:** drag it by its middle — the dark area around the text, not the
+buttons — and drop it anywhere on screen. It stays where you put it, on that page
+and every page after, so if it ever covers a question or a button you need, just
+move it out of the way once.
+
 The bar shows you what's happening as it goes:
 
 | What it says | Meaning |

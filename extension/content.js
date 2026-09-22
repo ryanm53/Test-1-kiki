@@ -459,9 +459,14 @@ const RELOAD_MSG = 'The extension was updated. Refresh this page to reconnect.';
 
 const store = {
   get(keys, cb) {
-    if (!extensionAlive()) { cb({}); return; }
-    try { chrome.storage.local.get(keys, res => cb(res ?? {})); }
-    catch (_) { cb({}); }
+    // The fallback must not fire once the real callback has run: an error
+    // thrown inside cb would otherwise land in this catch and run cb again
+    // with empty settings, quietly undoing whatever it had just done.
+    let answered = false;
+    const once = res => { if (answered) return; answered = true; cb(res ?? {}); };
+    if (!extensionAlive()) { once({}); return; }
+    try { chrome.storage.local.get(keys, once); }
+    catch (_) { once({}); }
   },
   set(obj, cb) {
     if (!extensionAlive()) { cb && cb(); return; }
@@ -533,7 +538,11 @@ function bgSend(msg, cb) {
     padding: 7px 8px 7px 7px;
     border-radius: 15px;
     user-select: none;
+    cursor: grab;
+    touch-action: none;          /* so a touch drag moves the bar, not the page */
   }
+  #bar.dragging { cursor: grabbing; }
+  #bar button { cursor: pointer; }
 
   #go {
     width: 30px; height: 30px;
@@ -605,6 +614,16 @@ function bgSend(msg, cb) {
     transition: opacity 0.2s cubic-bezier(0.32,0.72,0,1), transform 0.2s cubic-bezier(0.32,0.72,0,1);
     pointer-events: none;
   }
+  /* The panel hangs off the bar, so once the bar can be dragged anywhere the
+     panel has to pick a side — otherwise it opens off the edge of the screen. */
+  #panel.below {
+    bottom: auto; top: 52px;
+    transform: translateY(-6px) scale(0.98);
+    transform-origin: top left;
+  }
+  #panel.alignRight { left: auto; right: 0; transform-origin: bottom right; }
+  #panel.below.alignRight { transform-origin: top right; }
+
   #panel.show { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
   #panel::-webkit-scrollbar { width: 0; }
 
@@ -822,6 +841,7 @@ function bgSend(msg, cb) {
 
   const $ = id => shadow.getElementById(id);
   const goBtn = $('go'), gear = $('gear'), panel = $('panel'), closeBtn = $('close');
+  const bar = $('bar');
   const dot = $('dot'), statusText = $('statusText'), statusWrap = $('status');
   const presetSel = $('preset'), notesInput = $('notes'), autoSw = $('autoSw');
   const modelSel = $('model'), modelHint = $('modelHint'), upgradeSw = $('upgradeSw');
@@ -926,7 +946,7 @@ function bgSend(msg, cb) {
 
   // ── Persistence ────────────────────────────────────────────────────────────
   store.get(
-    ['lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'refUrls', 'model'],
+    ['lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'refUrls', 'model', 'barPos'],
     s => {
       presetIndex = PRESETS[s.lastPresetIndex] ? s.lastPresetIndex : 0;
       presetSel.value = String(presetIndex);
@@ -945,6 +965,15 @@ function bgSend(msg, cb) {
 
       if (s.apiKey) { keyInput.value = s.apiKey; hasKey = true; }
       if (Array.isArray(s.refUrls)) refUrls = s.refUrls;
+
+      // Where the user last parked the bar. Clamped on the way in, so a
+      // position saved on a bigger screen still lands somewhere visible.
+      if (s.barPos && Number.isFinite(s.barPos.left) && Number.isFinite(s.barPos.top)) {
+        placeAt(s.barPos.left, s.barPos.top);
+      } else {
+        orientPanel();
+      }
+
       renderRefs();
       render();
     }
@@ -1070,6 +1099,78 @@ function bgSend(msg, cb) {
   gear.addEventListener('click', () => togglePanel());
   closeBtn.addEventListener('click', () => togglePanel(false));
   shadow.addEventListener('keydown', e => { if (e.key === 'Escape') togglePanel(false); });
+
+  // ── Moving the bar ─────────────────────────────────────────────────────────
+  // Drag it anywhere by its background; the buttons stay buttons. Where it
+  // ends up is remembered, because a bar that covers the Next button on one
+  // site would otherwise have to be moved on every page load.
+  function placeAt(left, top) {
+    const EDGE = 8;   // a little breathing room from the window edge
+    const r = host.getBoundingClientRect();
+    const maxLeft = Math.max(EDGE, window.innerWidth  - r.width  - EDGE);
+    const maxTop  = Math.max(EDGE, window.innerHeight - r.height - EDGE);
+    const l = Math.min(Math.max(left, EDGE), maxLeft);
+    const t = Math.min(Math.max(top,  EDGE), maxTop);
+    host.style.left = `${l}px`;
+    host.style.top  = `${t}px`;
+    host.style.bottom = 'auto';
+    host.style.right  = 'auto';
+    orientPanel();
+    return { left: l, top: t };
+  }
+
+  function orientPanel() {
+    const r = host.getBoundingClientRect();
+    panel.classList.toggle('below', r.top < window.innerHeight / 2);
+    panel.classList.toggle('alignRight', r.left > window.innerWidth / 2);
+  }
+
+  let dragging = false, moved = false, startX = 0, startY = 0, origin = null;
+
+  bar.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    if (e.target.closest('button')) return;   // play and gear are not handles
+    dragging = true;
+    moved = false;
+    startX = e.clientX;
+    startY = e.clientY;
+    const r = host.getBoundingClientRect();
+    origin = { left: r.left, top: r.top };
+    try { bar.setPointerCapture(e.pointerId); } catch (_) {}
+    bar.classList.add('dragging');
+  });
+
+  bar.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const dx = e.clientX - startX, dy = e.clientY - startY;
+    // A few pixels of wobble while clicking shouldn't count as a drag
+    if (!moved && Math.hypot(dx, dy) < 4) return;
+    moved = true;
+    placeAt(origin.left + dx, origin.top + dy);
+  });
+
+  function endDrag(e) {
+    if (!dragging) return;
+    dragging = false;
+    bar.classList.remove('dragging');
+    try { bar.releasePointerCapture(e.pointerId); } catch (_) {}
+    if (!moved) return;
+    const r = host.getBoundingClientRect();
+    store.set({ barPos: { left: r.left, top: r.top } });
+  }
+  bar.addEventListener('pointerup', endDrag);
+  bar.addEventListener('pointercancel', endDrag);
+
+  // A bar parked against the right edge of a wide window would be off-screen
+  // in a narrow one, so pull it back into view whenever the window changes.
+  window.addEventListener('resize', () => {
+    if (host.style.top) {
+      const r = host.getBoundingClientRect();
+      placeAt(r.left, r.top);
+    } else {
+      orientPanel();
+    }
+  });
 
   // ── Run control ────────────────────────────────────────────────────────────
   goBtn.addEventListener('click', () => {
