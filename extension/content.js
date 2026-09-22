@@ -326,6 +326,24 @@ function setFieldValue(el, value) {
   el.dispatchEvent(new FocusEvent('blur', { bubbles: false }));
 }
 
+// A bare el.click() dispatches only a click event. Grids and toolbars commonly
+// act on mousedown/mouseup instead, so a click alone leaves the selection
+// untouched — the element appears clicked while nothing actually happens.
+// Sending the whole sequence matches what a real click produces.
+function realClick(el) {
+  const r = el.getBoundingClientRect();
+  const o = { bubbles: true, cancelable: true,
+              clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+  el.dispatchEvent(new PointerEvent('pointerover', { ...o, isPrimary: true }));
+  el.dispatchEvent(new MouseEvent('mouseover', o));
+  el.dispatchEvent(new PointerEvent('pointerdown', { ...o, isPrimary: true }));
+  el.dispatchEvent(new MouseEvent('mousedown', { ...o, buttons: 1 }));
+  if (typeof el.focus === 'function') el.focus({ preventScroll: true });
+  el.dispatchEvent(new PointerEvent('pointerup', { ...o, isPrimary: true }));
+  el.dispatchEvent(new MouseEvent('mouseup', o));
+  el.click();
+}
+
 async function execute(action) {
   try {
     // ── Fill in the blank(s) ───────────────────────────────────────────────
@@ -408,8 +426,7 @@ async function execute(action) {
       }
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       await new Promise(r => setTimeout(r, 150));
-      el.focus();
-      el.click();
+      realClick(el);
       return { success: true };
     }
 

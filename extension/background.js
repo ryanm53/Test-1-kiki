@@ -530,6 +530,18 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
           stepDone = true;
           completed++;
           history.push(actionSummary(action, pageData.elements));
+
+          // Repeating one step means it isn't taking effect — the page looks
+          // unchanged, so the same move keeps looking correct. Stop rather than
+          // spend the rest of the budget and the API calls on a loop.
+          const n = history.length;
+          if (n >= 3 && history[n - 1] === history[n - 2] && history[n - 2] === history[n - 3]) {
+            return {
+              success: false,
+              usedModel,
+              error: `Repeated the same step 3 times with no effect: ${history[n - 1]}. That control isn't responding to the click.`
+            };
+          }
           await new Promise(r => setTimeout(r, action.action === 'dragMove' ? 500 : 900));
           break;
         }
