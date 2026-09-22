@@ -199,7 +199,11 @@ function describeEl(el) {
     question: question || null,
     sheet: isSheetCell(el) || undefined,
     cell: cellAddress(el) || undefined,
-    selected: /select|active|focused/i.test(el.className) || undefined
+    // Only meaningful for spreadsheet cells. Scoped to them deliberately:
+    // plenty of ordinary elements carry an "active" or "is-selected" class for
+    // styling, and flagging those would tell Claude an answer had already been
+    // chosen when it had not.
+    selected: (cellAddress(el) && /select|active|focused/i.test(el.className)) || undefined
   };
 }
 
