@@ -1060,7 +1060,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       el.dispatchEvent(new PointerEvent('pointerup', { ...mo, isPrimary: true }));
       el.dispatchEvent(new MouseEvent('mouseup', mo));
       el.click();
-      if (typeof el.focus === 'function') el.focus();
+      // Deliberately not calling el.focus(): a sheet widget moves focus to its
+      // own hidden editor when a cell is clicked, and forcing focus onto the
+      // cell would send the keystrokes somewhere that cannot receive them.
       await new Promise(r => setTimeout(r, 150));
 
       // Report the page coordinates so the background can put a real click

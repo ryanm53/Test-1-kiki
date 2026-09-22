@@ -282,6 +282,31 @@ async function pressKey(tabId, name) {
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', { type: 'keyUp', ...base });
 }
 
+// Virtual key code for a character, which the sheet's keydown handler reads.
+function virtualKey(ch) {
+  if (ch >= '0' && ch <= '9') return ch.charCodeAt(0);
+  if (ch >= 'a' && ch <= 'z') return ch.toUpperCase().charCodeAt(0);
+  if (ch >= 'A' && ch <= 'Z') return ch.charCodeAt(0);
+  return { '-': 189, '.': 190, ',': 188, ' ': 32, '/': 191, '(': 57, ')': 48 }[ch] ?? 0;
+}
+
+// Type a value as real keystrokes. Input.insertText would be simpler, but it
+// inserts text without ever producing a keydown — and a spreadsheet only opens
+// its editor once it sees a real keypress, so the characters go nowhere.
+async function typeText(tabId, text) {
+  for (const ch of text) {
+    const vk = virtualKey(ch);
+    const base = { key: ch, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk };
+    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
+      type: 'keyDown', text: ch, unmodifiedText: ch, ...base
+    });
+    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
+      type: 'keyUp', ...base
+    });
+    await new Promise(r => setTimeout(r, 25));
+  }
+}
+
 // Spreadsheet cells (jQuery.sheet) have no input to set — you click the cell
 // and type. Synthetic events don't reliably open the editor, so click and type
 // for real, then commit with Enter.
@@ -302,8 +327,8 @@ async function typeIntoCell(tabId, frameId, index, value) {
     await new Promise(r => setTimeout(r, 120));
   }
 
-  await chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: String(value ?? '') });
-  await new Promise(r => setTimeout(r, 80));
+  await typeText(tabId, String(value ?? ''));
+  await new Promise(r => setTimeout(r, 60));
   await pressKey(tabId, 'enter');
   await new Promise(r => setTimeout(r, 160));
   return { success: true };
