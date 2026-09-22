@@ -22,13 +22,22 @@ const INTERACTIVE_SEL = [
 // so it operates on exactly the elements Claude was shown.
 let _lastElements = [];
 
-function isVisible(el) {
+// On the page and drawn — but possibly scrolled out of view.
+function isRendered(el) {
   const rect = el.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) return false;
-  if (rect.bottom < 0 || rect.top > window.innerHeight) return false;
-  if (rect.right < 0 || rect.left > window.innerWidth) return false;
   const style = window.getComputedStyle(el);
   return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+}
+
+function inViewport(el) {
+  const r = el.getBoundingClientRect();
+  return r.bottom >= 0 && r.top <= window.innerHeight
+      && r.right >= 0 && r.left <= window.innerWidth;
+}
+
+function isVisible(el) {
+  return isRendered(el) && inViewport(el);
 }
 
 // Resolve an element's accessible label, including aria-labelledby chains.
@@ -163,10 +172,13 @@ function scrape() {
   const root = document.querySelector('[role="main"], main, article, form')
              ?? document.body;
 
-  const all = Array.from(document.querySelectorAll(INTERACTIVE_SEL)).filter(isVisible);
+  const all = Array.from(document.querySelectorAll(INTERACTIVE_SEL)).filter(isRendered);
 
   // A grid of fields inside a table is a worksheet — many blanks that have to be
   // filled together and kept consistent, rather than one answer to pick.
+  // Deliberately not viewport-filtered: a worksheet is usually taller than the
+  // screen, so requiring cells to be on-screen would hide most of the question
+  // and make it look like there was nothing to answer.
   const fields = all.filter(isTableField);
   const isWorksheet = fields.length >= 4;
 
@@ -176,12 +188,14 @@ function scrape() {
   );
 
   if (isWorksheet) {
-    // Put the fields first so the cap can never truncate one away, then fill the
-    // remaining slots with everything else (nav, submit buttons) in page order.
-    const rest = all.filter(el => !isTableField(el));
+    // Every cell, on-screen or not, first — so the cap can never truncate one
+    // away. Remaining slots go to on-screen controls (submit, nav).
+    const rest = all.filter(el => !isTableField(el) && inViewport(el));
     _lastElements = [...fields, ...rest].slice(0, 60);
   } else {
-    _lastElements = all.slice(0, 25);
+    // Ordinary questions fit on screen, so staying in the viewport keeps
+    // offscreen nav and footer links out of the list.
+    _lastElements = all.filter(inViewport).slice(0, 25);
   }
 
   return {
@@ -1044,7 +1058,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           if (c.selector) el = document.querySelector(c.selector);
           else if (c.ariaLabel) el = all.find(b => (b.getAttribute('aria-label') || '').toLowerCase().includes(c.ariaLabel.toLowerCase()));
           else if (c.text) el = all.find(b => (b.innerText || b.textContent || '').trim().toLowerCase().includes(c.text.toLowerCase()));
-          if (el && isVisible(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true') return el;
+          // Rendered rather than on-screen: we scroll to it before clicking,
+          // and on a long page the button is often below the fold.
+          if (el && isRendered(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true') return el;
         }
         return null;
       }
