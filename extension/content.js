@@ -153,6 +153,16 @@ function isTableField(el) {
   return /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && !!el.closest(TABLE_SEL);
 }
 
+// Spreadsheet widgets (McGraw Hill's accounting tool runs on jQuery.sheet)
+// have no inputs at all — answers go into focusable <td> cells that you click
+// and type into. Read-only cells are tagged, so the editable ones are whatever
+// is focusable and isn't marked read-only.
+function isSheetCell(el) {
+  return el.tagName === 'TD'
+    && el.matches('[tabindex]:not([tabindex="-1"]), .responseCell')
+    && !el.classList.contains('td-readOnly');
+}
+
 function describeEl(el) {
   const question = nearestQuestionText(el);
   // Fall back to table headers when the field has no label of its own
@@ -163,7 +173,8 @@ function describeEl(el) {
     text: text.slice(0, 100),
     placeholder: el.getAttribute('placeholder') || null,
     name: el.getAttribute('name') || null,
-    question: question || null
+    question: question || null,
+    sheet: isSheetCell(el) || undefined
   };
 }
 
@@ -174,12 +185,17 @@ function scrape() {
 
   const all = Array.from(document.querySelectorAll(INTERACTIVE_SEL)).filter(isRendered);
 
+  // Spreadsheet cells are plain <td>s, so they never match INTERACTIVE_SEL
+  const sheetCells = Array.from(document.querySelectorAll('td')).filter(
+    el => isSheetCell(el) && isRendered(el)
+  );
+
   // A grid of fields inside a table is a worksheet — many blanks that have to be
   // filled together and kept consistent, rather than one answer to pick.
   // Deliberately not viewport-filtered: a worksheet is usually taller than the
   // screen, so requiring cells to be on-screen would hide most of the question
   // and make it look like there was nothing to answer.
-  const fields = all.filter(isTableField);
+  const fields = [...all.filter(isTableField), ...sheetCells];
   const isWorksheet = fields.length >= 4;
 
   // Drag questions need spatial reasoning over several sequential moves
@@ -1016,6 +1032,41 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     execute(msg.action)
       .then(sendResponse)
       .catch(e => sendResponse({ success: false, error: e.message }));
+    return true;
+  }
+
+  if (msg.type === 'FOCUS_CELL') {
+    // Open a spreadsheet cell for editing, so the real keystrokes the
+    // background sends next land in it.
+    (async () => {
+      const { index } = msg;
+      if (typeof index !== 'number' || index < 0 || index >= _lastElements.length) {
+        sendResponse({ success: false, error: `Index ${index} out of range` });
+        return;
+      }
+      const el = _lastElements[index];
+      if (!document.contains(el)) {
+        sendResponse({ success: false, error: `Cell [${index}] is no longer in the DOM` });
+        return;
+      }
+      el.scrollIntoView({ behavior: 'auto', block: 'center' });
+      await new Promise(r => setTimeout(r, 120));
+
+      const rect = el.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+      const mo = { bubbles: true, cancelable: true, clientX: cx, clientY: cy };
+      el.dispatchEvent(new PointerEvent('pointerdown', { ...mo, isPrimary: true }));
+      el.dispatchEvent(new MouseEvent('mousedown', { ...mo, buttons: 1 }));
+      el.dispatchEvent(new PointerEvent('pointerup', { ...mo, isPrimary: true }));
+      el.dispatchEvent(new MouseEvent('mouseup', mo));
+      el.click();
+      if (typeof el.focus === 'function') el.focus();
+      await new Promise(r => setTimeout(r, 150));
+
+      // Report the page coordinates so the background can put a real click
+      // there if the synthetic one didn't open the editor.
+      sendResponse({ success: true, x: cx, y: cy });
+    })();
     return true;
   }
 

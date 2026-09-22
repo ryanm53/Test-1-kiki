@@ -265,7 +265,9 @@ const KEYS = {
   up:    { key: 'ArrowUp',    code: 'ArrowUp',    vk: 38 },
   down:  { key: 'ArrowDown',  code: 'ArrowDown',  vk: 40 },
   left:  { key: 'ArrowLeft',  code: 'ArrowLeft',  vk: 37 },
-  right: { key: 'ArrowRight', code: 'ArrowRight', vk: 39 }
+  right: { key: 'ArrowRight', code: 'ArrowRight', vk: 39 },
+  enter: { key: 'Enter',      code: 'Enter',      vk: 13, text: '\r' },
+  tab:   { key: 'Tab',        code: 'Tab',        vk:  9, text: '\t' }
 };
 
 async function pressKey(tabId, name) {
@@ -278,6 +280,33 @@ async function pressKey(tabId, name) {
     ...(k.text ? { text: k.text, unmodifiedText: k.text } : {})
   });
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', { type: 'keyUp', ...base });
+}
+
+// Spreadsheet cells (jQuery.sheet) have no input to set — you click the cell
+// and type. Synthetic events don't reliably open the editor, so click and type
+// for real, then commit with Enter.
+async function typeIntoCell(tabId, frameId, index, value) {
+  const focused = await sendToTab(tabId, { type: 'FOCUS_CELL', index }, frameId);
+  if (!focused?.success) {
+    return { success: false, error: focused?.error ?? `Could not open cell [${index}]` };
+  }
+
+  await attachDebugger(tabId);
+
+  // A real click at the cell's coordinates, in case the synthetic one above
+  // wasn't enough to put the sheet into edit mode
+  if (typeof focused.x === 'number') {
+    const pt = { x: focused.x, y: focused.y, button: 'left', clickCount: 1 };
+    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...pt });
+    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...pt });
+    await new Promise(r => setTimeout(r, 120));
+  }
+
+  await chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: String(value ?? '') });
+  await new Promise(r => setTimeout(r, 80));
+  await pressKey(tabId, 'enter');
+  await new Promise(r => setTimeout(r, 160));
+  return { success: true };
 }
 
 // rbd keyboard drag: Space lifts, arrows move, Space drops.
@@ -320,7 +349,9 @@ async function findQuestionFrame(tabId) {
         const choices = n('[role="radio"], [role="checkbox"], input[type="radio"], input[type="checkbox"]');
         const gridFields = [...document.querySelectorAll('input:not([type="hidden"]), textarea, select')]
           .filter(el => el.closest('table, [role="table"], [role="grid"]')).length;
-        return { fields, choices, gridFields };
+        // Spreadsheet widgets answer into focusable <td>s, not inputs
+        const cells = n('td[tabindex]:not([tabindex="-1"]):not(.td-readOnly), td.responseCell:not(.td-readOnly)');
+        return { fields, choices, gridFields: gridFields + cells };
       }
     });
   } catch (_) {
@@ -368,8 +399,19 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
           throw new Error(pageData?.error ?? 'No response from content script');
         }
 
+        // The question prose often lives in the outer page while the answer
+        // grid is inside the iframe, so pull both or the amounts to work from
+        // would be missing entirely.
+        let pageText = pageData.text;
+        if (frameId !== 0) {
+          try {
+            const outer = await sendToTab(tabId, { type: 'SCRAPE' }, 0);
+            if (outer?.text) pageText = `${outer.text}\n\n${pageText}`;
+          } catch (_) { /* outer frame unreachable — use what we have */ }
+        }
+
         usedModel = pickModel(baseModel, pageData, autoUpgrade);
-        const action = await callClaude(apiKey, notes, pageData.text, pageData.elements, refTexts, usedModel, !!pageData.isWorksheet);
+        const action = await callClaude(apiKey, notes, pageText, pageData.elements, refTexts, usedModel, !!pageData.isWorksheet);
 
         if (action.action === 'none') {
           // Before any action: nothing on screen is answerable.
@@ -388,6 +430,20 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
           if (result?.success) {
             const steps = Number.isInteger(action.steps) && action.steps > 0 ? action.steps : 1;
             await trustedKeyDrag(tabId, action.dir, steps);
+          }
+        } else if (action.action === 'fill' && action.fills?.some(f => pageData.elements[f.index]?.sheet)) {
+          // Spreadsheet cells can't be filled like inputs — each has to be
+          // opened and typed into for real, one at a time.
+          result = { success: true };
+          const missed = [];
+          for (const f of action.fills) {
+            const r = await typeIntoCell(tabId, frameId, f.index, f.value);
+            if (!r.success) missed.push(`[${f.index}]`);
+          }
+          if (missed.length === action.fills.length) {
+            result = { success: false, error: `No cells could be filled: ${missed.join(', ')}` };
+          } else if (missed.length) {
+            result = { success: false, error: `Filled ${action.fills.length - missed.length}/${action.fills.length}; missed ${missed.join(', ')}` };
           }
         } else {
           result = await sendToTab(tabId, { type: 'EXECUTE', action }, frameId);
