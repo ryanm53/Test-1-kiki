@@ -1114,10 +1114,26 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       el.dispatchEvent(new PointerEvent('pointerup', { ...mo, isPrimary: true }));
       el.dispatchEvent(new MouseEvent('mouseup', mo));
       el.click();
-      // Deliberately not calling el.focus(): a sheet widget moves focus to its
-      // own hidden editor when a cell is clicked, and forcing focus onto the
-      // cell would send the keystrokes somewhere that cannot receive them.
+
+      // Clicking dispatches events but does not move real browser focus into
+      // this frame, and debugger keystrokes follow focus — without this they
+      // are delivered to the top document and lost. Sheet cells carry a
+      // tabindex precisely so they can be focused.
+      if (typeof el.focus === 'function') el.focus({ preventScroll: true });
       await new Promise(r => setTimeout(r, 150));
+
+      // Report where focus actually ended up, so a failure here is legible
+      // rather than showing up as silently empty cells.
+      const active = document.activeElement;
+      const landed = active === el || el.contains(active) ||
+                     (active && active.tagName === 'TEXTAREA'); // sheet's own editor
+      if (!landed) {
+        sendResponse({
+          success: false,
+          error: `Cell [${index}] would not take focus (focus went to ${active?.tagName ?? 'nothing'})`
+        });
+        return;
+      }
 
       sendResponse({ success: true });
     })();
