@@ -454,11 +454,17 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
   // Resolve once per run: every scrape, click and fill must hit the same frame
   const frameId = await findQuestionFrame(tabId);
 
+  cancelledRuns.delete(tabId);   // a fresh run clears any earlier stop
+
   let budget = MAX_STEPS_SIMPLE;
   let completed = 0;
   const history = [];   // what has been done so far on this question
 
   for (let step = 0; step < budget; step++) {
+    if (cancelledRuns.has(tabId)) {
+      cancelledRuns.delete(tabId);
+      return { success: false, error: 'Stopped.', usedModel };
+    }
     let lastError = 'Unknown error';
     let stepDone = false;
     let finished = false;
@@ -577,7 +583,19 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
   return { success: true, message: 'Done', usedModel };
 }
 
+// Tabs whose current run has been stopped from the widget. The loop checks
+// this between steps: without it, pressing stop only silenced the UI while the
+// background carried on clicking.
+const cancelledRuns = new Set();
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'STOP_RUN') {
+    const id = msg.tabId ?? sender.tab?.id;
+    if (id) cancelledRuns.add(id);
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (msg.type !== 'RUN_GOAL') return;
 
   (async () => {

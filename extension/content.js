@@ -1030,6 +1030,9 @@ async function execute(action) {
 
   function stopAll() {
     runToken++;                     // invalidates any in-flight reply
+    // The background runs a multi-step loop of its own; without telling it to
+    // stop, this would only quieten the widget while it kept on clicking.
+    try { chrome.runtime.sendMessage({ type: 'STOP_RUN' }); } catch (_) {}
     clearTimeout(pollTimer);
     clearTimeout(rateTimer);
     isRunning = waiting = false;
