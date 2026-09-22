@@ -675,6 +675,15 @@ async function execute(action) {
       </div>
       <div class="row-hint">Open tabs it can read as source material.</div>
 
+      <div class="label">Troubleshooting</div>
+      <div class="group">
+        <div class="row">
+          <span class="row-label">Copy last prompt</span>
+          <button class="inline-btn" id="copyPrompt">Copy</button>
+        </div>
+      </div>
+      <div class="row-hint">Copies exactly what was last sent to Claude, for diagnosing wrong answers.</div>
+
     </div>
   </div>
 
@@ -693,6 +702,7 @@ async function execute(action) {
   const modelSel = $('model'), modelHint = $('modelHint'), upgradeSw = $('upgradeSw');
   const keyInput = $('key'), saveKeyBtn = $('saveKey');
   const refInput = $('refUrl'), addRefBtn = $('addRef'), refList = $('refList');
+  const copyPromptBtn = $('copyPrompt');
 
   gear.innerHTML = ICON_GEAR;
 
@@ -896,6 +906,34 @@ async function execute(action) {
   }
   addRefBtn.addEventListener('click', addRef);
   refInput.addEventListener('keydown', e => { if (e.key === 'Enter') addRef(); });
+
+  copyPromptBtn.addEventListener('click', () => {
+    chrome.storage.local.get('lastPrompt', ({ lastPrompt }) => {
+      const flash = msg => {
+        copyPromptBtn.textContent = msg;
+        copyPromptBtn.classList.add('done');
+        setTimeout(() => {
+          copyPromptBtn.textContent = 'Copy';
+          copyPromptBtn.classList.remove('done');
+        }, 1800);
+      };
+      if (!lastPrompt) { flash('Run it first'); return; }
+      navigator.clipboard.writeText(lastPrompt)
+        .then(() => flash('Copied'))
+        .catch(() => {
+          // Clipboard API can be blocked on some pages — fall back to a
+          // selection the page can still copy from.
+          const ta = document.createElement('textarea');
+          ta.value = lastPrompt;
+          ta.style.cssText = 'position:fixed;top:-9999px';
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand('copy'); flash('Copied'); }
+          catch (_) { flash('Copy failed'); }
+          ta.remove();
+        });
+    });
+  });
 
   // ── Panel open/close ───────────────────────────────────────────────────────
   function togglePanel(open) {

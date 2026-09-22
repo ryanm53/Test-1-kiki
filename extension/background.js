@@ -101,9 +101,11 @@ ${pageText.slice(0, isWorksheet ? 3000 : 800)}${refSection}
 Elements (click by index):
 ${elementList || '(none found)'}`;
 
-  // Visible in the service worker console — the fastest way to see whether the
-  // question text and the cell labels actually reached the model.
-  console.log(`[PageAgent] ${model}${isWorksheet ? ' (worksheet)' : ''}\n${userContent}`);
+  // Kept so the exact prompt can be inspected from the widget without opening
+  // the service worker console.
+  const debugText = `model: ${model}${isWorksheet ? '  (worksheet mode)' : ''}\n\n${userContent}`;
+  console.log(`[PageAgent]\n${debugText}`);
+  chrome.storage.local.set({ lastPrompt: debugText });
 
   const requestBody = {
     model,
