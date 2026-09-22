@@ -238,13 +238,19 @@ function scrape() {
   // simulated ribbon minus the surrounding page chrome.
   const simCells = Array.from(document.querySelectorAll('td.grdbdy-cell'));
   if (simCells.length > 50) {
-    const CHROME = '[class*="Launch_"], .rsbtn_play, .read-speaker-btn, [class*="shell-"]';
+    // Only the surrounding exam page's own furniture. Note "shell-" is NOT
+    // chrome here: SIMnet names the simulated Excel's own controls shell-btn,
+    // so excluding it removes the entire ribbon and leaves nothing to act on.
+    const CHROME = '[class*="Launch_"], .rsbtn_play, .read-speaker-btn';
 
     // The workbook arrives already populated and each task asks for a single
     // operation, so the ribbon is what the answer is actually made of. It gets
     // the lion's share of the budget; cells are context.
     const controls = all
       .filter(el => !el.matches(CHROME) && !el.closest(CHROME))
+      // A control with no name of any kind is unusable to act on and would
+      // only crowd out the ones that can be identified.
+      .filter(el => (el.innerText || '').trim() || el.getAttribute('aria-label') || el.getAttribute('title'))
       .slice(0, 110);
 
     // Whatever cells the task names ("...to cell C7") must be present even when
