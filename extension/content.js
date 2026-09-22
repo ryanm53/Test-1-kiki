@@ -91,12 +91,67 @@ function nearestQuestionText(el) {
   return null;
 }
 
+// Matches real tables and ARIA grids alike — Angular apps often build the
+// latter out of divs, which a `table`/`tr`/`td` selector would miss entirely.
+const CELL_SEL  = 'td, th, [role="cell"], [role="gridcell"], [role="columnheader"], [role="rowheader"]';
+const ROW_SEL   = 'tr, [role="row"]';
+const TABLE_SEL = 'table, [role="table"], [role="grid"]';
+
+// innerText is preferred because it reflects only what's actually visible; the
+// ?? keeps an intentional empty string and falls through only when innerText
+// isn't implemented at all.
+const cellText = el => (el?.innerText ?? el?.textContent ?? '').trim();
+
+// Worksheet cells carry no label of their own — their meaning comes from the
+// intersection of a column header and a row header. Reconstruct that so an
+// otherwise anonymous box reads as "Deferred Revenue — December 31 Adjustment".
+function tableLabel(el) {
+  const cell = el.closest(CELL_SEL);
+  const row = cell?.closest(ROW_SEL);
+  const table = cell?.closest(TABLE_SEL);
+  if (!cell || !row || !table) return null;
+
+  const cells = Array.from(row.children);
+  const col = cells.indexOf(cell);
+  if (col === -1) return null;
+
+  // Row header: the nearest text to the left of this cell
+  let rowLabel = '';
+  for (const c of cells) {
+    if (c === cell) break;
+    const t = cellText(c);
+    if (t) { rowLabel = t; break; }
+  }
+
+  // Column header: walk up this column until a row has text at the same index.
+  // Rows containing form fields are data rows, so they're skipped — otherwise a
+  // pre-filled cell like "$ 0" sitting above a blank gets mistaken for the
+  // header, and the label loses the account name entirely. Stopping at the
+  // nearest qualifying row keeps each section of a table on its own headers.
+  let colLabel = '';
+  const rows = Array.from(table.querySelectorAll(ROW_SEL));
+  for (let i = rows.indexOf(row) - 1; i >= 0; i--) {
+    if (rows[i].querySelector('input, textarea, select')) continue;
+    const t = cellText(rows[i].children[col]);
+    if (t) { colLabel = t; break; }
+  }
+
+  const label = [colLabel, rowLabel].filter(Boolean).join(' — ');
+  return label || null;
+}
+
+function isTableField(el) {
+  return /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && !!el.closest(TABLE_SEL);
+}
+
 function describeEl(el) {
   const question = nearestQuestionText(el);
+  // Fall back to table headers when the field has no label of its own
+  const text = accessibleText(el) || tableLabel(el) || '';
   return {
     tag: el.tagName.toLowerCase(),
     type: el.getAttribute('type') || null,
-    text: accessibleText(el).slice(0, 100),
+    text: text.slice(0, 100),
     placeholder: el.getAttribute('placeholder') || null,
     name: el.getAttribute('name') || null,
     question: question || null
@@ -108,12 +163,26 @@ function scrape() {
   const root = document.querySelector('[role="main"], main, article, form')
              ?? document.body;
 
-  const all = Array.from(document.querySelectorAll(INTERACTIVE_SEL));
-  _lastElements = all.filter(isVisible).slice(0, 25);
+  const all = Array.from(document.querySelectorAll(INTERACTIVE_SEL)).filter(isVisible);
+
+  // A grid of fields inside a table is a worksheet — many blanks that have to be
+  // filled together and kept consistent, rather than one answer to pick.
+  const fields = all.filter(isTableField);
+  const isWorksheet = fields.length >= 4;
+
+  if (isWorksheet) {
+    // Put the fields first so the cap can never truncate one away, then fill the
+    // remaining slots with everything else (nav, submit buttons) in page order.
+    const rest = all.filter(el => !isTableField(el));
+    _lastElements = [...fields, ...rest].slice(0, 60);
+  } else {
+    _lastElements = all.slice(0, 25);
+  }
 
   return {
     text: (root.innerText ?? '').slice(0, 5000),
-    elements: _lastElements.map(describeEl)
+    elements: _lastElements.map(describeEl),
+    isWorksheet
   };
 }
 
@@ -158,19 +227,38 @@ async function execute(action) {
       if (!Array.isArray(fills) || fills.length === 0) {
         return { success: false, error: 'fill requires a non-empty fills array' };
       }
+
+      // Worksheets are dozens of cells — smooth-scrolling each one is slow and
+      // makes the page lurch, so go instant once there are more than a handful.
+      const bulk = fills.length > 5;
+      const scroll = bulk ? 'auto' : 'smooth';
+      const settle = bulk ? 60 : 200;
+
+      const failed = [];
       for (const f of fills) {
         const i = f?.index;
         if (typeof i !== 'number' || i < 0 || i >= _lastElements.length) {
-          return { success: false, error: `Index ${i} out of range (${_lastElements.length} elements)` };
+          failed.push(`[${i}] out of range`);
+          continue;
         }
         const el = _lastElements[i];
+        // A cell can go stale if the page re-renders mid-fill; skip it and keep
+        // going rather than throwing away every value already entered.
         if (!document.contains(el)) {
-          return { success: false, error: `Element [${i}] is no longer in the DOM` };
+          failed.push(`[${i}] left the page`);
+          continue;
         }
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        await new Promise(r => setTimeout(r, 120));
+        el.scrollIntoView({ behavior: scroll, block: 'center' });
+        await new Promise(r => setTimeout(r, bulk ? 20 : 120));
         setFieldValue(el, String(f.value ?? ''));
-        await new Promise(r => setTimeout(r, 200));
+        await new Promise(r => setTimeout(r, settle));
+      }
+
+      if (failed.length === fills.length) {
+        return { success: false, error: `No fields could be filled: ${failed.join(', ')}` };
+      }
+      if (failed.length) {
+        return { success: false, error: `Filled ${fills.length - failed.length}/${fills.length}; missed ${failed.join(', ')}` };
       }
       return { success: true };
     }

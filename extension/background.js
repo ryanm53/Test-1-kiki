@@ -42,7 +42,20 @@ const SYSTEM_PROMPT = `Answer the quiz question on screen correctly. Reply with 
 {"action":"none"} — question fully answered, or nothing answerable on screen
 N = an index from the list. Never invent an index. Output only the JSON completion.`;
 
-async function callClaude(apiKey, notes, pageText, elements, refTexts = [], modelId = DEFAULT_MODEL) {
+// Appended only for worksheet-style questions, so ordinary questions don't pay
+// for guidance they don't need.
+const WORKSHEET_HINT = `
+
+This is a worksheet with many blanks. Fill EVERY blank in one reply, as one fills array.
+Field labels read "Column — Row", so "Deferred Revenue — December 31 Adjustment" is the
+adjustment cell of the Deferred Revenue column.
+Work the amounts out from the prose above the table, and keep the columns internally
+consistent: ending balance = balance before adjustment + adjustment.
+Prorate by the months actually elapsed, not a full year.
+Values must be plain numbers — no $, no commas, minus sign for a reduction.
+A blank that is already correct at 0 still needs 0 entered.`;
+
+async function callClaude(apiKey, notes, pageText, elements, refTexts = [], modelId = DEFAULT_MODEL, isWorksheet = false) {
   const model = MODELS[modelId] ? modelId : DEFAULT_MODEL;
   const cfg = MODELS[model];
 
@@ -67,15 +80,17 @@ async function callClaude(apiKey, notes, pageText, elements, refTexts = [], mode
   const notesSection = notes ? `Notes from the user: ${notes}\n\n` : '';
 
   const userContent = `${notesSection}Page text:
-${pageText.slice(0, 800)}${refSection}
+${pageText.slice(0, isWorksheet ? 3000 : 800)}${refSection}
 
 Elements (click by index):
 ${elementList || '(none found)'}`;
 
   const requestBody = {
     model,
-    max_tokens: cfg.maxTokens,
-    system: SYSTEM_PROMPT,
+    // A fills array covering a whole worksheet needs far more room than a
+    // single index does
+    max_tokens: isWorksheet ? Math.max(cfg.maxTokens, 1500) : cfg.maxTokens,
+    system: isWorksheet ? SYSTEM_PROMPT + WORKSHEET_HINT : SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userContent }]
   };
 
@@ -298,7 +313,7 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], mode
           throw new Error(pageData?.error ?? 'No response from content script');
         }
 
-        const action = await callClaude(apiKey, notes, pageData.text, pageData.elements, refTexts, modelId);
+        const action = await callClaude(apiKey, notes, pageData.text, pageData.elements, refTexts, modelId, !!pageData.isWorksheet);
 
         if (action.action === 'none') {
           // Before any action: nothing on screen is answerable.
