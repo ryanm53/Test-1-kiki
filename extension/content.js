@@ -179,6 +179,13 @@ function isSheetCell(el) {
     && !el.classList.contains('td-readOnly');
 }
 
+// SIMnet's Excel simulation addresses every cell as id="cell-B7", which is far
+// more useful to work from than a position in a list.
+const cellAddress = el => {
+  const m = /^cell-([A-Z]+\d+)$/.exec(el.id || '');
+  return m ? m[1] : null;
+};
+
 function describeEl(el) {
   const question = nearestQuestionText(el);
   // Fall back to table headers when the field has no label of its own
@@ -190,7 +197,9 @@ function describeEl(el) {
     placeholder: el.getAttribute('placeholder') || null,
     name: el.getAttribute('name') || null,
     question: question || null,
-    sheet: isSheetCell(el) || undefined
+    sheet: isSheetCell(el) || undefined,
+    cell: cellAddress(el) || undefined,
+    selected: /select|active|focused/i.test(el.className) || undefined
   };
 }
 
@@ -218,6 +227,34 @@ function scrape() {
   const isDrag = !!document.querySelector(
     '[data-rbd-drag-handle-draggable-id], [data-react-beautiful-dnd-drag-handle]'
   );
+
+  // SIMnet renders a full Excel simulation: ~1500 grid cells and ~130 buttons,
+  // far too much to send. Cells are addressable (id="cell-B7"), so only the
+  // ones carrying data or currently selected are worth including, alongside the
+  // simulated ribbon minus the surrounding page chrome.
+  const simCells = Array.from(document.querySelectorAll('td.grdbdy-cell'));
+  if (simCells.length > 50) {
+    const CHROME = '[class*="Launch_"], .rsbtn_play, .read-speaker-btn, [class*="shell-"]';
+    const controls = all
+      .filter(el => !el.matches(CHROME) && !el.closest(CHROME))
+      .slice(0, 70);
+
+    const interesting = simCells.filter(c =>
+      isRendered(c) && (
+        c.classList.contains('has-value') ||
+        /select|active|focused/i.test(c.className)
+      )
+    ).slice(0, 60);
+
+    _lastElements = [...controls, ...interesting];
+    return {
+      text: (root.innerText ?? '').slice(0, 5000),
+      elements: _lastElements.map(describeEl),
+      isSimnet: true,      // multi-step procedure, worth the stronger model
+      isWorksheet: false,
+      isDrag: false
+    };
+  }
 
   if (isWorksheet) {
     // Every cell, on-screen or not, first — so the cap can never truncate one

@@ -22,7 +22,7 @@ const UPGRADE_TO = {
 
 function pickModel(baseModel, pageData, autoUpgrade) {
   if (!autoUpgrade) return baseModel;
-  const hard = pageData?.isWorksheet || pageData?.isDrag;
+  const hard = pageData?.isWorksheet || pageData?.isDrag || pageData?.isSimnet;
   return hard ? (UPGRADE_TO[baseModel] ?? baseModel) : baseModel;
 }
 
@@ -71,7 +71,22 @@ Prorate by the months actually elapsed, not a full year.
 Values must be plain numbers — no $, no commas, minus sign for a reduction.
 A blank that is already correct at 0 still needs 0 entered.`;
 
-async function callClaude(apiKey, notes, pageText, elements, refTexts = [], modelId = DEFAULT_MODEL, isWorksheet = false) {
+// SIMnet simulates Excel, so a task is a procedure rather than an answer, and
+// the procedure itself is graded.
+const SIMNET_HINT = `
+
+This is a simulated Excel. The task is stated in the page text above; cells are
+marked cell=B7 and the ribbon is in the element list.
+
+Do ONE step per reply — you will see the result before choosing the next.
+Follow the method the task names: if it says to use a particular dialog, open
+that dialog rather than typing the answer straight into the cell, because how
+it was done is what gets graded.
+Click a ribbon tab first when the control you need is on another tab.
+To put a value in a cell, click the cell and then use fill on it.
+Reply {"action":"none"} once the task described is complete.`;
+
+async function callClaude(apiKey, notes, pageText, elements, refTexts = [], modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false) {
   const model = MODELS[modelId] ? modelId : DEFAULT_MODEL;
   const cfg = MODELS[model];
 
@@ -82,6 +97,8 @@ async function callClaude(apiKey, notes, pageText, elements, refTexts = [], mode
       if (el.text) parts.push(`"${el.text.slice(0, 80)}"`);
       if (el.placeholder) parts.push(`placeholder="${el.placeholder}"`);
       if (el.name) parts.push(`name="${el.name}"`);
+      if (el.cell) parts.push(`cell=${el.cell}`);
+      if (el.selected) parts.push('(selected)');
       if (el.question) parts.push(`(question: "${el.question.slice(0, 120)}")`);
       return parts.join(' ');
     })
@@ -103,7 +120,8 @@ ${elementList || '(none found)'}`;
 
   // Kept so the exact prompt can be inspected from the widget without opening
   // the service worker console.
-  const debugText = `model: ${model}${isWorksheet ? '  (worksheet mode)' : ''}\n\n${userContent}`;
+  const mode = isSimnet ? '  (simnet mode)' : isWorksheet ? '  (worksheet mode)' : '';
+  const debugText = `model: ${model}${mode}\n\n${userContent}`;
   console.log(`[PageAgent]\n${debugText}`);
   chrome.storage.local.set({ lastPrompt: debugText });
 
@@ -112,7 +130,7 @@ ${elementList || '(none found)'}`;
     // A fills array covering a whole worksheet needs far more room than a
     // single index does
     max_tokens: isWorksheet ? Math.max(cfg.maxTokens, 1500) : cfg.maxTokens,
-    system: isWorksheet ? SYSTEM_PROMPT + WORKSHEET_HINT : SYSTEM_PROMPT,
+    system: SYSTEM_PROMPT + (isSimnet ? SIMNET_HINT : isWorksheet ? WORKSHEET_HINT : ''),
     messages: [{ role: 'user', content: userContent }]
   };
 
@@ -401,6 +419,7 @@ async function findQuestionFrame(tabId) {
 // starts — multiple choice still costs exactly one API call.
 const MAX_STEPS_SIMPLE = 1;
 const MAX_STEPS_DRAG   = 8;
+const MAX_STEPS_SIMNET = 10;  // select cell, open dialog, set arguments, confirm
 
 async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true) {
   const refTexts = await getReferenceContent(refUrls);
@@ -436,7 +455,7 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
         }
 
         usedModel = pickModel(baseModel, pageData, autoUpgrade);
-        const action = await callClaude(apiKey, notes, pageText, pageData.elements, refTexts, usedModel, !!pageData.isWorksheet);
+        const action = await callClaude(apiKey, notes, pageText, pageData.elements, refTexts, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet);
 
         if (action.action === 'none') {
           // Before any action: nothing on screen is answerable.
