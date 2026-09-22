@@ -132,17 +132,33 @@ function tableLabel(el) {
     if (t) { rowLabel = t; break; }
   }
 
-  // Column header: walk up this column until a row has text at the same index.
-  // Rows containing form fields are data rows, so they're skipped — otherwise a
-  // pre-filled cell like "$ 0" sitting above a blank gets mistaken for the
-  // header, and the label loses the account name entirely. Stopping at the
-  // nearest qualifying row keeps each section of a table on its own headers.
-  let colLabel = '';
+  // Column header: walk up this column for the account name. Data rows have to
+  // be stepped over, or a value sitting above a blank — a pre-filled "$ 0", or
+  // a figure in the row above — gets mistaken for the header and the label
+  // loses the account entirely.
+  //
+  // A data row is recognised two ways: it holds something answerable, or it
+  // carries a row label in the first column ("Balance before adjustment"),
+  // whereas a header row leaves that column empty. The second test matters for
+  // spreadsheet widgets, whose data rows are plain <td>s with nothing
+  // answerable to detect. Stopping at the nearest match keeps each section of a
+  // table on its own headers.
   const rows = Array.from(table.querySelectorAll(ROW_SEL));
-  for (let i = rows.indexOf(row) - 1; i >= 0; i--) {
-    if (rows[i].querySelector('input, textarea, select')) continue;
-    const t = cellText(rows[i].children[col]);
-    if (t) { colLabel = t; break; }
+  const start = rows.indexOf(row) - 1;
+  const hasTargets = r =>
+    r.querySelector('input, textarea, select') ||
+    Array.from(r.children).some(isSheetCell);
+
+  let colLabel = '';
+  for (let i = start; i >= 0 && !colLabel; i--) {
+    if (hasTargets(rows[i]) || cellText(rows[i].children[0])) continue;
+    colLabel = cellText(rows[i].children[col]);
+  }
+  // Layouts that label every row (a leading row-number column, say) leave the
+  // strict pass with nothing, so fall back to skipping only answerable rows.
+  for (let i = start; i >= 0 && !colLabel; i--) {
+    if (hasTargets(rows[i])) continue;
+    colLabel = cellText(rows[i].children[col]);
   }
 
   const label = [colLabel, rowLabel].filter(Boolean).join(' — ');
