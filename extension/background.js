@@ -313,9 +313,13 @@ async function typeText(tabId, text) {
   }
 }
 
-// Spreadsheet cells (jQuery.sheet) have no input to set — you click the cell
-// and type. Synthetic events don't reliably open the editor, so click and type
-// for real, then commit with Enter.
+// Spreadsheet cells (jQuery.sheet) have no input to set — the cell is selected
+// by clicking it, then typed into. The click is left to the content script,
+// which addresses the element directly; a debugger mouse click cannot be used
+// here because its coordinates are relative to the top-level page while the
+// sheet lives in an iframe, so it would land somewhere else and move the
+// selection off the cell just chosen. Keystrokes are safe to send this way:
+// they follow focus rather than coordinates.
 async function typeIntoCell(tabId, frameId, index, value) {
   const focused = await sendToTab(tabId, { type: 'FOCUS_CELL', index }, frameId);
   if (!focused?.success) {
@@ -323,16 +327,6 @@ async function typeIntoCell(tabId, frameId, index, value) {
   }
 
   await attachDebugger(tabId);
-
-  // A real click at the cell's coordinates, in case the synthetic one above
-  // wasn't enough to put the sheet into edit mode
-  if (typeof focused.x === 'number') {
-    const pt = { x: focused.x, y: focused.y, button: 'left', clickCount: 1 };
-    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...pt });
-    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...pt });
-    await new Promise(r => setTimeout(r, 120));
-  }
-
   await typeText(tabId, String(value ?? ''));
   await new Promise(r => setTimeout(r, 60));
   await pressKey(tabId, 'enter');

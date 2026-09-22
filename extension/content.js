@@ -1119,9 +1119,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       // cell would send the keystrokes somewhere that cannot receive them.
       await new Promise(r => setTimeout(r, 150));
 
-      // Report the page coordinates so the background can put a real click
-      // there if the synthetic one didn't open the editor.
-      sendResponse({ success: true, x: cx, y: cy });
+      sendResponse({ success: true });
     })();
     return true;
   }
