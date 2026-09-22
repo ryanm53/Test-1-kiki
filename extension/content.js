@@ -335,6 +335,9 @@ async function execute(action) {
 // ── Floating widget ──────────────────────────────────────────────────────────
 
 (function injectWidget() {
+  // The script runs in every frame so it can reach questions rendered inside an
+  // iframe, but only the top frame gets the control bar.
+  if (window.top !== window) return;
   if (document.getElementById('__cap-host')) return;
 
   const host = document.createElement('div');

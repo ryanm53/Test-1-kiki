@@ -293,9 +293,9 @@ async function trustedKeyDrag(tabId, dir, steps) {
   await new Promise(r => setTimeout(r, 400));
 }
 
-function sendToTab(tabId, msg) {
+function sendToTab(tabId, msg, frameId = 0) {
   return new Promise((resolve, reject) => {
-    chrome.tabs.sendMessage(tabId, msg, response => {
+    chrome.tabs.sendMessage(tabId, msg, { frameId }, response => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
       } else {
@@ -303,6 +303,41 @@ function sendToTab(tabId, msg) {
       }
     });
   });
+}
+
+// Some question types render inside an iframe — McGraw Hill's accounting
+// worksheet is served from a separate origin — so the frame holding the
+// question isn't always the top one. Score each frame by whether it actually
+// contains something answerable, rather than just navigation chrome.
+async function findQuestionFrame(tabId) {
+  let probes;
+  try {
+    probes = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => {
+        const n = sel => document.querySelectorAll(sel).length;
+        const fields = n('input:not([type="hidden"]), textarea, select');
+        const choices = n('[role="radio"], [role="checkbox"], input[type="radio"], input[type="checkbox"]');
+        const gridFields = [...document.querySelectorAll('input:not([type="hidden"]), textarea, select')]
+          .filter(el => el.closest('table, [role="table"], [role="grid"]')).length;
+        return { fields, choices, gridFields };
+      }
+    });
+  } catch (_) {
+    return 0; // can't enumerate (restricted page) — fall back to the top frame
+  }
+
+  let best = { frameId: 0, score: -1 };
+  for (const p of probes) {
+    const r = p.result;
+    if (!r) continue;
+    // A worksheet grid is the strongest signal; then any answerable input.
+    // The top frame gets a nudge so it still wins a genuine tie.
+    let score = (r.gridFields >= 4 ? 1000 : 0) + r.fields * 10 + r.choices * 10;
+    if (p.frameId === 0) score += 1;
+    if (score > best.score) best = { frameId: p.frameId, score };
+  }
+  return best.frameId;
 }
 
 // Click / clickMany answer a question in a single call. Drag questions need
@@ -315,6 +350,9 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
   const refTexts = await getReferenceContent(refUrls);
   let usedModel = baseModel;   // reported back so the UI can show an upgrade
 
+  // Resolve once per run: every scrape, click and fill must hit the same frame
+  const frameId = await findQuestionFrame(tabId);
+
   let budget = MAX_STEPS_SIMPLE;
   let completed = 0;
 
@@ -325,7 +363,7 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const pageData = await sendToTab(tabId, { type: 'SCRAPE' });
+        const pageData = await sendToTab(tabId, { type: 'SCRAPE' }, frameId);
         if (!pageData || pageData.error) {
           throw new Error(pageData?.error ?? 'No response from content script');
         }
@@ -346,13 +384,13 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
         if (action.action === 'dragMove') {
           budget = MAX_STEPS_DRAG;
           // Focus the card in the page, then drive real keys through the debugger
-          result = await sendToTab(tabId, { type: 'FOCUS_DRAG', index: action.index });
+          result = await sendToTab(tabId, { type: 'FOCUS_DRAG', index: action.index }, frameId);
           if (result?.success) {
             const steps = Number.isInteger(action.steps) && action.steps > 0 ? action.steps : 1;
             await trustedKeyDrag(tabId, action.dir, steps);
           }
         } else {
-          result = await sendToTab(tabId, { type: 'EXECUTE', action });
+          result = await sendToTab(tabId, { type: 'EXECUTE', action }, frameId);
         }
 
         if (result?.success) {
@@ -383,7 +421,7 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
 
   // Direct clicks (confidence button, next button) — no Claude needed
   for (const click of postClicks) {
-    const result = await sendToTab(tabId, { type: 'CLICK_TEXT', candidates: click.candidates });
+    const result = await sendToTab(tabId, { type: 'CLICK_TEXT', candidates: click.candidates }, frameId);
     if (!result?.success) {
       return { success: false, error: `Could not find "${click.label}" button: ${result?.error ?? ''}` };
     }
