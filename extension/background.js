@@ -445,7 +445,10 @@ async function findQuestionFrame(tabId) {
 // starts — multiple choice still costs exactly one API call.
 const MAX_STEPS_SIMPLE = 1;
 const MAX_STEPS_DRAG   = 8;
-const MAX_STEPS_SIMNET = 10;  // select cell, open dialog, set arguments, confirm
+// Most tasks are 2-5 steps (select, open dialog, set, confirm). Kept tight
+// because every step is a model call, and a long run risks the service worker
+// being torn down before it finishes.
+const MAX_STEPS_SIMNET = 6;
 
 async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true) {
   const refTexts = await getReferenceContent(refUrls);

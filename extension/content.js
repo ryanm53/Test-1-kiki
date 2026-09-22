@@ -795,7 +795,7 @@ async function execute(action) {
   let rateSecs  = 0;
 
   let runToken = 0;        // bumped on stop so in-flight replies are ignored
-  let pollTimer = null, rateTimer = null;
+  let pollTimer = null, rateTimer = null, watchdog = null;
   let lastRunAt = 0;
 
   const PRESETS = [
@@ -1035,6 +1035,7 @@ async function execute(action) {
     try { chrome.runtime.sendMessage({ type: 'STOP_RUN' }); } catch (_) {}
     clearTimeout(pollTimer);
     clearTimeout(rateTimer);
+    clearTimeout(watchdog);
     isRunning = waiting = false;
     paused = false;
     rateSecs = 0;
@@ -1050,9 +1051,20 @@ async function execute(action) {
     lastRunAt = Date.now();
     render();
 
+    // A multi-step run can make many model calls, and if the background worker
+    // is torn down mid-run its reply never arrives — leaving this waiting on
+    // "Answering…" with nothing to reset it. Fail visibly instead of hanging.
+    clearTimeout(watchdog);
+    watchdog = setTimeout(() => {
+      if (token !== runToken) return;
+      stopAll();
+      fail('Timed out waiting for a reply. Try again, or pick a faster model in settings.');
+    }, 180000);
+
     chrome.runtime.sendMessage(
       { type: 'RUN_GOAL', notes, postClicks: PRESETS[presetIndex].postClicks },
       result => {
+        clearTimeout(watchdog);
         if (token !== runToken) return;   // stopped, or superseded
         isRunning = false;
 
