@@ -78,12 +78,16 @@ const SIMNET_HINT = `
 This is a simulated Excel. The task is stated in the page text above; cells are
 marked cell=B7 and the ribbon is in the element list.
 
+The workbook is already filled in. Each task asks for ONE operation — a ribbon
+command, a dialog, a formatting change — so the answer is almost always a
+ribbon click rather than editing data. Do not change cell values unless the
+task explicitly says to enter something.
+
 Do ONE step per reply — you will see the result before choosing the next.
 Follow the method the task names: if it says to use a particular dialog, open
 that dialog rather than typing the answer straight into the cell, because how
 it was done is what gets graded.
 Click a ribbon tab first when the control you need is on another tab.
-To put a value in a cell, click the cell and then use fill on it.
 Reply {"action":"none"} once the task described is complete.`;
 
 async function callClaude(apiKey, notes, pageText, elements, refTexts = [], modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false) {
@@ -113,7 +117,7 @@ async function callClaude(apiKey, notes, pageText, elements, refTexts = [], mode
   const notesSection = notes ? `Notes from the user: ${notes}\n\n` : '';
 
   const userContent = `${notesSection}Page text:
-${pageText.slice(0, isWorksheet ? 3000 : 800)}${refSection}
+${pageText.slice(0, isWorksheet ? 3000 : isSimnet ? 1500 : 800)}${refSection}
 
 Elements (click by index):
 ${elementList || '(none found)'}`;

@@ -239,18 +239,25 @@ function scrape() {
   const simCells = Array.from(document.querySelectorAll('td.grdbdy-cell'));
   if (simCells.length > 50) {
     const CHROME = '[class*="Launch_"], .rsbtn_play, .read-speaker-btn, [class*="shell-"]';
+
+    // The workbook arrives already populated and each task asks for a single
+    // operation, so the ribbon is what the answer is actually made of. It gets
+    // the lion's share of the budget; cells are context.
     const controls = all
       .filter(el => !el.matches(CHROME) && !el.closest(CHROME))
-      .slice(0, 70);
+      .slice(0, 110);
 
-    const interesting = simCells.filter(c =>
-      isRendered(c) && (
-        c.classList.contains('has-value') ||
-        /select|active|focused/i.test(c.className)
-      )
-    ).slice(0, 60);
+    // Whatever cells the task names ("...to cell C7") must be present even when
+    // empty, or the one cell the question is about can be the one left out.
+    const named = new Set((root.innerText ?? '').slice(0, 600).match(/\b[A-Z]{1,3}\d{1,4}\b/g) ?? []);
+    const cells = simCells.filter(isRendered);
+    const referenced = cells.filter(c => named.has(cellAddress(c)));
+    const populated = cells.filter(c =>
+      !named.has(cellAddress(c)) &&
+      (c.classList.contains('has-value') || /select|active|focused/i.test(c.className))
+    ).slice(0, 30);
 
-    _lastElements = [...controls, ...interesting];
+    _lastElements = [...controls, ...referenced, ...populated];
     return {
       text: (root.innerText ?? '').slice(0, 5000),
       elements: _lastElements.map(describeEl),
