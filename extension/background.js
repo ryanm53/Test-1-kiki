@@ -101,6 +101,10 @@ ${pageText.slice(0, isWorksheet ? 3000 : 800)}${refSection}
 Elements (click by index):
 ${elementList || '(none found)'}`;
 
+  // Visible in the service worker console — the fastest way to see whether the
+  // question text and the cell labels actually reached the model.
+  console.log(`[PageAgent] ${model}${isWorksheet ? ' (worksheet)' : ''}\n${userContent}`);
+
   const requestBody = {
     model,
     // A fills array covering a whole worksheet needs far more room than a
