@@ -90,7 +90,25 @@ it was done is what gets graded.
 Click a ribbon tab first when the control you need is on another tab.
 Reply {"action":"none"} once the task described is complete.`;
 
-async function callClaude(apiKey, notes, pageText, elements, refTexts = [], modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false) {
+// A short account of what has already been done this question. Without it each
+// step is decided from a bare screenshot of the DOM, with no way to tell step
+// one of a procedure from step four — so steps get repeated or skipped.
+function actionSummary(action, elements) {
+  const name = i => {
+    const e = elements[i];
+    if (!e) return `[${i}]`;
+    return `"${(e.text || e.cell || e.tag || '').slice(0, 40)}"`;
+  };
+  switch (action.action) {
+    case 'click':     return `clicked ${name(action.index)}`;
+    case 'clickMany': return `selected ${(action.indexes ?? []).map(name).join(', ')}`;
+    case 'fill':      return (action.fills ?? []).map(f => `typed "${f.value}" into ${name(f.index)}`).join('; ');
+    case 'dragMove':  return `moved ${name(action.index)} ${action.dir} x${action.steps ?? 1}`;
+    default:          return action.action;
+  }
+}
+
+async function callClaude(apiKey, notes, pageText, elements, refTexts = [], modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = []) {
   const model = MODELS[modelId] ? modelId : DEFAULT_MODEL;
   const cfg = MODELS[model];
 
@@ -116,7 +134,11 @@ async function callClaude(apiKey, notes, pageText, elements, refTexts = [], mode
   // Optional user context (subject, conventions, hints) — omitted when blank
   const notesSection = notes ? `Notes from the user: ${notes}\n\n` : '';
 
-  const userContent = `${notesSection}Page text:
+  const historySection = history.length
+    ? `Steps you have ALREADY done for this question:\n${history.map((h, i) => `${i + 1}. ${h}`).join('\n')}\nDo the NEXT step, not one of these again.\n\n`
+    : '';
+
+  const userContent = `${notesSection}${historySection}Page text:
 ${pageText.slice(0, isWorksheet ? 3000 : isSimnet ? 1500 : 800)}${refSection}
 
 Elements (click by index):
@@ -434,6 +456,7 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
 
   let budget = MAX_STEPS_SIMPLE;
   let completed = 0;
+  const history = [];   // what has been done so far on this question
 
   for (let step = 0; step < budget; step++) {
     let lastError = 'Unknown error';
@@ -465,7 +488,7 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
         }
 
         usedModel = pickModel(baseModel, pageData, autoUpgrade);
-        const action = await callClaude(apiKey, notes, pageText, pageData.elements, refTexts, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet);
+        const action = await callClaude(apiKey, notes, pageText, pageData.elements, refTexts, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history);
 
         if (action.action === 'none') {
           // Before any action: nothing on screen is answerable.
@@ -506,6 +529,7 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
         if (result?.success) {
           stepDone = true;
           completed++;
+          history.push(actionSummary(action, pageData.elements));
           await new Promise(r => setTimeout(r, action.action === 'dragMove' ? 500 : 900));
           break;
         }
