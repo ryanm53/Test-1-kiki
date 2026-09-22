@@ -447,6 +447,12 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
           throw new Error(pageData?.error ?? 'No response from content script');
         }
 
+        // A simulated-Excel task is a procedure — switch tab, open dialog, set
+        // arguments, confirm — so it needs room for several steps. Set from the
+        // scrape rather than from the action, since the page says what it is
+        // before the first move is chosen.
+        if (pageData.isSimnet) budget = MAX_STEPS_SIMNET;
+
         // The question prose often lives in the outer page while the answer
         // grid is inside the iframe, so pull both or the amounts to work from
         // would be missing entirely.
