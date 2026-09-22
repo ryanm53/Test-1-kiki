@@ -141,3 +141,49 @@ are direct DOM lookups that never touch the API.
 | `background.js` | Service worker: Claude API calls, retry loop, reference tab scraping |
 | `content.js` | Injected on every page: scrapes elements, executes actions, control bar UI |
 | `popup.html` | Static card pointing at the on-page control bar |
+
+---
+
+## Failure handling
+
+The worst outcome is silence: a press of play that produces no action and no
+message. Everything below exists to make that impossible.
+
+**A reloaded extension orphans open pages.** Reloading at `chrome://extensions`
+leaves every already-open tab running the previous copy of `content.js` with a
+dead connection — `chrome.*` calls throw `Extension context invalidated`. All
+calls to the extension go through `bgSend` / `store`, which check
+`chrome.runtime.id` first and turn a dead connection into "refresh this page"
+in the status bar rather than an uncaught throw.
+
+**Pages open before install have no content script.** `sendToTab` catches
+"receiving end does not exist", injects `content.js` into that frame with
+`chrome.scripting`, and retries once. `content.js` is wrapped in a load guard so
+a second injection is a no-op instead of a redeclaration error.
+
+**Nothing waits forever.** Every message to the page has a 20s deadline, every
+async message handler answers even when it throws, and `RUN_GOAL` always sends a
+response — including from its `catch` and around `detachDebugger`.
+
+**The control bar's timer measures silence, not length.** A six-step spreadsheet
+task on Opus legitimately runs for minutes, so the background sends a `PROGRESS`
+heartbeat as each step begins (and between cells of a long fill). The timer is
+pushed back on each one and only fires after 90s of genuine silence.
+
+**Errors say what to do.** API failures are mapped to plain English — a 401
+points at the key-versus-key-ID mix-up, a 400 mentioning credit points at
+Billing, a network failure says to check the connection. 5xx is retried once
+before the user sees anything.
+
+## Tests
+
+```
+npm install
+npm test
+```
+
+jsdom, no browser. Each suite pins a bug that actually shipped: worksheet
+column/row labelling, spreadsheet cell detection, SIMnet's ribbon surviving the
+exam-chrome filter, SIMnet behaviour *not* leaking into ordinary questions, and
+the failure handling above. Run it before pushing — several of these were
+originally caught by the test rather than by the user.

@@ -93,6 +93,20 @@ Reply {"action":"none"} once the task described is complete.`;
 // A short account of what has already been done this question. Without it each
 // step is decided from a bare screenshot of the DOM, with no way to tell step
 // one of a procedure from step four — so steps get repeated or skipped.
+// Claude occasionally names an index that isn't in the list — usually right
+// after the page has re-rendered under it. Acting on that would click whatever
+// happens to sit at that position, so catch it before anything moves.
+function badIndexes(action, count) {
+  const out = [];
+  const check = i => {
+    if (!Number.isInteger(i) || i < 0 || i >= count) out.push(String(i));
+  };
+  if (action.action === 'click' || action.action === 'dragMove') check(action.index);
+  if (action.action === 'clickMany') (action.indexes ?? []).forEach(check);
+  if (action.action === 'fill') (action.fills ?? []).forEach(f => check(f?.index));
+  return out;
+}
+
 function actionSummary(action, elements) {
   const name = i => {
     const e = elements[i];
@@ -106,6 +120,61 @@ function actionSummary(action, elements) {
     case 'dragMove':  return `moved ${name(action.index)} ${action.dir} x${action.steps ?? 1}`;
     default:          return action.action;
   }
+}
+
+// Turns an API failure into something a non-technical user can act on. The
+// raw body is kept as a last resort so an unfamiliar error is still diagnosable.
+function apiErrorMessage(status, body) {
+  if (status === 401 || status === 403) {
+    return 'Your API key was rejected. Make sure you pasted the key itself — it starts with '
+         + 'sk-ant-api03- and is very long — and not the short key ID.';
+  }
+  if (status === 429) {
+    return 'Rate limit hit — wait about a minute and try again.';
+  }
+  if (status === 400 && /credit balance|billing/i.test(body)) {
+    return 'Your Anthropic account is out of credit. Add some at console.anthropic.com under Billing.';
+  }
+  if (status === 404 && /model/i.test(body)) {
+    return 'That model is not available on your account. Pick a different one in settings.';
+  }
+  if (status >= 500) {
+    return `Claude is having trouble right now (error ${status}). Wait a moment and try again.`;
+  }
+  return `Claude API ${status}: ${body.slice(0, 300)}`;
+}
+
+// Overloads and dropped connections are common and temporary, so retry them
+// once before surfacing anything to the user.
+async function postToApi(apiKey, requestBody) {
+  let lastNetworkError = null;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt) await new Promise(r => setTimeout(r, 1500));
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify(requestBody)
+      });
+      // Only server-side wobbles are worth a second go; a bad key or a bad
+      // request will fail exactly the same way twice.
+      if (response.status >= 500 && attempt === 0) continue;
+      return response;
+    } catch (e) {
+      lastNetworkError = e;
+    }
+  }
+
+  throw new Error(
+    'Could not reach Claude. Check your internet connection and try again.'
+    + (lastNetworkError ? ` (${lastNetworkError.message})` : '')
+  );
 }
 
 async function callClaude(apiKey, notes, pageText, elements, refTexts = [], modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = []) {
@@ -171,26 +240,19 @@ ${elementList || '(none found)'}`;
     if (cfg.effort) requestBody.output_config.effort = cfg.effort;
   }
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify(requestBody)
-  });
+  const response = await postToApi(apiKey, requestBody);
 
   if (!response.ok) {
-    const body = await response.text();
-    if (response.status === 429) {
-      throw new Error('Rate limit hit — wait about a minute and try again.');
-    }
-    throw new Error(`Claude API ${response.status}: ${body.slice(0, 300)}`);
+    const body = await response.text().catch(() => '');
+    throw new Error(apiErrorMessage(response.status, body));
   }
 
-  const data = await response.json();
+  let data;
+  try {
+    data = await response.json();
+  } catch (_) {
+    throw new Error('Claude sent back a reply that could not be read. Try again.');
+  }
   // Find the text block specifically — thinking models emit other block types first
   const text = data.content?.find(b => b.type === 'text')?.text ?? '';
   // Prefill responses are only the completion, so restore the seeded prefix
@@ -261,7 +323,7 @@ ${elementList || '(none found)'}`;
 async function getReferenceContent(refUrls) {
   if (!refUrls || refUrls.length === 0) return [];
 
-  const allTabs = await chrome.tabs.query({});
+  const allTabs = await chrome.tabs.query({}).catch(() => []);
   const results = [];
 
   for (const refUrl of refUrls) {
@@ -391,16 +453,53 @@ async function trustedKeyDrag(tabId, dir, steps) {
   await new Promise(r => setTimeout(r, 400));
 }
 
-function sendToTab(tabId, msg, frameId = 0) {
+// A content script that never answers would hang the run forever, so every
+// message gets a deadline. Generous, because a scrape of a big worksheet is
+// not instant.
+const MSG_TIMEOUT_MS = 20000;
+
+function rawSend(tabId, msg, frameId) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('The page stopped responding. Refresh it and try again.'));
+    }, MSG_TIMEOUT_MS);
+
     chrome.tabs.sendMessage(tabId, msg, { frameId }, response => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-      } else {
-        resolve(response);
-      }
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+      else resolve(response);
     });
   });
+}
+
+const NO_RECEIVER = /Receiving end does not exist|Could not establish connection/i;
+
+async function sendToTab(tabId, msg, frameId = 0) {
+  try {
+    return await rawSend(tabId, msg, frameId);
+  } catch (e) {
+    if (!NO_RECEIVER.test(e.message)) throw e;
+
+    // No content script in that frame: the tab was open before the extension
+    // was installed or updated. Inject one and retry, rather than making the
+    // user work out for themselves that a refresh is needed. content.js is
+    // guarded against loading twice, so this is safe even in a race.
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId, frameIds: [frameId] },
+        files: ['content.js']
+      });
+    } catch (_) {
+      throw new Error('Could not reach this page. Refresh it and try again.');
+    }
+    await new Promise(r => setTimeout(r, 300));
+    return await rawSend(tabId, msg, frameId);
+  }
 }
 
 // Some question types render inside an iframe — McGraw Hill's accounting
@@ -450,6 +549,17 @@ const MAX_STEPS_DRAG   = 8;
 // being torn down before it finishes.
 const MAX_STEPS_SIMNET = 6;
 
+// Tells the control bar the run is still moving. Fire and forget: the bar
+// lives in the top frame, may not exist at all (popup-driven runs), and a
+// failure to report progress must never stop the run itself.
+function reportProgress(tabId, step, budget) {
+  try {
+    chrome.tabs.sendMessage(tabId, { type: 'PROGRESS', step, budget }, { frameId: 0 }, () => {
+      void chrome.runtime.lastError;   // read it so Chrome doesn't log it
+    });
+  } catch (_) { /* no listener — nothing to report to */ }
+}
+
 async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true) {
   const refTexts = await getReferenceContent(refUrls);
   let usedModel = baseModel;   // reported back so the UI can show an upgrade
@@ -468,6 +578,8 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
       cancelledRuns.delete(tabId);
       return { success: false, error: 'Stopped.', usedModel };
     }
+    reportProgress(tabId, step + 1, budget);
+
     let lastError = 'Unknown error';
     let stepDone = false;
     let finished = false;
@@ -499,6 +611,11 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
         usedModel = pickModel(baseModel, pageData, autoUpgrade);
         const action = await callClaude(apiKey, notes, pageText, pageData.elements, refTexts, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history);
 
+        const bad = badIndexes(action, pageData.elements.length);
+        if (bad.length) {
+          throw new Error(`Referred to item ${bad.join(', ')}, which isn't on the page.`);
+        }
+
         if (action.action === 'none') {
           // Before any action: nothing on screen is answerable.
           // After a move: the drag arrangement is complete.
@@ -523,6 +640,9 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
           result = { success: true };
           const missed = [];
           for (const f of action.fills) {
+            // Typing a long worksheet cell by cell can outlast the control
+            // bar's silence timer on its own, so keep telling it we're alive.
+            reportProgress(tabId, step + 1, budget);
             const r = await typeIntoCell(tabId, frameId, f.index, f.value);
             if (!r.success) missed.push(`[${f.index}]`);
           }
@@ -576,6 +696,10 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
 
   // Direct clicks (confidence button, next button) — no Claude needed
   for (const click of postClicks) {
+    if (cancelledRuns.has(tabId)) {
+      cancelledRuns.delete(tabId);
+      return { success: false, error: 'Stopped.', usedModel };
+    }
     const result = await sendToTab(tabId, { type: 'CLICK_TEXT', candidates: click.candidates }, frameId);
     if (!result?.success) {
       return { success: false, error: `Could not find "${click.label}" button: ${result?.error ?? ''}` };
@@ -603,7 +727,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   (async () => {
     const { apiKey: rawKey, model: savedModel, autoUpgrade } =
-      await chrome.storage.local.get(['apiKey', 'model', 'autoUpgrade']);
+      await chrome.storage.local.get(['apiKey', 'model', 'autoUpgrade']).catch(() => ({}));
     const baseModel = MODELS[savedModel] ? savedModel : DEFAULT_MODEL;
     const apiKey = rawKey ? rawKey.replace(/[^\x20-\x7E]/g, '').trim() : '';
     if (!apiKey) {
@@ -620,15 +744,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // Popup sends refUrls; floating widget loads them from storage
     const refUrls = msg.refUrls
-      ?? (await chrome.storage.local.get('refUrls')).refUrls
+      ?? (await chrome.storage.local.get('refUrls').catch(() => ({}))).refUrls
       ?? [];
 
     let result;
     try {
       result = await runGoal(apiKey, msg.notes ?? '', tabId, refUrls, msg.postClicks ?? [], baseModel, autoUpgrade !== false);
+    } catch (e) {
+      // Anything unexpected still has to come back as an answer. Without this
+      // the reply never arrives and the widget sits on "Answering…" forever.
+      result = { success: false, error: e?.message ?? String(e) };
     } finally {
       // Always release the tab so the "being debugged" banner doesn't linger
-      await detachDebugger(tabId);
+      try { await detachDebugger(tabId); } catch (_) {}
     }
     sendResponse(result);
   })();

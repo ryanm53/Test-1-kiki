@@ -1,3 +1,14 @@
+// Claude Page Agent — page side: scrapes the question, carries out the action,
+// and draws the control bar.
+//
+// The whole file is wrapped so it can be injected a second time safely. The
+// background injects it into tabs that were already open when the extension
+// was installed or updated; without this, the second copy would redeclare every
+// top-level const and die with a syntax error before reaching the guard.
+(function pageAgent() {
+if (window.__pageAgentLoaded) return;
+window.__pageAgentLoaded = true;
+
 // Selectors for elements worth interacting with
 const INTERACTIVE_SEL = [
   'button',
@@ -436,6 +447,48 @@ async function execute(action) {
   }
 }
 
+// After the extension is reloaded or updated, an already-open page keeps
+// running this old copy, but its link back to the extension is dead: every
+// chrome.* call throws "Extension context invalidated". Nothing here may throw
+// on that, or pressing play does nothing at all with no explanation.
+function extensionAlive() {
+  try { return !!chrome.runtime?.id; } catch (_) { return false; }
+}
+
+const RELOAD_MSG = 'The extension was updated. Refresh this page to reconnect.';
+
+const store = {
+  get(keys, cb) {
+    if (!extensionAlive()) { cb({}); return; }
+    try { chrome.storage.local.get(keys, res => cb(res ?? {})); }
+    catch (_) { cb({}); }
+  },
+  set(obj, cb) {
+    if (!extensionAlive()) { cb && cb(); return; }
+    try { chrome.storage.local.set(obj, cb); }
+    catch (_) { cb && cb(); }
+  }
+};
+
+// The background reports each step of a run through here. It is set by the
+// control bar once that exists, and stays null in iframes, which have none.
+let progressHook = null;
+
+// Every message to the background comes through here, so a dead connection is
+// always reported as something the user can act on.
+function bgSend(msg, cb) {
+  if (!extensionAlive()) { cb?.(null, RELOAD_MSG); return; }
+  try {
+    chrome.runtime.sendMessage(msg, res => {
+      const err = chrome.runtime.lastError?.message;
+      if (err) cb?.(null, /context invalidated|port closed|receiving end/i.test(err) ? RELOAD_MSG : err);
+      else cb?.(res, null);
+    });
+  } catch (_) {
+    cb?.(null, RELOAD_MSG);
+  }
+}
+
 // ── Floating widget ──────────────────────────────────────────────────────────
 
 (function injectWidget() {
@@ -793,6 +846,7 @@ async function execute(action) {
   let answered  = 0;
   let errorMsg  = '';
   let rateSecs  = 0;
+  let stepNote  = '';      // "step 2/6" during a multi-step task
 
   let runToken = 0;        // bumped on stop so in-flight replies are ignored
   let pollTimer = null, rateTimer = null, watchdog = null;
@@ -834,7 +888,7 @@ async function execute(action) {
   }
 
   modelSel.addEventListener('change', () => {
-    chrome.storage.local.set({ model: modelSel.value });
+    store.set({ model: modelSel.value });
     showModelHint();
   });
 
@@ -849,7 +903,7 @@ async function execute(action) {
     if (errorMsg)        { cls = 'err';  text = errorMsg; }
     else if (rateSecs)   { cls = 'hold'; text = `Rate limited · ${rateSecs}s`; }
     else if (paused)     { cls = 'hold'; text = 'Paused'; }
-    else if (isRunning)  { cls = 'run';  text = 'Answering…'; }
+    else if (isRunning)  { cls = 'run';  text = 'Answering…' + stepNote; }
     else if (waiting)    { cls = 'run';  text = 'Next question…'; }
 
     if (answered > 0 && !errorMsg) text += ` · ${answered}`;
@@ -871,7 +925,7 @@ async function execute(action) {
   }
 
   // ── Persistence ────────────────────────────────────────────────────────────
-  chrome.storage.local.get(
+  store.get(
     ['lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'refUrls', 'model'],
     s => {
       presetIndex = PRESETS[s.lastPresetIndex] ? s.lastPresetIndex : 0;
@@ -898,7 +952,7 @@ async function execute(action) {
 
   presetSel.addEventListener('change', () => {
     presetIndex = parseInt(presetSel.value) || 0;
-    chrome.storage.local.set({ lastPresetIndex: presetIndex });
+    store.set({ lastPresetIndex: presetIndex });
   });
 
   let notesDebounce = null;
@@ -906,26 +960,26 @@ async function execute(action) {
     clearTimeout(notesDebounce);
     notesDebounce = setTimeout(() => {
       notes = notesInput.value.trim();
-      chrome.storage.local.set({ notes });
+      store.set({ notes });
     }, 400);
   });
 
   upgradeSw.addEventListener('click', () => {
     autoUpgrade = !autoUpgrade;
     upgradeSw.classList.toggle('on', autoUpgrade);
-    chrome.storage.local.set({ autoUpgrade });
+    store.set({ autoUpgrade });
   });
 
   autoSw.addEventListener('click', () => {
     autoContinue = !autoContinue;
     autoSw.classList.toggle('on', autoContinue);
-    chrome.storage.local.set({ autoContinue });
+    store.set({ autoContinue });
   });
 
   saveKeyBtn.addEventListener('click', () => {
     const k = keyInput.value.trim();
     if (!k) return;
-    chrome.storage.local.set({ apiKey: k }, () => {
+    store.set({ apiKey: k }, () => {
       hasKey = true;
       saveKeyBtn.textContent = 'Saved';
       saveKeyBtn.classList.add('done');
@@ -957,7 +1011,7 @@ async function execute(action) {
       b.textContent = '✕';
       b.addEventListener('click', () => {
         refUrls.splice(i, 1);
-        chrome.storage.local.set({ refUrls });
+        store.set({ refUrls });
         renderRefs();
       });
       row.append(s, b);
@@ -971,7 +1025,7 @@ async function execute(action) {
     if (!/^https?:\/\//.test(u)) { fail('URL must start with http:// or https://'); return; }
     if (!refUrls.includes(u)) {
       refUrls.push(u);
-      chrome.storage.local.set({ refUrls });
+      store.set({ refUrls });
       renderRefs();
     }
     refInput.value = '';
@@ -980,7 +1034,7 @@ async function execute(action) {
   refInput.addEventListener('keydown', e => { if (e.key === 'Enter') addRef(); });
 
   copyPromptBtn.addEventListener('click', () => {
-    chrome.storage.local.get('lastPrompt', ({ lastPrompt }) => {
+    store.get('lastPrompt', ({ lastPrompt }) => {
       const flash = msg => {
         copyPromptBtn.textContent = msg;
         copyPromptBtn.classList.add('done');
@@ -1020,6 +1074,7 @@ async function execute(action) {
   // ── Run control ────────────────────────────────────────────────────────────
   goBtn.addEventListener('click', () => {
     if (isRunning || waiting || rateSecs > 0) { stopAll(); return; }
+    if (!extensionAlive()) { fail(RELOAD_MSG); return; }
     errorMsg = '';
     paused = false;
     answered = 0;
@@ -1032,14 +1087,29 @@ async function execute(action) {
     runToken++;                     // invalidates any in-flight reply
     // The background runs a multi-step loop of its own; without telling it to
     // stop, this would only quieten the widget while it kept on clicking.
-    try { chrome.runtime.sendMessage({ type: 'STOP_RUN' }); } catch (_) {}
+    bgSend({ type: 'STOP_RUN' });
     clearTimeout(pollTimer);
     clearTimeout(rateTimer);
     clearTimeout(watchdog);
     isRunning = waiting = false;
     paused = false;
     rateSecs = 0;
+    stepNote = '';
     render();
+  }
+
+  // If the background worker is torn down mid-run its reply never arrives,
+  // leaving this on "Answering…" with nothing to reset it. A run can legitimately
+  // take minutes, though — a six-step spreadsheet task on Opus does — so the
+  // clock measures silence, not total length: every step the background starts
+  // pushes it back. Only a genuinely stalled run runs it out.
+  function armWatchdog(token) {
+    clearTimeout(watchdog);
+    watchdog = setTimeout(() => {
+      if (token !== runToken) return;
+      stopAll();
+      fail('Nothing came back for a while. Press play to try again, or pick a faster model in settings.');
+    }, 90000);
   }
 
   function triggerRun() {
@@ -1049,27 +1119,20 @@ async function execute(action) {
     waiting = false;
     errorMsg = '';
     lastRunAt = Date.now();
+    stepNote = '';
     render();
 
-    // A multi-step run can make many model calls, and if the background worker
-    // is torn down mid-run its reply never arrives — leaving this waiting on
-    // "Answering…" with nothing to reset it. Fail visibly instead of hanging.
-    clearTimeout(watchdog);
-    watchdog = setTimeout(() => {
-      if (token !== runToken) return;
-      stopAll();
-      fail('Timed out waiting for a reply. Try again, or pick a faster model in settings.');
-    }, 180000);
+    armWatchdog(token);
 
-    chrome.runtime.sendMessage(
+    bgSend(
       { type: 'RUN_GOAL', notes, postClicks: PRESETS[presetIndex].postClicks },
-      result => {
+      (result, sendError) => {
         clearTimeout(watchdog);
         if (token !== runToken) return;   // stopped, or superseded
         isRunning = false;
 
-        if (chrome.runtime.lastError || !result) {
-          fail(chrome.runtime.lastError?.message ?? 'No response from background.');
+        if (sendError || !result) {
+          fail(sendError ?? 'No response from the extension. Refresh this page and try again.');
           return;
         }
 
@@ -1130,6 +1193,15 @@ async function execute(action) {
     })();
   }
 
+  progressHook = (step, budget) => {
+    if (!isRunning) return;
+    armWatchdog(runToken);
+    // A one-step question is the normal case and needs no commentary; a
+    // procedure that takes several says where it has got to.
+    stepNote = budget > 1 ? ` · step ${step}/${budget}` : '';
+    render();
+  };
+
   // ── Auto-run on SPA navigation ─────────────────────────────────────────────
   let lastAutoUrl = '', autoTimer = null;
   const COOLDOWN = 5000;
@@ -1155,11 +1227,30 @@ async function execute(action) {
 
   render();
   document.body.appendChild(host);
+
+  // Some course pages swap out the whole body between questions, which takes
+  // the control bar with it. Put it back rather than leaving the user staring
+  // at a page with no controls.
+  setInterval(() => {
+    if (!document.body) return;
+    if (!document.body.contains(host)) document.body.appendChild(host);
+  }, 2000);
 })();
 
 // ── Message listener ─────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === 'PROGRESS') {
+    progressHook?.(msg.step, msg.budget);
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (msg.type === 'PING') {
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (msg.type === 'SCRAPE') {
     try {
       sendResponse(scrape());
@@ -1223,7 +1314,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       }
 
       sendResponse({ success: true });
-    })();
+    })().catch(e => sendResponse({ success: false, error: e?.message ?? String(e) }));
     return true;
   }
 
@@ -1252,7 +1343,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return;
       }
       sendResponse({ success: true });
-    })();
+    })().catch(e => sendResponse({ success: false, error: e?.message ?? String(e) }));
     return true;
   }
 
@@ -1298,7 +1389,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       found.dispatchEvent(new MouseEvent('mouseup', mo));
       found.click();
       sendResponse({ success: true });
-    })();
+    })().catch(e => sendResponse({ success: false, error: e?.message ?? String(e) }));
     return true; // async response
   }
+
+  sendResponse({ success: false, error: `Unknown message type: ${msg?.type}` });
+  return false;
 });
+
+})();
