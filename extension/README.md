@@ -156,6 +156,18 @@ change between sites.
   — and a `<select>` its choices and current value, everywhere. Up to 8 steps;
   a run that uses them all without the model reporting the task complete is
   an error ("Used all 8 steps…"), never "Finished".
+- **SIMnet grading** — SIMnet grades with a popup: a "Correct"/"Incorrect"
+  heading, a HINT with the exact steps on a wrong answer, and one Continue
+  button (back to the question after a wrong try, on to the next after a
+  right one). `findVerdict()` finds it by wording — the heading's text with
+  a Continue button in the same box, which keeps a cell reading "Correct"
+  from counting — in the question frame and the top frame. It's checked
+  before each step and, when the model says it's finished, for up to 3s.
+  Correct: Continue, and the run returns `advanced` so Autopilot goes on at
+  once. Incorrect on the first round: one retry round with the hint in the
+  prompt and effort raised to medium — only if the "N of M Attempts" counter
+  (read at the start) shows the retry can't spend the last attempt, and
+  never in Answer only mode. Verdicts and hints go into the answer log.
 - **SIMnet menus** — the element list is capped (130), and SIMnet's ribbon alone
   nearly fills it, while dropdowns, submenus and dialogs are added at the end
   of the page. So each look compares against the previous one (a `WeakSet` of

@@ -460,6 +460,41 @@ function pickTarget(action) {
   return pickElement(action.index);
 }
 
+// SIMnet grades a task with a popup: a heading "Correct" or "Incorrect", on a
+// wrong answer a hint with the exact steps, and a Continue button — back to
+// the question after a wrong try, on to the next after a right one. Found by
+// its wording rather than its markup: the heading's text, with a Continue
+// button in the same box. That pairing is what keeps a cell that happens to
+// say "Correct" from counting.
+function findVerdict() {
+  if (!document.body) return null;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    const t = node.nodeValue.trim();
+    if (!/^(in)?correct!?$/i.test(t)) continue;
+    const heading = node.parentElement;
+    if (!heading || !isRendered(heading)) continue;
+    let box = heading.parentElement, cont = null;
+    for (let i = 0; i < 6 && box && box !== document.body; i++, box = box.parentElement) {
+      cont = Array.from(box.querySelectorAll('button, [role="button"], a'))
+        .find(b => /^continue$/i.test((b.innerText ?? b.textContent ?? '').trim()) && isRendered(b));
+      if (cont) break;
+    }
+    if (!cont) continue;
+    const hint = (box.innerText ?? box.textContent ?? '')
+      .replace(t, '').replace(/\bContinue\b/i, '').replace(/\s+/g, ' ').trim();
+    return { verdict: /^in/i.test(t) ? 'incorrect' : 'correct', hint: hint.slice(0, 600), button: cont };
+  }
+  return null;
+}
+
+// "1 of 3 Attempts": which try this is, so a retry never spends the last one
+function attemptsShown() {
+  const m = /(\d+)\s+of\s+(\d+)\s+Attempts?/i.exec(document.body?.innerText ?? document.body?.textContent ?? '');
+  return m ? { current: Number(m[1]), total: Number(m[2]) } : null;
+}
+
 const KEY_CODES = {
   Enter: 13, Escape: 27, Tab: 9, Delete: 46, Backspace: 8, F2: 113, F4: 115,
   ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, Home: 36, End: 35
@@ -1746,6 +1781,19 @@ function bgSend(msg, cb) {
 
         if (!autoContinue) { render(); return; }
 
+        // The run already moved to the next question (SIMnet's Continue), so
+        // there's no change left to wait for: go on once it has settled
+        if (result.advanced) {
+          waiting = true;
+          render();
+          pollTimer = setTimeout(() => {
+            if (token !== runToken) return;
+            waiting = false;
+            triggerRun();
+          }, 1000);
+          return;
+        }
+
         // Wait for the page to actually change before the next question
         const root = document.querySelector('[role="main"], main, article, form') ?? document.body;
         waitForPageChange((root.innerText ?? '').slice(0, 400), token);
@@ -1818,6 +1866,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'PROGRESS') {
     progressHook?.(msg.step, msg.budget);
     sendResponse({ ok: true });
+    return false;
+  }
+
+  if (msg.type === 'SIMNET_VERDICT') {
+    const v = findVerdict();
+    sendResponse({ verdict: v?.verdict ?? null, hint: v?.hint ?? '', attempts: attemptsShown() });
+    return false;
+  }
+
+  if (msg.type === 'SIMNET_CONTINUE') {
+    const v = findVerdict();
+    if (!v) { sendResponse({ success: false, error: 'No result popup to continue from' }); return false; }
+    realClick(v.button);
+    sendResponse({ success: true });
     return false;
   }
 

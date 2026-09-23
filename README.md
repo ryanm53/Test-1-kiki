@@ -107,7 +107,7 @@ Press the **play button ▶**. What happens next depends on the site:
 |---|---|
 | **Connect** | Answers, clicks **High Confidence** and **Next Question**, and keeps going through the whole assignment on its own |
 | **Canvas** | Answers **every question on the page** in one go. If the quiz shows one question at a time, it clicks **Next** and keeps going. **It never presses Submit Quiz** — when it's done it says *"Answered. Check it over, then submit it yourself."* |
-| **SIMnet** | Does the task on screen — ribbon tabs and their menus, dialogs, selecting cells and ranges, double-clicking a sheet tab to rename it, right-click menus, Ctrl-clicking to group sheets, typing and pressing keys — then stops and says *"Finished. Check SIMnet agrees."* Go to the next task yourself and press play again. If it uses all its steps without finishing, it says so rather than claiming it's done |
+| **SIMnet** | Does the task on screen — ribbon tabs and their menus, dialogs, selecting cells and ranges, double-clicking a sheet tab to rename it, right-click menus, Ctrl-clicking to group sheets, typing and pressing keys. SIMnet then grades it: when it's **correct**, Autopilot presses Continue and goes on to the next question by itself. When it's **incorrect**, it reads SIMnet's hint and tries **once** more following it. It never spends your **last attempt**: if another try would use it, or the second try is also wrong, it stops and shows you the hint to finish it yourself |
 
 Press the same button again — it's now a **stop button ⏸** — to halt at any point.
 
@@ -128,10 +128,25 @@ The bar shows you what's happening as it goes:
 | **Answering… · step 2/6** | Working through a task that takes several steps (SIMnet) |
 | **Paused · 7** | Stopped, 7 answered |
 | **Answered. Check it over, then submit it yourself.** | Canvas page done. Look it over and hand it in when you're happy |
-| **Finished. Check SIMnet agrees, then move to the next one.** | SIMnet task done, as far as it can tell — SIMnet's own right/wrong popup has the final word |
+| **Finished. Check SIMnet agrees, then move to the next one.** | It thinks the SIMnet task is done, but SIMnet showed no result popup to confirm |
+| **Correct! Click Continue for the next question.** | *Answer only* mode on SIMnet — it leaves Continue to you |
+| **Marked incorrect… SIMnet's hint: …** | SIMnet said no, and it won't try again (second wrong try, or another would use your last attempt). The hint says how to do it |
 | **Used all 8 steps without finishing** | SIMnet task it couldn't complete. Do that one yourself |
 | **Rate limited · 45s** | Went too fast for the API. It waits and resumes automatically — just leave it |
 | *Amber text* | Something went wrong. The message explains what |
+
+---
+
+## Updating to a new version
+
+When there's a new version:
+
+1. Go to **https://github.com/ryanm53/Test-1-kiki**, click the green **Code** button, then **Download ZIP**, and unzip it
+2. Open the folder you set up in Step 1 — the one Chrome loads the extension from. **Delete what's inside its `extension` folder, and copy in the new `extension` folder's files.** Keep it in the same place: if Chrome finds it somewhere new, it treats it as a different extension, and you'd have to enter your API key and settings again
+3. Go to `chrome://extensions` and click the **reload arrow ↻** on the Page Agent card
+4. Refresh any quiz tabs you have open
+
+Your API key and settings are kept, since they're stored in Chrome, not in the folder.
 
 ---
 

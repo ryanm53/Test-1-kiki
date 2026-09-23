@@ -121,7 +121,7 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
 // Resolves once the bar settles on something other than a working state.
 // Generous, because CI machines are slower and run every suite at once; it
 // returns as soon as the bar settles, so the ceiling costs nothing normally.
-function settle(page, ms = 20000) {
+function settle(page, ms = 90000) {
   const end = Date.now() + ms;
   return new Promise(resolve => (function poll() {
     const s = page.status();

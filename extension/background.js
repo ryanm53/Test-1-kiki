@@ -252,7 +252,7 @@ async function postToApi(apiKey, requestBody, betas = []) {
   );
 }
 
-async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = [], isCanvas = false) {
+async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = [], isCanvas = false, retryHint = '') {
   const model = resolveModel(modelId);
   const cfg = MODELS[model];
 
@@ -281,7 +281,13 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
     ? `Steps you have ALREADY done for this question:\n${history.map((h, i) => `${i + 1}. ${h}`).join('\n')}\nDo the NEXT step, not one of these again.\n\n`
     : '';
 
-  const userContent = `${notesSection}${historySection}Page text:
+  // A second try at a SIMnet task, after it was marked wrong. SIMnet's hint
+  // spells out the steps it wanted, which beats anything the model guesses.
+  const retrySection = retryHint
+    ? `SIMnet marked your previous attempt at this task INCORRECT and gave this hint:\n"${retryHint}"\nThe task has been reset. Follow the hint's steps exactly, one per reply.\n\n`
+    : '';
+
+  const userContent = `${notesSection}${retrySection}${historySection}Page text:
 ${pageText.slice(0, isWorksheet || isCanvas ? 3000 : isSimnet ? 1500 : 800)}
 
 Elements (click by index):
@@ -314,7 +320,8 @@ ${elementList || '(none found)'}`;
   } else {
     // Prefill 400s on these models; constrain the response shape instead
     requestBody.output_config = { format: { type: 'json_schema', schema: ACTION_SCHEMA } };
-    if (cfg.effort) requestBody.output_config.effort = cfg.effort;
+    // A retry is the last automatic chance at the task, so it thinks harder
+    if (cfg.effort) requestBody.output_config.effort = retryHint ? 'medium' : cfg.effort;
   }
 
   // "default" lets Anthropic pick the fallback by the reason for the decline,
@@ -664,6 +671,39 @@ function everyQuestionAnswered(elements) {
   return byQuestion.size > 0 && [...byQuestion.values()].every(Boolean);
 }
 
+// SIMnet's result popup may be drawn by the exam shell rather than the
+// simulation, so both the question frame and the top frame are asked.
+async function readVerdict(tabId, frameId) {
+  let attempts = null;
+  for (const f of new Set([frameId, 0])) {
+    const r = await sendToTab(tabId, { type: 'SIMNET_VERDICT' }, f).catch(() => null);
+    attempts ??= r?.attempts ?? null;
+    if (r?.verdict) return { verdict: r.verdict, hint: r.hint, attempts, frameId: f };
+  }
+  return { verdict: null, attempts };
+}
+
+async function waitForVerdict(tabId, frameId, ms) {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await readVerdict(tabId, frameId);
+    if (v.verdict || Date.now() > end) return v;
+    await new Promise(r => setTimeout(r, 300));
+  }
+}
+
+// Continue, then wait for the popup to go and the page behind it to settle
+async function pressContinue(tabId, v) {
+  const r = await sendToTab(tabId, { type: 'SIMNET_CONTINUE' }, v.frameId).catch(() => null);
+  if (!r?.success) return false;
+  const end = Date.now() + 6000;
+  while (Date.now() < end && (await readVerdict(tabId, v.frameId)).verdict) {
+    await new Promise(r => setTimeout(r, 300));
+  }
+  await new Promise(r => setTimeout(r, 1200));
+  return true;
+}
+
 // Tells the control bar the run is still moving. Fire and forget: the bar
 // lives in the top frame, may not exist at all (popup-driven runs), and a
 // failure to report progress must never stop the run itself.
@@ -700,12 +740,27 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   let isSimnet = false;
   const history = [];   // what has been done so far on this question
 
-  for (let step = 0; step < budget; step++) {
+  // SIMnet grades with a popup (see findVerdict in content.js). A wrong first
+  // try gets one more round, following SIMnet's hint — if that leaves the
+  // student's last attempt untouched.
+  let verdict = null;
+  let attempts = null;     // {current, total} as shown at the start
+  let retryHint = '';
+  let round = 0;
+
+  rounds: for (;;) {
+  steps: for (let step = 0; step < budget; step++) {
     if (cancelledRuns.has(tabId)) {
       cancelledRuns.delete(tabId);
       return { success: false, error: 'Stopped.', usedModel };
     }
     reportProgress(tabId, step + 1, budget);
+
+    // A verdict can arrive after any step, not only the last
+    if (isSimnet && step > 0) {
+      const v = await readVerdict(tabId, frameId);
+      if (v.verdict) { verdict = v; break steps; }
+    }
 
     let lastError = 'Unknown error';
     let stepDone = false;
@@ -724,6 +779,13 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         // scrape rather than from the action, since the page says what it is
         // before the first move is chosen.
         if (pageData.isSimnet) { isSimnet = true; budget = MAX_STEPS_SIMNET; }
+        // The popup may already be up (play pressed on a graded task), and the
+        // attempt counter is read before anything can change it
+        if (pageData.isSimnet && step === 0 && attempt === 0) {
+          const v = await readVerdict(tabId, frameId);
+          if (round === 0) attempts = v.attempts;
+          if (v.verdict) { verdict = v; break steps; }
+        }
         // Choices in one reply, typed blanks in a second — only when there
         // are blanks, so a plain multiple-choice page costs one call.
         if (pageData.isCanvas) {
@@ -743,10 +805,10 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         }
 
         usedModel = pickModel(baseModel, pageData, autoUpgrade);
-        const { action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas);
+        const { action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint);
 
         log?.steps.push({
-          step: step + 1, attempt: attempt + 1,
+          round: round + 1, step: step + 1, attempt: attempt + 1,
           model: request.model, kind: request.kind, prompt: request.prompt,
           action, answer: actionSummary(action, pageData.elements)
         });
@@ -845,10 +907,60 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
     if (finished) break;
   }
 
+  if (!isSimnet) break rounds;
+
+  // Finished by the model's account: give SIMnet a moment to grade it. Out
+  // of steps: the last one may still have drawn a verdict, so look once.
+  if (!verdict?.verdict) {
+    verdict = saidDone ? await waitForVerdict(tabId, frameId, 3000) : await readVerdict(tabId, frameId);
+  }
+  if (verdict?.verdict) log?.verdicts.push({ round: round + 1, verdict: verdict.verdict, hint: verdict.hint });
+
+  // Wrong on the first try: one more, with the hint — only when pressing
+  // Continue can't spend the student's last attempt, and never in Answer only
+  // mode, where the student drives.
+  const retrySafe = attempts && attempts.current + 1 < attempts.total;
+  if (verdict?.verdict === 'incorrect' && round === 0 && postClicks.length && retrySafe) {
+    if (cancelledRuns.has(tabId)) {
+      cancelledRuns.delete(tabId);
+      return { success: false, error: 'Stopped.', usedModel };
+    }
+    if (!(await pressContinue(tabId, verdict))) break rounds;
+    retryHint = verdict.hint;
+    verdict = null;
+    saidDone = false;
+    completed = 0;
+    history.length = 0;
+    round++;
+    continue rounds;
+  }
+  break rounds;
+  }
+
   // SIMnet has no confidence rating or Next button of the Connect kind, and
   // going round again would start fiddling with a task that's already done.
   if (isSimnet) {
     await snapshot();
+    const hint = verdict?.hint ? ` SIMnet's hint: ${verdict.hint.replace(/^HINT:\s*/i, '').slice(0, 300)}` : '';
+
+    if (verdict?.verdict === 'correct') {
+      // Answer only: the student moves on. Otherwise Continue goes to the
+      // next question, and Autopilot carries on from there.
+      if (!postClicks.length) {
+        return { success: true, usedModel, finished: 'Correct! Click Continue for the next question.' };
+      }
+      const moved = await pressContinue(tabId, verdict);
+      // "advanced": the next question is already up, so the bar needn't wait
+      // for the page to change — it has
+      return { success: true, message: 'Done', usedModel, advanced: moved };
+    }
+    if (verdict?.verdict === 'incorrect') {
+      const why = round > 0 ? 'Marked incorrect again.'
+                : postClicks.length && attempts && !(attempts.current + 1 < attempts.total)
+                  ? 'Marked incorrect, and another try would use your last attempt.'
+                  : 'Marked incorrect.';
+      return { success: false, usedModel, error: `${why}${hint} Do this one yourself.` };
+    }
     // Using up every step without the model saying it's finished is not a
     // finished task, however it looks — say so rather than "done".
     if (!saidDone) {
@@ -1094,7 +1206,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return;
     }
 
-    const log = keepLog ? { at: new Date().toISOString(), host: hostOf(sender.url), steps: [], after: '' } : null;
+    const log = keepLog ? { at: new Date().toISOString(), host: hostOf(sender.url), steps: [], verdicts: [], after: '' } : null;
 
     let result;
     try {
