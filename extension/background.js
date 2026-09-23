@@ -40,7 +40,7 @@ function pickModel(baseModel, pageData, autoUpgrade) {
 const ACTION_SCHEMA = {
   type: 'object',
   properties: {
-    action:  { type: 'string', enum: ['click', 'clickMany', 'fill', 'dragMove', 'none'] },
+    action:  { type: 'string', enum: ['click', 'clickMany', 'fill', 'dragMove', 'doubleClick', 'rightClick', 'type', 'key', 'none'] },
     index:   { type: 'integer' },
     indexes: { type: 'array', items: { type: 'integer' } },
     fills:   {
@@ -53,6 +53,8 @@ const ACTION_SCHEMA = {
       }
     },
     dir:     { type: 'string', enum: ['up', 'down', 'left', 'right'] },
+    text:    { type: 'string' },
+    key:     { type: 'string', enum: ['Enter', 'Escape', 'Tab'] },
     steps:   { type: 'integer' }
   },
   required: ['action'],
@@ -99,7 +101,19 @@ Follow the method the task names: if it says to use a particular dialog, open
 that dialog rather than typing the answer straight into the cell, because how
 it was done is what gets graded.
 Click a ribbon tab first when the control you need is on another tab.
-Reply {"action":"none"} once the task described is complete.`;
+
+Besides click, Excel needs these:
+{"action":"doubleClick","index":N} — e.g. double-click a sheet tab to rename it
+{"action":"rightClick","index":N} — open an item's context menu
+{"action":"type","text":"...","index":N} — type into element N (a box, a cell).
+  Leave out index to type into whatever is already being edited, such as the
+  name box that appears after double-clicking a sheet tab.
+{"action":"key","key":"Enter"} — press Enter, Escape or Tab, e.g. to confirm
+  what you typed.
+
+Reply {"action":"none"} only once the page shows the task is complete — the
+new name on the tab, the value in the cell, the dialog closed. If it doesn't
+show yet, take the next step instead.`;
 
 // Canvas shows a whole quiz on one page, so one reply has to cover every
 // question rather than the single one the base prompt assumes.
@@ -124,7 +138,8 @@ function badIndexes(action, count) {
   const check = i => {
     if (!Number.isInteger(i) || i < 0 || i >= count) out.push(String(i));
   };
-  if (action.action === 'click' || action.action === 'dragMove') check(action.index);
+  if (['click', 'dragMove', 'doubleClick', 'rightClick'].includes(action.action)) check(action.index);
+  if (action.action === 'type' && action.index !== undefined) check(action.index);
   if (action.action === 'clickMany') (action.indexes ?? []).forEach(check);
   if (action.action === 'fill') (action.fills ?? []).forEach(f => check(f?.index));
   return out;
@@ -141,6 +156,10 @@ function actionSummary(action, elements) {
     case 'clickMany': return `selected ${(action.indexes ?? []).map(name).join(', ')}`;
     case 'fill':      return (action.fills ?? []).map(f => `typed "${f.value}" into ${name(f.index)}`).join('; ');
     case 'dragMove':  return `moved ${name(action.index)} ${action.dir} x${action.steps ?? 1}`;
+    case 'doubleClick': return `double-clicked ${name(action.index)}`;
+    case 'rightClick':  return `right-clicked ${name(action.index)}`;
+    case 'type':      return `typed "${action.text}"${action.index !== undefined ? ` into ${name(action.index)}` : ''}`;
+    case 'key':       return `pressed ${action.key}`;
     default:          return action.action;
   }
 }
@@ -211,6 +230,7 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
       if (el.type) parts.push(`type="${el.type}"`);
       if (el.text) parts.push(`"${el.text.slice(0, 80)}"`);
       if (el.placeholder) parts.push(`placeholder="${el.placeholder}"`);
+      if (el.value) parts.push(`value="${el.value}"`);
       if (el.name) parts.push(`name="${el.name}"`);
       if (el.cell) parts.push(`cell=${el.cell}`);
       if (el.selected) parts.push('(selected)');
@@ -330,8 +350,17 @@ ${elementList || '(none found)'}`;
     throw new Error(`Claude returned invalid JSON: ${cleaned.slice(0, 300)}`);
   }
 
-  if (!['click', 'clickMany', 'fill', 'dragMove', 'none'].includes(parsed.action)) {
+  if (!['click', 'clickMany', 'fill', 'dragMove', 'doubleClick', 'rightClick', 'type', 'key', 'none'].includes(parsed.action)) {
     throw new Error(`Unexpected action: ${JSON.stringify(parsed.action)}`);
+  }
+  if ((parsed.action === 'doubleClick' || parsed.action === 'rightClick') && typeof parsed.index !== 'number') {
+    throw new Error(`${parsed.action} requires a numeric index, got: ${JSON.stringify(parsed.index)}`);
+  }
+  if (parsed.action === 'type' && (typeof parsed.text !== 'string' || !parsed.text.length)) {
+    throw new Error(`type requires the text to type, got: ${JSON.stringify(parsed.text)}`);
+  }
+  if (parsed.action === 'key' && !['Enter', 'Escape', 'Tab'].includes(parsed.key)) {
+    throw new Error(`key must be Enter, Escape or Tab, got: ${JSON.stringify(parsed.key)}`);
   }
   if (parsed.action === 'fill') {
     const ok = Array.isArray(parsed.fills)
@@ -620,6 +649,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
 
   let budget = MAX_STEPS_SIMPLE;
   let completed = 0;
+  let saidDone = false;   // the model reported the task complete, vs. steps running out
   let isCanvas = false;
   let isSimnet = false;
   const history = [];   // what has been done so far on this question
@@ -687,6 +717,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
           const alreadyDone = isCanvas && everyQuestionAnswered(pageData.elements);
           if (completed === 0 && !alreadyDone) return { success: true, action, noAnswer: true, usedModel };
           finished = true;
+          saidDone = true;
           stepDone = true;
           break;
         }
@@ -719,6 +750,13 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
           }
         } else {
           result = await sendToTab(tabId, { type: 'EXECUTE', action }, frameId);
+          // Grid cells take no typed-in value; they only respond to real key
+          // presses, like the worksheet cells above. The page has focused the
+          // cell and says so; the keys go through the debugger.
+          if (result?.success && result.needsKeys) {
+            await attachDebugger(tabId);
+            await typeText(tabId, action.text);
+          }
         }
 
         if (result?.success) {
@@ -764,7 +802,13 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   // going round again would start fiddling with a task that's already done.
   if (isSimnet) {
     await snapshot();
-    return { success: true, usedModel, finished: 'Task done. Check it, then move to the next one.' };
+    // Using up every step without the model saying it's finished is not a
+    // finished task, however it looks — say so rather than "done".
+    if (!saidDone) {
+      return { success: false, usedModel,
+               error: `Used all ${budget} steps without finishing. Do this one yourself, then move on.` };
+    }
+    return { success: true, usedModel, finished: 'Finished. Check SIMnet agrees, then move to the next one.' };
   }
 
   // Canvas: no confidence rating, and a Next button only in one-question-at-

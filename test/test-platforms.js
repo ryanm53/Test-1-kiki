@@ -55,7 +55,7 @@ const flatLayout = w => {
     check('SIMnet: used the stronger model for it',
       page.requests[0]?.model === 'claude-opus-5-5', page.requests[0]?.model);
     check('SIMnet: finishes cleanly, no confidence-button error',
-      /Task done/.test(final) && !page.isError(), final);
+      /^Finished\. Check SIMnet agrees/.test(final) && !page.isError(), final);
     check('SIMnet: does not start the task over', page.requests.length === 2, `${page.requests.length} calls`);
     check('SIMnet: never pressed the exam\'s Submit', !clicks.includes('Submit'));
   }

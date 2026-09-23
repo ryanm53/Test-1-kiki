@@ -107,7 +107,7 @@ Press the **play button ▶**. What happens next depends on the site:
 |---|---|
 | **Connect** | Answers, clicks **High Confidence** and **Next Question**, and keeps going through the whole assignment on its own |
 | **Canvas** | Answers **every question on the page** in one go. If the quiz shows one question at a time, it clicks **Next** and keeps going. **It never presses Submit Quiz** — when it's done it says *"Answered. Check it over, then submit it yourself."* |
-| **SIMnet** | Does the task on screen (switching ribbon tabs, opening dialogs and so on), then stops and says *"Task done."* Go to the next task yourself and press play again |
+| **SIMnet** | Does the task on screen — ribbon tabs, dialogs, double-clicking a sheet tab to rename it, right-click menus, typing and pressing Enter — then stops and says *"Finished. Check SIMnet agrees."* Go to the next task yourself and press play again. If it uses all its steps without finishing, it says so rather than claiming it's done |
 
 Press the same button again — it's now a **stop button ⏸** — to halt at any point.
 
@@ -128,7 +128,8 @@ The bar shows you what's happening as it goes:
 | **Answering… · step 2/6** | Working through a task that takes several steps (SIMnet) |
 | **Paused · 7** | Stopped, 7 answered |
 | **Answered. Check it over, then submit it yourself.** | Canvas page done. Look it over and hand it in when you're happy |
-| **Task done. Check it, then move to the next one.** | SIMnet task done |
+| **Finished. Check SIMnet agrees, then move to the next one.** | SIMnet task done, as far as it can tell — SIMnet's own right/wrong popup has the final word |
+| **Used all 6 steps without finishing** | SIMnet task it couldn't complete. Do that one yourself |
 | **Rate limited · 45s** | Went too fast for the API. It waits and resumes automatically — just leave it |
 | *Amber text* | Something went wrong. The message explains what |
 

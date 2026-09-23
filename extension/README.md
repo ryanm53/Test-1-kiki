@@ -140,6 +140,14 @@ change between sites.
 - **SIMnet** — detected by its grid (`td.grdbdy-cell`). Up to six steps per task,
   then the run ends with a note: no Connect post-clicks, and no second pass that
   would start editing a finished task.
+- **SIMnet moves** — besides click, SIMnet steps can `doubleClick`, `rightClick`,
+  `type` (into element N, or into whatever is being edited when no index is
+  given) and `key` (Enter/Escape/Tab); only the SIMnet prompt describes them.
+  Clicks and keys are simulated, as SIMnet acts on simulated events; typing
+  sets a text box's value directly, and a grid cell — which edits only on real
+  key presses — gets focused and then real keystrokes via the debugger. A run
+  that uses all six steps without the model reporting the task complete is an
+  error ("Used all 6 steps…"), never "Finished".
 - **Canvas Classic Quizzes** — detected by `#questions .display_question`. Every
   question on the page is scraped regardless of scroll position, each choice
   tagged with its own `.question_text` (the fieldset legend is a generic

@@ -206,6 +206,9 @@ function describeEl(el) {
     type: el.getAttribute('type') || null,
     text: text.slice(0, 100),
     placeholder: el.getAttribute('placeholder') || null,
+    // Never a password; never a tick box, whose value is just "on"
+    value: (isTextBox(el) && el.type !== 'password' && !el.isContentEditable && el.value)
+      ? String(el.value).slice(0, 60) : undefined,
     name: el.getAttribute('name') || null,
     question: question || null,
     sheet: isSheetCell(el) || undefined,
@@ -267,7 +270,9 @@ function scrape() {
       .filter(el => !el.matches(CHROME))
       // A control with no name of any kind is unusable to act on and would
       // only crowd out the ones that can be identified.
-      .filter(el => (el.innerText || '').trim() || el.getAttribute('aria-label') || el.getAttribute('title'))
+      // Text boxes count even unlabelled: the name box that opens on a sheet
+      // tab, a dialog field — often exactly what the next step types into
+      .filter(el => isTextBox(el) || (el.innerText || '').trim() || el.getAttribute('aria-label') || el.getAttribute('title'))
       .slice(0, 110);
 
     // Whatever cells the task names ("...to cell C7") must be present even when
@@ -358,6 +363,48 @@ function scrape() {
 // Set a field's value so framework bindings notice. Assigning .value directly
 // is invisible to React (it tracks the last value it set), so go through the
 // native prototype setter and then fire the events the frameworks listen for.
+// Typing into a box that's being edited — a sheet tab's name, a dialog field.
+// Unlike setFieldValue it leaves the box open (no change, no blur), so the
+// Enter that follows is what commits it, as it would be for a person.
+function typeIntoBox(el, text) {
+  if (el.isContentEditable) {
+    el.textContent = text;
+  } else {
+    const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (setter) setter.call(el, text); else el.value = text;
+  }
+  el.dispatchEvent(new InputEvent('input', { bubbles: true, data: text }));
+  el.dispatchEvent(new KeyboardEvent('keyup', { key: text.slice(-1), bubbles: true }));
+}
+
+const isTextBox = el => !!el && (el.isContentEditable || el.tagName === 'TEXTAREA' ||
+  (el.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|hidden|file|image|reset)$/i.test(el.type)));
+
+// Whatever the page is editing — never the control bar itself, which holds
+// focus right after play is pressed.
+function editingNow() {
+  const a = document.activeElement;
+  return a && a !== document.body && a.id !== '__cap-host' ? a : null;
+}
+
+function centreOf(el) {
+  const r = el.getBoundingClientRect();
+  return { bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+}
+
+// The same range and still-on-the-page checks every action needs
+function pickElement(index) {
+  if (typeof index !== 'number' || index < 0 || index >= _lastElements.length) {
+    return { error: `Index ${index} out of range (${_lastElements.length} elements)` };
+  }
+  const el = _lastElements[index];
+  if (!document.contains(el)) return { error: `Element [${index}] is no longer in the DOM` };
+  return { el };
+}
+
+const KEY_CODES = { Enter: 13, Escape: 27, Tab: 9 };
+
 function setFieldValue(el, value) {
   el.focus();
   const tag = el.tagName.toLowerCase();
@@ -472,6 +519,71 @@ async function execute(action) {
         el.focus();
         el.click();
         await new Promise(r => setTimeout(r, 250));
+      }
+      return { success: true };
+    }
+
+    // ── Excel moves (SIMnet) ───────────────────────────────────────────────
+    // Simulated rather than real input: SIMnet acts on simulated clicks, and
+    // simulated events can't be misrouted by where the browser's focus is.
+    if (action.action === 'doubleClick' || action.action === 'rightClick') {
+      const { el, error } = pickElement(action.index);
+      if (error) return { success: false, error };
+      el.scrollIntoView({ behavior: 'auto', block: 'center' });
+      await new Promise(r => setTimeout(r, 120));
+      const o = centreOf(el);
+      if (action.action === 'doubleClick') {
+        realClick(el);
+        el.dispatchEvent(new MouseEvent('mousedown', { ...o, detail: 2, buttons: 1 }));
+        el.dispatchEvent(new MouseEvent('mouseup', { ...o, detail: 2 }));
+        el.dispatchEvent(new MouseEvent('click', { ...o, detail: 2 }));
+        el.dispatchEvent(new MouseEvent('dblclick', { ...o, detail: 2 }));
+      } else {
+        el.dispatchEvent(new PointerEvent('pointerdown', { ...o, button: 2, buttons: 2, isPrimary: true }));
+        el.dispatchEvent(new MouseEvent('mousedown', { ...o, button: 2, buttons: 2 }));
+        el.dispatchEvent(new PointerEvent('pointerup', { ...o, button: 2, isPrimary: true }));
+        el.dispatchEvent(new MouseEvent('mouseup', { ...o, button: 2 }));
+        el.dispatchEvent(new MouseEvent('contextmenu', { ...o, button: 2 }));
+      }
+      return { success: true };
+    }
+
+    if (action.action === 'type') {
+      let target = null;
+      if (action.index !== undefined) {
+        const { el, error } = pickElement(action.index);
+        if (error) return { success: false, error };
+        el.scrollIntoView({ behavior: 'auto', block: 'center' });
+        realClick(el);
+        target = el;
+        await new Promise(r => setTimeout(r, 150));
+      }
+      // Clicking may open an editor; type into whichever is a text box
+      const box = [target, editingNow()].find(isTextBox);
+      if (box) {
+        typeIntoBox(box, action.text);
+        return { success: true };
+      }
+      if (!target) {
+        return { success: false, error: 'Nothing is being edited to type into — name the element to type into.' };
+      }
+      // A grid cell: edits only on real key presses, which the background
+      // sends once the cell has focus
+      if (typeof target.focus === 'function') target.focus({ preventScroll: true });
+      return { success: true, needsKeys: true };
+    }
+
+    if (action.action === 'key') {
+      const code = KEY_CODES[action.key];
+      if (!code) return { success: false, error: `Unsupported key ${JSON.stringify(action.key)}` };
+      const target = editingNow() ?? document.body;
+      for (const type of ['keydown', 'keypress', 'keyup']) {
+        if (type === 'keypress' && action.key !== 'Enter') continue;
+        const ev = new KeyboardEvent(type, { key: action.key, code: action.key, bubbles: true, cancelable: true });
+        // Older page code reads keyCode/which, which the constructor won't set
+        Object.defineProperty(ev, 'keyCode', { get: () => code });
+        Object.defineProperty(ev, 'which', { get: () => code });
+        target.dispatchEvent(ev);
       }
       return { success: true };
     }
