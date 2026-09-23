@@ -31,6 +31,9 @@ const INTERACTIVE_SEL = [
 
 // Cached element list from the last scrape — execute() uses these references
 // so it operates on exactly the elements Claude was shown.
+// What a SIMnet look saw, so the next look can tell what has just appeared.
+// Cleared on each task's first look; a peek never changes it.
+let _simSeen = null;
 let _lastElements = [];
 
 // On the page and drawn — but possibly scrolled out of view.
@@ -266,14 +269,39 @@ function scrape() {
     // The workbook arrives already populated and each task asks for a single
     // operation, so the ribbon is what the answer is actually made of. It gets
     // the lion's share of the budget; cells are context.
-    const controls = all
-      .filter(el => !el.matches(CHROME))
-      // A control with no name of any kind is unusable to act on and would
-      // only crowd out the ones that can be identified.
-      // Text boxes count even unlabelled: the name box that opens on a sheet
-      // tab, a dialog field — often exactly what the next step types into
-      .filter(el => isTextBox(el) || (el.innerText || '').trim() || el.getAttribute('aria-label') || el.getAttribute('title'))
-      .slice(0, 110);
+    //
+    // What a step just opened — a dropdown, a submenu, a dialog — is what the
+    // next step acts on, and it's usually added at the END of the page, after
+    // a ribbon that alone nearly fills the list. Taken in page order, a menu
+    // opened by "Format" fell past the cutoff: the model never saw "Tab
+    // Color", clicked elsewhere, the menu closed, and round it went. So
+    // anything new since the previous look, and anything inside an open menu
+    // or dialog, goes first, marked as just appeared.
+    const POPUP = '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
+    const inPopup = el => !!el.closest(POPUP);
+    const baseline = _simSeen;               // null on a task's first look
+    const allSet = new Set(all);
+    // Colour swatches and the like are often bare shapes with only a title,
+    // which the general selector doesn't treat as clickable. Those count
+    // inside a menu or dialog, or once they've newly appeared.
+    const titled = Array.from(document.querySelectorAll('[title], [aria-label]'))
+      .filter(el => !el.matches('td.grdbdy-cell') && isRendered(el));
+    const extras = [
+      ...Array.from(document.querySelectorAll(POPUP)).flatMap(p =>
+        Array.from(p.querySelectorAll('[title], [aria-label], [tabindex], li'))).filter(isRendered),
+      ...(baseline ? titled.filter(el => !baseline.has(el)) : [])
+    ].filter(el => !allSet.has(el));
+
+    // A control with no name of any kind is unusable to act on and would
+    // only crowd out the ones that can be identified. Text boxes count even
+    // unlabelled: the name box that opens on a sheet tab, a dialog field —
+    // often exactly what the next step types into.
+    const labelled = el => isTextBox(el) || (el.innerText || '').trim() || el.getAttribute('aria-label') || el.getAttribute('title');
+    const candidates = [...new Set([...all, ...extras])].filter(el => !el.matches(CHROME)).filter(labelled);
+    const isNew = el => inPopup(el) || (baseline !== null && !baseline.has(el));
+    const controls = [...candidates.filter(isNew), ...candidates.filter(el => !isNew(el))].slice(0, 130);
+    const fresh = new Set(controls.filter(isNew));
+    _simSeen = new WeakSet([...candidates, ...titled]);
 
     // Whatever cells the task names ("...to cell C7") must be present even when
     // empty, or the one cell the question is about can be the one left out.
@@ -288,7 +316,7 @@ function scrape() {
     _lastElements = [...controls, ...referenced, ...populated];
     return {
       text: (root.innerText ?? '').slice(0, 5000),
-      elements: _lastElements.map(describeEl),
+      elements: _lastElements.map(el => ({ ...describeEl(el), fresh: fresh.has(el) || undefined })),
       isSimnet: true,      // multi-step procedure, worth the stronger model
       isWorksheet: false,
       isDrag: false
@@ -1756,13 +1784,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     // A peek (recognising the page, Check this page) must leave alone the
     // list a run's clicks point into, or an idle look could shift an index
     // between a run's read and its click.
-    const kept = _lastElements;
+    const kept = _lastElements, keptSeen = _simSeen;
+    if (msg.firstLook && !msg.peek) _simSeen = null;
     try {
       sendResponse(scrape());
     } catch (e) {
       sendResponse({ error: e.message, text: '', elements: [] });
     } finally {
-      if (msg.peek) _lastElements = kept;
+      if (msg.peek) { _lastElements = kept; _simSeen = keptSeen; }
     }
     return false;
   }

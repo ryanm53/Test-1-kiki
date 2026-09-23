@@ -12,6 +12,7 @@ const SUITES = [
   ['test-features.js',   'Every feature: question types, models, errors, stop, settings'],
   ['test-panel.js',      'Settings panel: mode, model, key, More, page type in the bar'],
   ['test-simnet-moves.js', 'SIMnet: double-click, right-click, type, Enter; honest when unfinished'],
+  ['test-simnet-menus.js', 'SIMnet: menus that open are seen, even past a full ribbon'],
   ['test-log.js',        'Answer log: records runs and verdicts, thumbs-down, download, clear'],
   ['test-platforms.js',  'SIMnet, Connect and Canvas on the same default settings'],
   ['test-canvas.js',     'Canvas quizzes: whole page, one at a time, never submits'],

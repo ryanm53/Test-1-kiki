@@ -148,6 +148,13 @@ change between sites.
   key presses — gets focused and then real keystrokes via the debugger. A run
   that uses all six steps without the model reporting the task complete is an
   error ("Used all 6 steps…"), never "Finished".
+- **SIMnet menus** — the element list is capped (130), and SIMnet's ribbon alone
+  nearly fills it, while dropdowns, submenus and dialogs are added at the end
+  of the page. So each look compares against the previous one (a `WeakSet` of
+  what it saw): anything new, and anything inside an open menu or dialog, goes
+  first and is marked `(just appeared)`. Bare elements with only a title
+  (colour swatches) are included once they appear. A run's first look
+  (`firstLook`) has no baseline; a peek never changes it.
 - **Canvas Classic Quizzes** — detected by `#questions .display_question`. Every
   question on the page is scraped regardless of scroll position, each choice
   tagged with its own `.question_text` (the fieldset legend is a generic

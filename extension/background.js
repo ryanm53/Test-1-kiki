@@ -101,6 +101,9 @@ Follow the method the task names: if it says to use a particular dialog, open
 that dialog rather than typing the answer straight into the cell, because how
 it was done is what gets graded.
 Click a ribbon tab first when the control you need is on another tab.
+Items marked (just appeared) are what your last step opened — a dropdown, a
+submenu, a dialog — and are listed first. Continue in them rather than
+clicking the button that opened them again, which usually closes them.
 
 Besides click, Excel needs these:
 {"action":"doubleClick","index":N} — e.g. double-click a sheet tab to rename it
@@ -231,6 +234,7 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
       if (el.text) parts.push(`"${el.text.slice(0, 80)}"`);
       if (el.placeholder) parts.push(`placeholder="${el.placeholder}"`);
       if (el.value) parts.push(`value="${el.value}"`);
+      if (el.fresh) parts.push('(just appeared)');
       if (el.name) parts.push(`name="${el.name}"`);
       if (el.cell) parts.push(`cell=${el.cell}`);
       if (el.selected) parts.push('(selected)');
@@ -667,7 +671,8 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const pageData = await sendToTab(tabId, { type: 'SCRAPE' }, frameId);
+        // The first look of a run has nothing earlier to compare against
+        const pageData = await sendToTab(tabId, { type: 'SCRAPE', firstLook: step === 0 && attempt === 0 }, frameId);
         if (!pageData || pageData.error) {
           throw new Error(pageData?.error ?? 'No response from content script');
         }
