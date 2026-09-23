@@ -105,10 +105,13 @@ const check = (name, ok, detail = '') => {
   run(w, SRC);
   w.document.body.innerHTML = '<div role="main">next question</div>';
   check('control bar removed by the page', !widgetOf(w));
-  // the self-heal runs on an interval
-  return void setTimeout(() => {
+  // The self-heal runs on a 2s interval, which a loaded machine can stretch,
+  // so wait until it has happened rather than a fixed time
+  const end = Date.now() + 10000;
+  return void (function poll() {
+    if (!widgetOf(w) && Date.now() < end) return setTimeout(poll, 50);
     check('control bar puts itself back', !!widgetOf(w));
     console.log(failed ? `\n${failed} failed` : '\nAll resilience checks passed');
     process.exit(failed ? 1 : 0);
-  }, 2500);
+  })();
 }

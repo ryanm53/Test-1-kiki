@@ -1,7 +1,7 @@
 // One set of settings, every platform. The defaults a new user has — the
 // "Answer, confidence, next" mode, auto-continue on, Haiku — must do the right
 // thing on SIMnet, Connect and Canvas without anything being switched.
-const { boot, settle } = require('./harness');
+const { boot, settle, until } = require('./harness');
 
 let failed = 0;
 const check = (name, ok, detail = '') => {
@@ -84,7 +84,7 @@ const flatLayout = w => {
     });
 
     page.pressPlay();
-    for (let i = 0; i < 120 && page.requests.length < 2; i++) await wait(50);
+    await until(() => page.requests.length >= 2);
     await wait(1200);
 
     check('Connect: answered', order.length > 0);

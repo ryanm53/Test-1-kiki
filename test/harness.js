@@ -112,8 +112,10 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, refTabs = 
   };
 }
 
-// Resolves once the bar settles on something other than a working state
-function settle(page, ms = 8000) {
+// Resolves once the bar settles on something other than a working state.
+// Generous, because CI machines are slower and run every suite at once; it
+// returns as soon as the bar settles, so the ceiling costs nothing normally.
+function settle(page, ms = 20000) {
   const end = Date.now() + ms;
   return new Promise(resolve => (function poll() {
     const s = page.status();
@@ -122,4 +124,16 @@ function settle(page, ms = 8000) {
   })());
 }
 
-module.exports = { boot, settle };
+// Waits for something to HAVE happened. A fixed sleep followed by a check
+// passes on a fast machine and fails on a slow one; this waits as long as it
+// takes, up to a ceiling. (Checks that something did NOT happen still need a
+// fixed wait — long enough for it to have happened if it was going to.)
+function until(cond, ms = 15000) {
+  const end = Date.now() + ms;
+  return new Promise(resolve => (function poll() {
+    if (cond() || Date.now() > end) return resolve();
+    setTimeout(poll, 25);
+  })());
+}
+
+module.exports = { boot, settle, until };

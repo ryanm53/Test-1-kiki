@@ -1,6 +1,6 @@
 // Canvas Classic Quizzes, end to end: the real background and content scripts
 // on Canvas's markup, with only Claude's reply faked.
-const { boot, settle } = require('./harness');
+const { boot, settle, until } = require('./harness');
 const { ALL_ON_ONE_PAGE, ONE_AT_A_TIME, installLayout } = require('./fixtures-canvas');
 
 let failed = 0;
@@ -75,7 +75,7 @@ const checked = (w, id) => w.document.getElementById(id).checked;
       .addEventListener('click', e => { submitted = true; e.preventDefault(); });
 
     page.pressPlay();
-    for (let i = 0; i < 100 && !nextClicked; i++) await wait(50);
+    await until(() => nextClicked);
 
     check('answered', checked(page.w, 'question_102_answer_0'));
     check('pressed Next', nextClicked);
@@ -94,7 +94,7 @@ const checked = (w, id) => w.document.getElementById(id).checked;
       installLayout, reply: 'click","index":0}',
       beforeLoad: w => w.sessionStorage.setItem('__pageAgentResume', fresh)
     });
-    await wait(2000);
+    await until(() => page.requests.length >= 1);
     check('carries on by itself', page.requests.length >= 1, `${page.requests.length} requests`);
     check('keeps counting from where it was', /· 4/.test(page.status()), page.status());
     page.pressPlay();

@@ -1,6 +1,6 @@
 // Every feature a user can reach, driven through the real extension with only
 // Claude's replies faked. If a change breaks one of these, this says which.
-const { boot, settle } = require('./harness');
+const { boot, settle, until } = require('./harness');
 const canvas = require('./fixtures-canvas');
 
 // Each case gets its own page and runs alongside the others; results are
@@ -129,7 +129,7 @@ const run = async (html, opts) => {
     const page = boot(MC, { installLayout: flat, storage: ANSWER_ONLY,
       reply: () => ({ status: 429, body: 'rate_limit_error' }) });
     page.pressPlay();
-    await wait(400);
+    await until(() => /Rate limited/.test(page.status()));
     check('rate limit counts down and will retry', /Rate limited · \d+s/.test(page.status()), page.status());
     page.pressPlay();
     check('stop cancels the countdown', !/Rate limited/.test(page.status()), page.status());
@@ -161,7 +161,7 @@ const run = async (html, opts) => {
   test(async check => {
     const page = boot(SIM, { installLayout: flat, reply: b => as(b, { action: 'click', index: 0 }) });
     page.pressPlay();
-    for (let i = 0; i < 60 && page.requests.length < 1; i++) await wait(50);
+    await until(() => page.requests.length >= 1);
     page.pressPlay();                       // stop, mid-task
     const at = page.requests.length;
     await wait(3000);
@@ -175,12 +175,13 @@ const run = async (html, opts) => {
     const page = boot(MC, { installLayout: flat, storage: { lastPresetIndex: 1, autoContinue: true },
                             reply: b => as(b, { action: 'click', index: 0 }) });
     page.pressPlay();
-    await wait(6500);
+    await until(() => /Click Next when ready/.test(page.status()));
+    await wait(6000);   // past the old 5s fallback, which is what this guards
     check('answer only: waits for you to click Next, however long',
       page.requests.length === 1 && /Click Next when ready/.test(page.status()),
       `${page.requests.length} calls, "${page.status()}"`);
     page.w.document.querySelector('.prompt').textContent = 'Which of the following is a liability?';
-    await wait(1000);
+    await until(() => page.requests.length >= 2);
     check('answer only: answers the next question once you move on', page.requests.length === 2,
       `${page.requests.length} calls`);
     page.pressPlay();
@@ -191,7 +192,7 @@ const run = async (html, opts) => {
     const page = boot(html, { installLayout: flat, ...opts });
     const sh = page.w.document.getElementById('__cap-host').shadowRoot;
     sh.getElementById('checkPage').dispatchEvent(new page.w.MouseEvent('click', { bubbles: true }));
-    for (let i = 0; i < 80 && !sh.getElementById('checkResult').textContent; i++) await wait(50);
+    await until(() => sh.getElementById('checkResult').textContent);
     const rows = [...sh.getElementById('checkResult').children].map(d => `${d.className}: ${d.textContent}`);
     return { page, rows, text: rows.join(' | ') };
   };
