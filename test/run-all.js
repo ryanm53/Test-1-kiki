@@ -14,6 +14,7 @@ const SUITES = [
   ['test-simnet-moves.js', 'SIMnet: double-click, right-click, type, Enter; honest when unfinished'],
   ['test-simnet-menus.js', 'SIMnet: menus that open are seen, even past a full ribbon'],
   ['test-simnet-verdict.js', "SIMnet: reads its right/wrong popup, retries with the hint, spares the last attempt"],
+  ['test-simnet-real.js', 'SIMnet: every failure in a real exercise log, replayed'],
   ['test-log.js',        'Answer log: records runs and verdicts, thumbs-down, download, clear'],
   ['test-platforms.js',  'SIMnet, Connect and Canvas on the same default settings'],
   ['test-canvas.js',     'Canvas quizzes: whole page, one at a time, never submits'],

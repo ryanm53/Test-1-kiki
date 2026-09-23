@@ -282,7 +282,6 @@ function scrape() {
     // anything new since the previous look, and anything inside an open menu
     // or dialog, goes first, marked as just appeared.
     const POPUP = '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
-    const inPopup = el => !!el.closest(POPUP);
     const baseline = _simSeen;               // null on a task's first look
     const allSet = new Set(all);
     // Colour swatches and the like are often bare shapes with only a title,
@@ -290,10 +289,21 @@ function scrape() {
     // inside a menu or dialog, or once they've newly appeared.
     const titled = Array.from(document.querySelectorAll('[title], [aria-label]'))
       .filter(el => !el.matches('td.grdbdy-cell') && isRendered(el));
+    // Short text with nothing inside it: a menu entry, a dialog option, a
+    // label. Plain ones don't look clickable to the general selector, so they
+    // count once they've newly appeared — what a click just opened. Read
+    // with textContent, which unlike innerText costs no layout, since this
+    // looks at every element on the page.
+    const leaves = Array.from(document.body.querySelectorAll('*')).filter(el => {
+      if (el.firstElementChild || el.tagName === 'TD' || el.tagName === 'SCRIPT' || el.tagName === 'STYLE') return false;
+      const n = (el.textContent || '').trim().length;
+      return n > 0 && n <= 40 && !el.closest('td.grdbdy-cell');
+    });
     const extras = [
       ...Array.from(document.querySelectorAll(POPUP)).flatMap(p =>
         Array.from(p.querySelectorAll('[title], [aria-label], [tabindex], li'))).filter(isRendered),
-      ...(baseline ? titled.filter(el => !baseline.has(el)) : [])
+      ...(baseline ? titled.filter(el => !baseline.has(el)) : []),
+      ...(baseline ? leaves.filter(el => !baseline.has(el) && isRendered(el)).slice(0, 40) : [])
     ].filter(el => !allSet.has(el));
 
     // A control with no name of any kind is unusable to act on and would
@@ -302,10 +312,38 @@ function scrape() {
     // often exactly what the next step types into.
     const labelled = el => isTextBox(el) || (el.innerText || '').trim() || el.getAttribute('aria-label') || el.getAttribute('title');
     const candidates = [...new Set([...all, ...extras])].filter(el => !el.matches(CHROME)).filter(labelled);
-    const isNew = el => inPopup(el) || (baseline !== null && !baseline.has(el));
-    const controls = [...candidates.filter(isNew), ...candidates.filter(el => !isNew(el))].slice(0, 130);
+    // "New" means new since the previous look — never merely "inside a menu":
+    // part of SIMnet's own toolbar sits in menu-like containers, which marked
+    // ribbon buttons as just appeared on a task's very first look
+    const isNew = el => baseline !== null && !baseline.has(el);
+
+    // The strip under the grid: sheet tabs, the New Sheet (+) button, sheet
+    // scrolling. Plain elements, so the general selector missed them — and
+    // with them every task about sheets (group, rename, add, unhide). Taken by
+    // position: anything short and labelled below the grid's last row.
+    const gridBottom = Math.max(...simCells.filter(isRendered).slice(-400).map(c => c.getBoundingClientRect().bottom));
+    // Cheapest tests first — the page has thousands of elements, and reading
+    // text is what's costly
+    const textOf = el => (el.innerText ?? el.textContent ?? '').trim();
+    const underGrid = Number.isFinite(gridBottom) ? Array.from(root.querySelectorAll('*')).filter(el => {
+      if (el.children.length > 2 || el.tagName === 'TD' || el.matches(CHROME)) return false;
+      const r = el.getBoundingClientRect();
+      if (r.top < gridBottom - 1 || !r.width || !r.height) return false;
+      const t = textOf(el);
+      if (!(t && t.length <= 30) && !el.getAttribute('aria-label') && !el.getAttribute('title')) return false;
+      // The innermost of a wrapper and its child saying the same thing
+      if (t && Array.from(el.children).some(c => textOf(c) === t)) return false;
+      return isRendered(el);
+    }).slice(0, 30) : [];
+    const under = new Set(underGrid);
+    const pool = [...new Set([...candidates, ...underGrid])];
+    const controls = [
+      ...pool.filter(isNew),
+      ...underGrid.filter(el => !isNew(el)),
+      ...pool.filter(el => !isNew(el) && !under.has(el))
+    ].slice(0, 130);
     const fresh = new Set(controls.filter(isNew));
-    _simSeen = new WeakSet([...candidates, ...titled]);
+    _simSeen = new WeakSet([...pool, ...titled, ...leaves]);
 
     // Whatever cells the task names ("...to cell C7") must be present even when
     // empty, or the one cell the question is about can be the one left out.
@@ -318,9 +356,19 @@ function scrape() {
     ).slice(0, 30);
 
     _lastElements = [...controls, ...referenced, ...populated];
+    const described = _lastElements.map(el => ({ ...describeEl(el), state: stateOf(el), fresh: fresh.has(el) || undefined }));
+    // Labels that repeat — Sheet Options has two "Print" boxes, one under
+    // Gridlines and one under Headings — mean nothing alone, and picking the
+    // wrong one was graded wrong. Each gets the name of the group it's in.
+    const counts = new Map();
+    for (const d of described) if (d.text && !d.cell) counts.set(d.text, (counts.get(d.text) ?? 0) + 1);
+    const repeated = new Set([...counts].filter(([, n]) => n > 1).map(([t]) => t));
+    described.forEach((d, i) => {
+      if (repeated.has(d.text)) d.group = groupOf(_lastElements[i], d.text, repeated);
+    });
     return {
       text: (root.innerText ?? '').slice(0, 5000),
-      elements: _lastElements.map(el => ({ ...describeEl(el), state: stateOf(el), fresh: fresh.has(el) || undefined })),
+      elements: described,
       isSimnet: true,      // multi-step procedure, worth the stronger model
       isWorksheet: false,
       isDrag: false
@@ -432,6 +480,25 @@ function stateOf(el) {
   return s.length ? s.join(', ') : undefined;
 }
 
+// The nearest heading-like text around an element: the first short text in
+// an enclosing container that isn't the element's own and isn't itself one of
+// the repeated labels. "Gridlines" for the Print box in the Gridlines column.
+function groupOf(el, ownText, repeated) {
+  let box = el.parentElement;
+  for (let i = 0; i < 5 && box && box !== document.body; i++, box = box.parentElement) {
+    const label = box.getAttribute('aria-label');
+    if (label && label !== ownText && !repeated.has(label)) return label.slice(0, 40);
+    const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const t = node.nodeValue.trim();
+      if (!t || t.length > 40 || el.contains(node) || t === ownText || repeated.has(t)) continue;
+      return t;
+    }
+  }
+  return undefined;
+}
+
 function centreOf(el) {
   const r = el.getBoundingClientRect();
   return { bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
@@ -452,7 +519,49 @@ function pickElement(index) {
 function cellByAddress(ref) {
   return document.getElementById(`cell-${String(ref).toUpperCase()}`);
 }
+// The column and row "selectors" — the header letters and numbers. SIMnet's
+// markup for them isn't known, but Excel's layout is: a column's header is the
+// element reading "B" that sits above column B's cells, lined up with them; a
+// row's header reads "5" and sits left of row 5, level with it. Found by text
+// through a text walk (cheap), then by position.
+function headerFor(text, isColumn) {
+  const cells = Array.from(document.querySelectorAll(
+    isColumn ? `[id^="cell-${text}"]` : 'td.grdbdy-cell'))
+    .filter(c => (isColumn ? new RegExp(`^cell-${text}\\d+$`) : new RegExp(`^cell-[A-Z]+${text}$`)).test(c.id))
+    .filter(isRendered);
+  if (!cells.length) return null;
+  const ref = cells[0].getBoundingClientRect();
+  const gridTop = Math.min(...Array.from(document.querySelectorAll('td.grdbdy-cell')).filter(isRendered)
+    .slice(0, 200).map(c => c.getBoundingClientRect().top));
+  const gridLeft = Math.min(...Array.from(document.querySelectorAll('td.grdbdy-cell')).filter(isRendered)
+    .slice(0, 200).map(c => c.getBoundingClientRect().left));
+
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node, best = null;
+  while ((node = walker.nextNode())) {
+    if (node.nodeValue.trim() !== String(text)) continue;
+    const el = node.parentElement;
+    if (!el || el.closest('td.grdbdy-cell') || !isRendered(el)) continue;
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const fits = isColumn
+      ? cx >= ref.left - 1 && cx <= ref.right + 1 && r.bottom <= gridTop + 2
+      : cy >= ref.top - 1 && cy <= ref.bottom + 1 && r.right <= gridLeft + 2;
+    // The one nearest the grid, if a letter happens to appear twice above it
+    if (fits && (!best || (isColumn ? r.bottom > best.r.bottom : r.right > best.r.right))) best = { el, r };
+  }
+  return best?.el ?? null;
+}
+
 function pickTarget(action) {
+  if (action.column !== undefined) {
+    const el = headerFor(String(action.column).toUpperCase(), true);
+    return el ? { el } : { error: `Couldn't find the header for column ${action.column}` };
+  }
+  if (action.row !== undefined) {
+    const el = headerFor(String(action.row), false);
+    return el ? { el } : { error: `Couldn't find the header for row ${action.row}` };
+  }
   if (action.cell !== undefined) {
     const el = cellByAddress(action.cell);
     return el ? { el } : { error: `Cell ${action.cell} isn't on this sheet` };
@@ -637,6 +746,23 @@ async function execute(action) {
     // Simulated rather than real input: SIMnet acts on simulated clicks, and
     // simulated events can't be misrouted by where the browser's focus is.
     if (action.action === 'selectRange') return selectRange(action.from, action.to);
+
+    // "Point to" a menu item: submenus like Hide & Unhide or Tab Color open on
+    // hover, and SIMnet grades a click on them as a wrong answer
+    if (action.action === 'hover') {
+      const { el, error } = pickTarget(action);
+      if (error) return { success: false, error };
+      el.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+      const o = centreOf(el);
+      el.dispatchEvent(new PointerEvent('pointerover', { ...o, isPrimary: true }));
+      el.dispatchEvent(new PointerEvent('pointerenter', { ...o, bubbles: false, isPrimary: true }));
+      el.dispatchEvent(new MouseEvent('mouseover', o));
+      el.dispatchEvent(new MouseEvent('mouseenter', { ...o, bubbles: false }));
+      el.dispatchEvent(new PointerEvent('pointermove', { ...o, isPrimary: true }));
+      el.dispatchEvent(new MouseEvent('mousemove', o));
+      await new Promise(r => setTimeout(r, 350));   // submenus animate open
+      return { success: true };
+    }
 
     if (action.action === 'doubleClick' || action.action === 'rightClick') {
       const { el, error } = pickTarget(action);

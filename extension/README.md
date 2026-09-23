@@ -156,6 +156,21 @@ change between sites.
   — and a `<select>` its choices and current value, everywhere. Up to 8 steps;
   a run that uses them all without the model reporting the task complete is
   an error ("Used all 8 steps…"), never "Finished".
+- **SIMnet, from a real exercise log** (36 tasks, 25 right first time out; every
+  miss traced): `hover` for "Point to X" submenus (Hide & Unhide, Tab Color),
+  since SIMnet grades a click on a submenu's parent as wrong. The strip under
+  the grid — sheet tabs, New Sheet (+) — found by position (anything short and
+  labelled below the grid's last row) and listed near the top; they're plain
+  elements the general selector never matched. Column and row selectors by
+  `column`/`row`, found by text and position (the element reading "B" above
+  column B's cells), so the Bold button's "B" can't be mistaken for it. "Just
+  appeared" means new since the previous look only; being inside a menu-like
+  container no longer counts (part of SIMnet's toolbar is one). Newly
+  appeared plain text leaves (menu entries without roles) are candidates. A
+  label that repeats in the list gets its group (`(in: Gridlines)` vs
+  `(in: Headings)` for Sheet Options' two Print boxes). And on a graded page
+  (the attempt counter is showing), "done" with no popup means nothing was
+  graded: the model is told so and continues, twice at most.
 - **SIMnet grading** — SIMnet grades with a popup: a "Correct"/"Incorrect"
   heading, a HINT with the exact steps on a wrong answer, and one Continue
   button (back to the question after a wrong try, on to the next after a

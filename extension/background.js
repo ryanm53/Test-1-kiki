@@ -40,12 +40,12 @@ function pickModel(baseModel, pageData, autoUpgrade) {
 // Keys a SIMnet step may press. Kept in step with KEY_CODES in content.js.
 const KEY_NAMES = ['Enter', 'Escape', 'Tab', 'Delete', 'Backspace', 'F2', 'F4',
                    'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
-const CELL_REF = /^[A-Z]{1,3}[1-9]\d{0,5}$/;
+const CELL_REF = /^[A-Z]{1,3}[1-9]\d{0,6}$/;
 
 const ACTION_SCHEMA = {
   type: 'object',
   properties: {
-    action:  { type: 'string', enum: ['click', 'clickMany', 'fill', 'dragMove', 'doubleClick', 'rightClick', 'type', 'key', 'selectRange', 'none'] },
+    action:  { type: 'string', enum: ['click', 'clickMany', 'fill', 'dragMove', 'doubleClick', 'rightClick', 'type', 'key', 'selectRange', 'hover', 'none'] },
     index:   { type: 'integer' },
     indexes: { type: 'array', items: { type: 'integer' } },
     fills:   {
@@ -61,6 +61,8 @@ const ACTION_SCHEMA = {
     text:    { type: 'string' },
     key:     { type: 'string', enum: KEY_NAMES },
     cell:    { type: 'string' },
+    column:  { type: 'string' },
+    row:     { type: 'integer' },
     from:    { type: 'string' },
     to:      { type: 'string' },
     shift:   { type: 'boolean' },
@@ -126,16 +128,26 @@ Besides click, Excel needs these:
   "ctrl":true or "shift":true for a shortcut such as Ctrl+Home.
 {"action":"selectRange","from":"A4","to":"G9"} — select a block of cells.
 
+{"action":"hover","index":N} — point to an item without clicking. When a
+  task or hint says "Point to X", or X opens a submenu (Hide & Unhide, Tab
+  Color, and the like), HOVER it, then click the item in the submenu that
+  appears. SIMnet grades a click on a submenu's parent as a WRONG answer.
+
 Any cell can be named directly: use "cell":"B7" in place of "index" with
-click, doubleClick, rightClick or type — listed or not. Add "shift":true to a
+click, doubleClick, rightClick or type — listed or not. A column or row
+selector (the header letter or number) likewise: "column":"B" or "row":5 —
+e.g. click column A, then shift-click column C to select columns A to C.
+The sheet tabs and the New Sheet (+) button are listed near the top. Click a
+tab to select it, ctrl-click tabs to group them, right-click one for Insert,
+Delete, Rename, Move or Copy, Tab Color, Hide, Unhide and Ungroup. Add "shift":true to a
 click to extend a selection, or "ctrl":true to add to it (e.g. ctrl-click a
 second sheet tab to group the sheets).
-To select whole columns or rows, type the reference (C:C, or 5:7) into the
-Name Box — the box showing the current cell, like "G1" — and press Enter.
 Formatting applies to what is selected: select the cells first, then use the
 ribbon or dialog.
 A dropdown list shows its choices as options=[...]; pick one with
 {"action":"fill","fills":[{"index":N,"value":"<the option's text>"}]}.
+A label that appears more than once shows its group as (in: Gridlines) — pick
+the one in the group the task or hint names.
 Marks after an item: (on) a toggle that is on, like Bold; (selected) the
 current tab or item; (open) an expanded menu; (disabled) not usable yet.
 
@@ -167,7 +179,8 @@ function badIndexes(action, count) {
     if (!Number.isInteger(i) || i < 0 || i >= count) out.push(String(i));
   };
   if (action.action === 'dragMove') check(action.index);
-  if (['click', 'doubleClick', 'rightClick'].includes(action.action) && action.cell === undefined) check(action.index);
+  const named = ['cell', 'column', 'row'].some(f => action[f] !== undefined);
+  if (['click', 'doubleClick', 'rightClick', 'hover'].includes(action.action) && !named) check(action.index);
   if (action.action === 'type' && action.index !== undefined) check(action.index);
   if (action.action === 'clickMany') (action.indexes ?? []).forEach(check);
   if (action.action === 'fill') (action.fills ?? []).forEach(f => check(f?.index));
@@ -177,7 +190,11 @@ function badIndexes(action, count) {
 function actionSummary(action, elements) {
   const mods = (action.ctrl ? 'ctrl+' : '') + (action.shift ? 'shift+' : '');
   const name = i => {
-    if (action.cell && i === action.index) return `cell ${action.cell}`;
+    if (i === action.index) {
+      if (action.cell) return `cell ${action.cell}`;
+      if (action.column) return `the column ${action.column} header`;
+      if (action.row) return `the row ${action.row} header`;
+    }
     const e = elements[i];
     if (!e) return `[${i}]`;
     return `"${(e.text || e.cell || e.tag || '').slice(0, 40)}"`;
@@ -192,6 +209,7 @@ function actionSummary(action, elements) {
     case 'type':      return `typed "${action.text}"${action.cell || action.index !== undefined ? ` into ${name(action.index)}` : ''}`;
     case 'key':       return `pressed ${(action.ctrl ? 'Ctrl+' : '') + (action.shift ? 'Shift+' : '')}${action.key}`;
     case 'selectRange': return `selected ${action.from}:${action.to}`;
+    case 'hover':     return `pointed to ${name(action.index)}`;
     default:          return action.action;
   }
 }
@@ -264,6 +282,7 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
       if (el.placeholder) parts.push(`placeholder="${el.placeholder}"`);
       if (el.value) parts.push(`value="${el.value}"`);
       if (el.options) parts.push(`options=[${el.options.join(' | ')}]`);
+      if (el.group) parts.push(`(in: ${el.group})`);
       if (el.state) parts.push(`(${el.state})`);
       if (el.fresh) parts.push('(just appeared)');
       if (el.name) parts.push(`name="${el.name}"`);
@@ -392,7 +411,7 @@ ${elementList || '(none found)'}`;
     throw new Error(`Claude returned invalid JSON: ${cleaned.slice(0, 300)}`);
   }
 
-  if (!['click', 'clickMany', 'fill', 'dragMove', 'doubleClick', 'rightClick', 'type', 'key', 'selectRange', 'none'].includes(parsed.action)) {
+  if (!['click', 'clickMany', 'fill', 'dragMove', 'doubleClick', 'rightClick', 'type', 'key', 'selectRange', 'hover', 'none'].includes(parsed.action)) {
     throw new Error(`Unexpected action: ${JSON.stringify(parsed.action)}`);
   }
   // A cell address stands in for an index; normalise and check it
@@ -401,9 +420,16 @@ ${elementList || '(none found)'}`;
     parsed[f] = String(parsed[f]).trim().toUpperCase().replace(/\$/g, '');
     if (!CELL_REF.test(parsed[f])) throw new Error(`${f} must be a cell address like B7, got: ${JSON.stringify(parsed[f])}`);
   }
-  if (['click', 'doubleClick', 'rightClick'].includes(parsed.action)
-      && typeof parsed.index !== 'number' && parsed.cell === undefined) {
-    throw new Error(`${parsed.action} needs an index or a cell, got neither`);
+  if (parsed.column !== undefined) {
+    parsed.column = String(parsed.column).trim().toUpperCase();
+    if (!/^[A-Z]{1,3}$/.test(parsed.column)) throw new Error(`column must be a letter like B, got: ${JSON.stringify(parsed.column)}`);
+  }
+  if (parsed.row !== undefined && !(Number.isInteger(parsed.row) && parsed.row > 0)) {
+    throw new Error(`row must be a row number like 5, got: ${JSON.stringify(parsed.row)}`);
+  }
+  const hasTarget = typeof parsed.index === 'number' || ['cell', 'column', 'row'].some(f => parsed[f] !== undefined);
+  if (['click', 'doubleClick', 'rightClick', 'hover'].includes(parsed.action) && !hasTarget) {
+    throw new Error(`${parsed.action} needs an index, a cell, a column or a row`);
   }
   if (parsed.action === 'selectRange' && (!parsed.from || !parsed.to)) {
     throw new Error(`selectRange needs from and to, got: ${JSON.stringify({ from: parsed.from, to: parsed.to })}`);
@@ -422,7 +448,7 @@ ${elementList || '(none found)'}`;
       throw new Error(`fill requires a non-empty fills array of {index,value}, got: ${JSON.stringify(parsed.fills)}`);
     }
   }
-  if (parsed.action === 'click' && typeof parsed.index !== 'number' && parsed.cell === undefined) {
+  if (parsed.action === 'click' && !hasTarget) {
     throw new Error(`click requires a numeric index, got: ${JSON.stringify(parsed.index)}`);
   }
   if (parsed.action === 'clickMany') {
@@ -747,6 +773,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   let attempts = null;     // {current, total} as shown at the start
   let retryHint = '';
   let round = 0;
+  let ungradedDone = 0;    // "done" claims SIMnet didn't grade, this round
 
   rounds: for (;;) {
   steps: for (let step = 0; step < budget; step++) {
@@ -823,6 +850,22 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
           // After a move: the drag arrangement is complete.
           // Except on a Canvas page whose questions all have an answer already
           // — arriving back on one, say — where "none" means move on.
+          // Graded SIMnet — the attempt counter shows it — puts up a popup
+          // for every finished task. "Done" with no popup means nothing was
+          // graded, so the task isn't done: say so and carry on, rather than
+          // stop on the model's word. Twice at most, so a stuck run can't
+          // spend its steps insisting.
+          if (isSimnet && attempts) {
+            const v = await waitForVerdict(tabId, frameId, 2000);
+            if (v.verdict) { verdict = v; break steps; }
+            if (++ungradedDone <= 2) {
+              history.push('said the task was done, but SIMnet graded nothing, so it is NOT done yet — take the next step');
+              stepDone = true;
+              break;
+            }
+            return { success: false, usedModel,
+                     error: "It thinks it's done, but SIMnet hasn't graded anything. Check it and finish this one yourself." };
+          }
           const alreadyDone = isCanvas && everyQuestionAnswered(pageData.elements);
           if (completed === 0 && !alreadyDone) return { success: true, action, noAnswer: true, usedModel };
           finished = true;
@@ -930,6 +973,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
     verdict = null;
     saidDone = false;
     completed = 0;
+    ungradedDone = 0;
     history.length = 0;
     round++;
     continue rounds;

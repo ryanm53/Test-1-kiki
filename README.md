@@ -107,7 +107,7 @@ Press the **play button ▶**. What happens next depends on the site:
 |---|---|
 | **Connect** | Answers, clicks **High Confidence** and **Next Question**, and keeps going through the whole assignment on its own |
 | **Canvas** | Answers **every question on the page** in one go. If the quiz shows one question at a time, it clicks **Next** and keeps going. **It never presses Submit Quiz** — when it's done it says *"Answered. Check it over, then submit it yourself."* |
-| **SIMnet** | Does the task on screen — ribbon tabs and their menus, dialogs, selecting cells and ranges, double-clicking a sheet tab to rename it, right-click menus, Ctrl-clicking to group sheets, typing and pressing keys. SIMnet then grades it: when it's **correct**, Autopilot presses Continue and goes on to the next question by itself. When it's **incorrect**, it reads SIMnet's hint and tries **once** more following it. It never spends your **last attempt**: if another try would use it, or the second try is also wrong, it stops and shows you the hint to finish it yourself |
+| **SIMnet** | Does the task on screen — ribbon tabs and their menus and submenus, dialogs, selecting cells, ranges, whole columns and rows, sheet tabs (rename, group, color, hide, add), right-click menus, typing and pressing keys. SIMnet then grades it: when it's **correct**, Autopilot presses Continue and goes on to the next question by itself. When it's **incorrect**, it reads SIMnet's hint and tries **once** more following it. It never spends your **last attempt**: if another try would use it, or the second try is also wrong, it stops and shows you the hint to finish it yourself |
 
 Press the same button again — it's now a **stop button ⏸** — to halt at any point.
 
