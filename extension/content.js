@@ -31,10 +31,11 @@ const INTERACTIVE_SEL = [
 
 // Cached element list from the last scrape — execute() uses these references
 // so it operates on exactly the elements Claude was shown.
+let _lastElements = [];
+
 // What a SIMnet look saw, so the next look can tell what has just appeared.
 // Cleared on each task's first look; a peek never changes it.
 let _simSeen = null;
-let _lastElements = [];
 
 // On the page and drawn — but possibly scrolled out of view.
 function isRendered(el) {
@@ -48,10 +49,6 @@ function inViewport(el) {
   const r = el.getBoundingClientRect();
   return r.bottom >= 0 && r.top <= window.innerHeight
       && r.right >= 0 && r.left <= window.innerWidth;
-}
-
-function isVisible(el) {
-  return isRendered(el) && inViewport(el);
 }
 
 // Resolve an element's accessible label, including aria-labelledby chains.
@@ -279,8 +276,8 @@ function scrape() {
     // a ribbon that alone nearly fills the list. Taken in page order, a menu
     // opened by "Format" fell past the cutoff: the model never saw "Tab
     // Color", clicked elsewhere, the menu closed, and round it went. So
-    // anything new since the previous look, and anything inside an open menu
-    // or dialog, goes first, marked as just appeared.
+    // anything new since the previous look goes first, marked as just
+    // appeared.
     const POPUP = '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
     const baseline = _simSeen;               // null on a task's first look
     const allSet = new Set(all);
@@ -321,7 +318,9 @@ function scrape() {
     // scrolling. Plain elements, so the general selector missed them — and
     // with them every task about sheets (group, rename, add, unhide). Taken by
     // position: anything short and labelled below the grid's last row.
-    const gridBottom = Math.max(...simCells.filter(isRendered).slice(-400).map(c => c.getBoundingClientRect().bottom));
+    // ~1500 cells: which are drawn is worked out once and used twice
+    const cells = simCells.filter(isRendered);
+    const gridBottom = Math.max(...cells.slice(-400).map(c => c.getBoundingClientRect().bottom));
     // Cheapest tests first — the page has thousands of elements, and reading
     // text is what's costly
     const textOf = el => (el.innerText ?? el.textContent ?? '').trim();
@@ -348,7 +347,6 @@ function scrape() {
     // Whatever cells the task names ("...to cell C7") must be present even when
     // empty, or the one cell the question is about can be the one left out.
     const named = new Set((root.innerText ?? '').slice(0, 600).match(/\b[A-Z]{1,3}\d{1,4}\b/g) ?? []);
-    const cells = simCells.filter(isRendered);
     const referenced = cells.filter(c => named.has(cellAddress(c)));
     const populated = cells.filter(c =>
       !named.has(cellAddress(c)) &&
@@ -1008,7 +1006,10 @@ function bgSend(msg, cb) {
   /* ── Panel ── */
   #panel {
     position: absolute;
-    bottom: 52px; left: 0;
+    /* From the bar's real height, not a fixed offset: an error message wraps
+       and makes the bar taller, and a fixed 52px let the bar cover the bottom
+       of the panel — the More button with it */
+    bottom: calc(100% + 8px); left: 0;
     width: 318px;
     max-height: 74vh;
     overflow-y: auto;
@@ -1022,7 +1023,7 @@ function bgSend(msg, cb) {
   /* The panel hangs off the bar, so once the bar can be dragged anywhere the
      panel has to pick a side — otherwise it opens off the edge of the screen. */
   #panel.below {
-    bottom: auto; top: 52px;
+    bottom: auto; top: calc(100% + 8px);
     transform: translateY(-6px) scale(0.98);
     transform-origin: top left;
   }
@@ -2006,11 +2007,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!v) { sendResponse({ success: false, error: 'No result popup to continue from' }); return false; }
     realClick(v.button);
     sendResponse({ success: true });
-    return false;
-  }
-
-  if (msg.type === 'PING') {
-    sendResponse({ ok: true });
     return false;
   }
 

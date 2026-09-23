@@ -218,11 +218,14 @@ auto-ran on any `pushState` navigation, on any site — removed.)
 
 ### Token usage
 
-The request is kept small: a short system prompt, page text truncated to 800
-characters, at most 25 interactive elements, and a compact action object back.
+The request is kept small: a short system prompt, a compact action object back, and
+only as much of the page as the platform needs. Page text is cut to 800 characters on
+ordinary questions, 1,500 on SIMnet and 3,000 on worksheets and Canvas. Elements are
+capped per platform: 25 on-screen ones for ordinary questions, 60 on worksheets, 150 on
+a whole-page Canvas quiz and 130 on SIMnet (newly opened menus first).
 Multiple choice costs exactly one API call — the step budget only expands (to 8) once
-a drag move starts, since those need several sequential moves with a fresh look at the
-board between each. Confidence and Next-question clicks cost nothing at all, since they
+a drag move starts or on SIMnet, since those need several sequential moves with a fresh
+look between each. Confidence and Next-question clicks cost nothing at all, since they
 are direct DOM lookups that never touch the API.
 
 ---

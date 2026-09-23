@@ -264,10 +264,13 @@ async function postToApi(apiKey, requestBody, betas = []) {
     }
   }
 
-  throw new Error(
+  // Already retried above; final, like the other API failures
+  const err = new Error(
     'Could not reach Claude. Check your internet connection and try again.'
     + (lastNetworkError ? ` (${lastNetworkError.message})` : '')
   );
+  err.final = true;
+  throw err;
 }
 
 async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = [], isCanvas = false, retryHint = '') {
@@ -316,7 +319,6 @@ ${elementList || '(none found)'}`;
   // the service worker console.
   const mode = isSimnet ? '  (simnet mode)' : isWorksheet ? '  (worksheet mode)' : isCanvas ? '  (canvas mode)' : '';
   const debugText = `model: ${model}${mode}\n\n${userContent}`;
-  console.log(`[PageAgent]\n${debugText}`);
   chrome.storage.local.set({ lastPrompt: debugText });
 
   const requestBody = {
@@ -356,7 +358,12 @@ ${elementList || '(none found)'}`;
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    throw new Error(apiErrorMessage(response.status, body));
+    // Final: a bad key, no credit or a bad request fails identically every
+    // time, so it's reported as it is — no "Stuck on step 1" wrapping, and no
+    // second request. (Rate limits go their own way, to the countdown.)
+    const err = new Error(apiErrorMessage(response.status, body));
+    err.final = true;
+    throw err;
   }
 
   let data;
@@ -731,7 +738,7 @@ async function pressContinue(tabId, v) {
 }
 
 // Tells the control bar the run is still moving. Fire and forget: the bar
-// lives in the top frame, may not exist at all (popup-driven runs), and a
+// lives in the top frame, may not have finished loading, and a
 // failure to report progress must never stop the run itself.
 function reportProgress(tabId, step, budget) {
   try {
@@ -1239,11 +1246,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const baseModel = resolveModel(savedModel);
     const apiKey = cleanKey(rawKey);
     if (!apiKey) {
-      sendResponse({ success: false, error: 'No API key saved. Enter it in the extension popup and click Save.' });
+      sendResponse({ success: false, error: 'No API key saved. Open the gear on the control bar and add it.' });
       return;
     }
 
-    // Popup sends msg.tabId; floating widget (content script) uses sender.tab.id
+    // The control bar's messages carry their tab; msg.tabId is for a caller
+    // outside the page
     const tabId = msg.tabId ?? sender.tab?.id;
     if (!tabId) {
       sendResponse({ success: false, error: 'Could not determine tab ID.' });
