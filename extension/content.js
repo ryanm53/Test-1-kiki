@@ -561,6 +561,7 @@ function bgSend(msg, cb) {
 
   const ICON_PLAY  = '<svg viewBox="0 0 24 24" width="15" height="15"><path d="M8 5.14v13.72L19 12z"/></svg>';
   const ICON_PAUSE = '<svg viewBox="0 0 24 24" width="15" height="15"><path d="M6.5 5h3.5v14H6.5zM14 5h3.5v14H14z"/></svg>';
+  const ICON_THUMB_DOWN = '<svg viewBox="0 0 24 24" width="15" height="15"><path d="M15 3H6c-.8 0-1.5.5-1.8 1.2l-3 7c-.1.3-.2.5-.2.8v2c0 1.1.9 2 2 2h6.3l-1 4.6v.3c0 .4.2.8.4 1.1L9.8 23l6.6-6.6c.4-.4.6-.9.6-1.4V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>';
   const ICON_GEAR  = '<svg viewBox="0 0 24 24" width="15" height="15"><path d="M12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7zm7.4-2.6l1.8 1.4-1.9 3.3-2.2-.7a7.8 7.8 0 0 1-1.6.9l-.4 2.2h-3.8l-.4-2.2a7.8 7.8 0 0 1-1.6-.9l-2.2.7-1.9-3.3 1.8-1.4a7.6 7.6 0 0 1 0-1.8L2.8 9.7l1.9-3.3 2.2.7a7.8 7.8 0 0 1 1.6-.9l.4-2.2h3.8l.4 2.2c.6.2 1.1.5 1.6.9l2.2-.7 1.9 3.3-1.8 1.4a7.6 7.6 0 0 1 0 1.8z"/></svg>';
 
   shadow.innerHTML = `
@@ -806,6 +807,36 @@ function bgSend(msg, cb) {
   .seg button.on { background: rgba(99, 99, 102, 0.95); box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
 
   .saved-mark { font-size: 13px; color: #30D158; }
+
+  /* "That answer was wrong" — only while the answer log is on */
+  #flag {
+    width: 26px; height: 26px; flex-shrink: 0;
+    border: none; background: transparent; border-radius: 7px;
+    color: rgba(235, 235, 245, 0.45);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: color 0.18s, background 0.18s;
+  }
+  #flag svg { fill: currentColor; display: block; }
+  #flag:hover { color: #FF9F0A; background: rgba(120, 120, 128, 0.26); }
+
+  /* iOS switch */
+  .switch {
+    width: 40px; height: 24px; flex-shrink: 0;
+    border-radius: 999px;
+    background: rgba(120, 120, 128, 0.36);
+    position: relative; cursor: pointer;
+    transition: background 0.26s cubic-bezier(0.32,0.72,0,1);
+  }
+  .switch.on { background: #30D158; }
+  .switch::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.28);
+    transition: transform 0.26s cubic-bezier(0.32,0.72,0,1);
+  }
+  .switch.on::after { transform: translateX(16px); }
+  .inline-btn:disabled { opacity: 0.35; cursor: default; }
   .inline-btn.quiet { color: rgba(235, 235, 245, 0.45); }
 
   /* "More" disclosure */
@@ -872,6 +903,20 @@ function bgSend(msg, cb) {
         </div>
         <div class="row-hint">Course context or hints. Leave blank if you don't need it.</div>
 
+        <div class="label">Answer log</div>
+        <div class="group">
+          <div class="row">
+            <span class="row-label">Keep a log</span>
+            <div class="switch" id="logSw" role="switch" aria-checked="false" tabindex="0"></div>
+          </div>
+          <div class="row" id="logRow" hidden>
+            <span class="row-label" id="logCount">Nothing logged yet</span>
+            <button class="inline-btn quiet" id="logClear">Clear</button>
+            <button class="inline-btn" id="logDownload">Download</button>
+          </div>
+        </div>
+        <div class="row-hint">Saves each question it answers, and how the page looked afterwards, in this browser only. When an answer was wrong, tap the thumbs-down on the bar. Download the log to share it.</div>
+
         <div class="label">Troubleshooting</div>
         <div class="group">
           <div class="row">
@@ -893,6 +938,7 @@ function bgSend(msg, cb) {
   <div id="bar" class="glass">
     <button id="go"></button>
     <div id="status"><span class="dot idle" id="dot"></span><span id="statusText">Ready</span></div>
+    <button id="flag" title="That answer was wrong" aria-label="That answer was wrong" hidden></button>
     <button id="gear"></button>
   </div>
 </div>
@@ -908,9 +954,12 @@ function bgSend(msg, cb) {
   const keySavedRow = $('keySaved'), keyEditRow = $('keyEdit'), keyHint = $('keyHint');
   const changeKeyBtn = $('changeKey'), moreBtn = $('moreBtn'), more = $('more');
   const copyPromptBtn = $('copyPrompt');
+  const flagBtn = $('flag'), logSw = $('logSw'), logRow = $('logRow'), logCount = $('logCount');
+  const logDownloadBtn = $('logDownload'), logClearBtn = $('logClear');
   const checkPageBtn = $('checkPage'), checkResult = $('checkResult');
 
   gear.innerHTML = ICON_GEAR;
+  flagBtn.innerHTML = ICON_THUMB_DOWN;
 
   // ── State ──────────────────────────────────────────────────────────────────
   let mode = 'autopilot';  // one of MODES, below
@@ -918,6 +967,8 @@ function bgSend(msg, cb) {
   let autoContinue = true; // whether to go on to the next question; set by the mode
   let notes = '';          // optional user context, sent only when non-empty
   let hasKey = false;
+  let keepLog = false;     // the answer log, off unless switched on
+  let canFlag = false;     // a run has finished here since the last thumbs-down
   let pageKind = '';       // what the page looks like — "Canvas quiz" — shown when idle
   // Declared up here, not beside the detection code, because the settings
   // loader below can call into it synchronously (when the extension has just
@@ -1050,6 +1101,8 @@ function bgSend(msg, cb) {
       text += ` · ↑ ${MODEL_LIST.find(m => m.id === lastModel)?.label ?? lastModel}`;
     }
 
+    flagBtn.hidden = !(keepLog && canFlag && !isRunning);
+
     dot.className = 'dot ' + cls;
     statusText.textContent = text;
     statusText.classList.toggle('err', !!errorMsg);
@@ -1086,7 +1139,7 @@ function bgSend(msg, cb) {
 
   // ── Persistence ────────────────────────────────────────────────────────────
   store.get(
-    ['mode', 'lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'model', 'barPos'],
+    ['mode', 'lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'model', 'barPos', 'keepLog'],
     s => {
       setMode(MODES[s.mode] ? s.mode : legacyMode(s), false);
 
@@ -1110,6 +1163,10 @@ function bgSend(msg, cb) {
 
       hasKey = !!s.apiKey;
       showKeyEditor(!hasKey);
+
+      keepLog = s.keepLog === true;
+      logSw.classList.toggle('on', keepLog);
+      logSw.setAttribute('aria-checked', String(keepLog));
 
       // Where the user last parked the bar. Clamped on the way in, so a
       // position saved on a bigger screen still lands somewhere visible.
@@ -1171,6 +1228,73 @@ function bgSend(msg, cb) {
     const open = more.hidden;
     more.hidden = !open;
     moreBtn.setAttribute('aria-expanded', String(open));
+    if (open) refreshLogCount();
+  });
+
+  // ── Answer log ────────────────────────────────────────────────────────────
+  function refreshLogCount() {
+    bgSend({ type: 'LOG_COUNT' }, res => {
+      const n = res?.count ?? 0;
+      logCount.textContent = n ? `${n} answer${n === 1 ? '' : 's'} logged` : 'Nothing logged yet';
+      logDownloadBtn.disabled = logClearBtn.disabled = n === 0;
+      logRow.hidden = !keepLog && n === 0;
+    });
+  }
+
+  function setKeepLog(on) {
+    keepLog = on;
+    logSw.classList.toggle('on', on);
+    logSw.setAttribute('aria-checked', String(on));
+    store.set({ keepLog: on });
+    render();
+    refreshLogCount();
+  }
+  logSw.addEventListener('click', () => setKeepLog(!keepLog));
+  logSw.addEventListener('keydown', e => {
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setKeepLog(!keepLog); }
+  });
+
+  flagBtn.addEventListener('click', () => {
+    bgSend({ type: 'LOG_FLAG' }, res => {
+      if (!res?.ok) return;
+      canFlag = false;        // one mark per answer
+      const note = 'Marked as wrong';
+      infoMsg = note;
+      render();
+      setTimeout(() => { if (infoMsg === note) { infoMsg = ''; render(); } }, 2000);
+    });
+  });
+
+  logDownloadBtn.addEventListener('click', () => {
+    bgSend({ type: 'LOG_EXPORT' }, res => {
+      const entries = res?.entries ?? [];
+      if (!entries.length) return;
+      const json = JSON.stringify({ exported: new Date().toISOString(), entries }, null, 1);
+      const a = document.createElement('a');
+      a.download = `page-agent-log-${new Date().toISOString().slice(0, 10)}.json`;
+      let url;
+      try { url = URL.createObjectURL(new Blob([json], { type: 'application/json' })); }
+      catch (_) { url = 'data:application/json;charset=utf-8,' + encodeURIComponent(json); }
+      a.href = url;
+      shadow.appendChild(a);
+      a.click();
+      a.remove();
+      if (url.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(url), 5000);
+    });
+  });
+
+  // Two taps, so the log isn't lost to a stray click
+  let clearArmed = null;
+  logClearBtn.addEventListener('click', () => {
+    if (!clearArmed) {
+      logClearBtn.textContent = 'Tap again to clear';
+      clearArmed = setTimeout(() => { clearArmed = null; logClearBtn.textContent = 'Clear'; }, 3000);
+      return;
+    }
+    clearTimeout(clearArmed);
+    clearArmed = null;
+    logClearBtn.textContent = 'Clear';
+    bgSend({ type: 'LOG_CLEAR' }, () => refreshLogCount());
   });
 
   // ── Recognising the page ──────────────────────────────────────────────────
@@ -1407,6 +1531,7 @@ function bgSend(msg, cb) {
           fail(sendError ?? 'No response from the extension. Refresh this page and try again.');
           return;
         }
+        if (keepLog) canFlag = true;
 
         if (!result.success) {
           const err = result.error ?? 'Unknown error.';

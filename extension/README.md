@@ -219,6 +219,24 @@ points at the key-versus-key-ID mix-up, a 400 mentioning credit points at
 Billing, a network failure says to check the connection. 5xx is retried once
 before the user sees anything.
 
+## Answer log
+
+Off unless the user switches it on (`keepLog`). Each run becomes one entry in
+`chrome.storage.local.answerLog`: the host, every step's exact user prompt (as
+returned by `callClaude`, with the model and page kind — enough to replay it
+against another model, since the system prompt follows from the kind), the
+parsed action and a readable summary, the run's outcome, and `after` — a peek
+at the page text once the answer is in. For Connect that's taken before the
+last post-click (after the confidence rating, before Next), where the
+Correct/Incorrect verdict shows; for SIMnet at the end of the task, where the
+incorrect popup and hint show. The thumbs-down (`LOG_FLAG`) marks the latest
+run on the sender's host.
+
+One promise queue serialises every write, so an append and a flag can't
+overwrite each other. Capped at 300 entries and ~6M characters, oldest first
+out. Runs that never reached Claude aren't logged, and a failed write is
+dropped rather than holding up the reply.
+
 ## Tests
 
 ```

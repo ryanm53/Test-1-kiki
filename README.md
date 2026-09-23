@@ -149,6 +149,7 @@ Tap **More** for the rest:
 |---|---|
 | **Model** | Which AI does the thinking. **Auto** *(default, recommended)* uses the cheapest model for most questions and **Opus 5.5**, the most capable, for SIMnet, worksheets and drag-and-drop — the bar shows **↑ Opus 5.5** when it steps up. Or pick one to use every time: **Haiku 4.5** is fastest and cheapest, **Sonnet 5** is noticeably smarter for about 2× the cost, **Opus 5.5** is the most capable at about 4× |
 | **Notes** *(optional)* | Extra context to improve accuracy, e.g. *"This is financial accounting — use GAAP conventions."* Fine to leave blank |
+| **Answer log** | *Off unless you turn it on.* Saves each question it answers — what it was asked, what it picked, and how the page looked straight after, which is where Connect shows "Correct"/"Incorrect" and SIMnet its hint — in your browser only. When an answer was wrong, tap the **thumbs-down** that appears on the bar (most reliable in *One question* mode, since on Autopilot it may already have moved on). **Download** saves it as a file you can share to help tune Auto; **Clear** takes two taps. It adds under a second per question while it's on |
 | **Troubleshooting** | *Check this page* — see [Troubleshooting](#troubleshooting). *Copy last prompt* copies exactly what was sent to Claude last time |
 
 ---
@@ -209,3 +210,5 @@ It isn't perfect, especially on harder material. Under **More**, try setting **M
 ## Privacy
 
 Your API key is stored in your own browser only. The text of the page you're on is sent to Anthropic to answer the question — that's how it works at all. Nothing is sent anywhere else, and there's no server in the middle collecting anything.
+
+If you turn on the **Answer log**, the questions and answers are also kept in your browser, and they stay there unless you press Download. Turning it off stops new entries; **Clear** deletes what's there.

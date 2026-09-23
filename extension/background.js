@@ -361,7 +361,12 @@ ${elementList || '(none found)'}`;
     }
   }
 
-  return parsed;
+  // What was asked comes back with the answer, so the answer log can record
+  // exactly the prompt a model saw — enough to replay it against another model.
+  return {
+    action: parsed,
+    request: { model, kind: isSimnet ? 'simnet' : isWorksheet ? 'worksheet' : isCanvas ? 'canvas' : 'question', prompt: userContent }
+  };
 }
 
 // ── Trusted input via the Chrome debugger protocol ───────────────────────────
@@ -595,13 +600,23 @@ function reportProgress(tabId, step, budget) {
   } catch (_) { /* no listener — nothing to report to */ }
 }
 
-async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true) {
+async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true, log = null) {
   let usedModel = baseModel;   // reported back so the UI can show an upgrade
 
   // Resolve once per run: every scrape, click and fill must hit the same frame
   const frameId = await findQuestionFrame(tabId);
 
   cancelledRuns.delete(tabId);   // a fresh run clears any earlier stop
+
+  // For the answer log: the page as it stands once the answer is in — which
+  // is where Connect shows "Correct"/"Incorrect" and SIMnet its incorrect
+  // popup and hint. That verdict is what tells a good answer from a bad one.
+  const snapshot = async () => {
+    if (!log) return;
+    await new Promise(r => setTimeout(r, 700));
+    const page = await sendToTab(tabId, { type: 'SCRAPE', peek: true }, frameId).catch(() => null);
+    log.after = (page?.text ?? '').slice(0, 2500);
+  };
 
   let budget = MAX_STEPS_SIMPLE;
   let completed = 0;
@@ -651,7 +666,13 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         }
 
         usedModel = pickModel(baseModel, pageData, autoUpgrade);
-        const action = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas);
+        const { action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas);
+
+        log?.steps.push({
+          step: step + 1, attempt: attempt + 1,
+          model: request.model, kind: request.kind, prompt: request.prompt,
+          action, answer: actionSummary(action, pageData.elements)
+        });
 
         const bad = badIndexes(action, pageData.elements.length);
         if (bad.length) {
@@ -742,6 +763,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   // SIMnet has no confidence rating or Next button of the Connect kind, and
   // going round again would start fiddling with a task that's already done.
   if (isSimnet) {
+    await snapshot();
     return { success: true, usedModel, finished: 'Task done. Check it, then move to the next one.' };
   }
 
@@ -764,8 +786,12 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
     return next?.success ? { success: true, message: 'Done', usedModel } : done;
   }
 
-  // Direct clicks (confidence button, next button) — no Claude needed
-  for (const click of postClicks) {
+  // Direct clicks (confidence button, next button) — no Claude needed. The
+  // snapshot goes just before the last one (Next), after the confidence
+  // rating, when Connect is showing its verdict and before it moves on.
+  if (!postClicks.length) await snapshot();
+  for (const [i, click] of postClicks.entries()) {
+    if (i === postClicks.length - 1) await snapshot();
     if (cancelledRuns.has(tabId)) {
       cancelledRuns.delete(tabId);
       return { success: false, error: 'Stopped.', usedModel };
@@ -785,6 +811,31 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
 
   return { success: true, message: 'Done', usedModel };
 }
+
+// ── Answer log ─────────────────────────────────────────────────────────────
+// Off unless switched on. Each run is one entry: the prompts each model saw,
+// what it answered, how the run ended, a look at the page afterwards, and
+// whether the user marked it wrong. Kept in this browser only; the user
+// downloads it to share it. Every change goes through one queue so a flag and
+// an append can't overwrite each other.
+const LOG_MAX_ENTRIES = 300;
+const LOG_MAX_CHARS = 6_000_000;   // well inside chrome.storage's 10MB
+let logQueue = Promise.resolve();
+
+function changeLog(fn) {
+  const done = logQueue.then(async () => {
+    const { answerLog } = await chrome.storage.local.get('answerLog').catch(() => ({}));
+    const next = fn(Array.isArray(answerLog) ? answerLog : []);
+    if (!next) return;
+    const kept = next.slice(-LOG_MAX_ENTRIES);
+    while (kept.length > 1 && JSON.stringify(kept).length > LOG_MAX_CHARS) kept.shift();
+    await chrome.storage.local.set({ answerLog: kept });
+  });
+  logQueue = done.catch(() => {});
+  return done;
+}
+
+const hostOf = url => { try { return new URL(url).hostname; } catch (_) { return ''; } };
 
 // Pasting a key can pick up invisible characters (a trailing newline, a
 // zero-width space from a web page) that make a valid key fail.
@@ -905,11 +956,39 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'LOG_FLAG') {
+    // Marks the latest run on this site. Reliable when one question is
+    // answered per press; on Autopilot the latest run may already be the next
+    // question, which is why the page snapshot matters more.
+    const host = hostOf(sender.url);
+    let flagged = false;
+    changeLog(log => {
+      for (let i = log.length - 1; i >= 0; i--) {
+        if (log[i].host === host) { log[i].flagged = true; flagged = true; break; }
+      }
+      return log;
+    }).then(() => sendResponse({ ok: flagged }), () => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (msg.type === 'LOG_EXPORT' || msg.type === 'LOG_COUNT') {
+    logQueue.then(() => chrome.storage.local.get('answerLog')).then(({ answerLog }) => {
+      const entries = Array.isArray(answerLog) ? answerLog : [];
+      sendResponse(msg.type === 'LOG_COUNT' ? { count: entries.length } : { entries });
+    }, () => sendResponse(msg.type === 'LOG_COUNT' ? { count: 0 } : { entries: [] }));
+    return true;
+  }
+
+  if (msg.type === 'LOG_CLEAR') {
+    changeLog(() => []).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+    return true;
+  }
+
   if (msg.type !== 'RUN_GOAL') return;
 
   (async () => {
-    const { apiKey: rawKey, model: savedModel, autoUpgrade } =
-      await chrome.storage.local.get(['apiKey', 'model', 'autoUpgrade']).catch(() => ({}));
+    const { apiKey: rawKey, model: savedModel, autoUpgrade, keepLog } =
+      await chrome.storage.local.get(['apiKey', 'model', 'autoUpgrade', 'keepLog']).catch(() => ({}));
     const baseModel = resolveModel(savedModel);
     const apiKey = cleanKey(rawKey);
     if (!apiKey) {
@@ -924,9 +1003,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return;
     }
 
+    const log = keepLog ? { at: new Date().toISOString(), host: hostOf(sender.url), steps: [], after: '' } : null;
+
     let result;
     try {
-      result = await runGoal(apiKey, msg.notes ?? '', tabId, msg.postClicks ?? [], baseModel, autoUpgrade !== false);
+      result = await runGoal(apiKey, msg.notes ?? '', tabId, msg.postClicks ?? [], baseModel, autoUpgrade !== false, log);
     } catch (e) {
       // Anything unexpected still has to come back as an answer. Without this
       // the reply never arrives and the widget sits on "Answering…" forever.
@@ -934,6 +1015,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     } finally {
       // Always release the tab so the "being debugged" banner doesn't linger
       try { await detachDebugger(tabId); } catch (_) {}
+    }
+    // A run that never reached Claude has nothing worth keeping. Logging must
+    // never hold up or break the run, so a failed write is dropped.
+    if (log?.steps.length) {
+      const outcome = result?.success
+        ? (result.finished ?? (result.noAnswer ? 'no answer found' : 'done'))
+        : (result?.error ?? 'failed');
+      await changeLog(entries => [...entries, { ...log, outcome, flagged: false }]).catch(() => {});
     }
     sendResponse(result);
   })();

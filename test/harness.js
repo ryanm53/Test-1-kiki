@@ -37,7 +37,8 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
       get id() { return 'ext'; },
       lastError: null,
       onMessage: { addListener: f => { contentListener = f; } },
-      sendMessage: (msg, cb) => backgroundListener(msg, { tab: { id: 1 } }, res => cb && cb(res))
+      // Chrome tells the background which tab and page a message came from
+      sendMessage: (msg, cb) => backgroundListener(msg, { tab: { id: 1 }, url: w.location.href }, res => cb && cb(res))
     },
     storage: { local: {
       get: (k, cb) => cb({ ...store }),
@@ -99,7 +100,7 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
 
   vm.runInNewContext(fs.readFileSync(path.join(EXT, 'background.js'), 'utf8'), {
     chrome: bgChrome, fetch: fakeFetch, console: { log() {}, warn() {}, error() {} },
-    setTimeout, clearTimeout, Promise, JSON, Math, Date, Set, Map, Number, String, Array, Object, Error
+    setTimeout, clearTimeout, Promise, JSON, Math, Date, Set, Map, Number, String, Array, Object, Error, URL
   });
   if (beforeLoad) beforeLoad(w);
   new w.Function(fs.readFileSync(path.join(EXT, 'content.js'), 'utf8')).call(w);
@@ -107,7 +108,7 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
   const shadow = () => w.document.getElementById('__cap-host')?.shadowRoot;
   return {
     w, store, requests, requestHeaders, debuggerCalls, pageMessages,
-    send: msg => new Promise(res => backgroundListener(msg, { tab: { id: 1 } }, res)),
+    send: msg => new Promise(res => backgroundListener(msg, { tab: { id: 1 }, url: w.location.href }, res)),
     status: () => shadow()?.getElementById('statusText')?.textContent ?? '',
     isError: () => !!shadow()?.getElementById('statusText')?.classList.contains('err'),
     pressPlay: () => shadow().getElementById('go').dispatchEvent(new w.MouseEvent('click', { bubbles: true })),
