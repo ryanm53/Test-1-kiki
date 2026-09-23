@@ -53,7 +53,7 @@ const flatLayout = w => {
 
     check('SIMnet: carried out the step', clicks.includes('Formulas'), clicks.join(','));
     check('SIMnet: used the stronger model for it',
-      page.requests[0]?.model === 'claude-sonnet-5', page.requests[0]?.model);
+      page.requests[0]?.model === 'claude-opus-5-5', page.requests[0]?.model);
     check('SIMnet: finishes cleanly, no confidence-button error',
       /Task done/.test(final) && !page.isError(), final);
     check('SIMnet: does not start the task over', page.requests.length === 2, `${page.requests.length} calls`);

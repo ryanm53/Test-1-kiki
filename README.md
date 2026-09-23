@@ -147,7 +147,7 @@ Tap **More** for the rest:
 
 | Setting | What it does |
 |---|---|
-| **Model** | Which AI does the thinking. **Auto** *(default, recommended)* uses the cheapest model for most questions and a smarter one for SIMnet, worksheets and drag-and-drop — the bar shows **↑ Sonnet 5** when it steps up. Or pick one to use every time: **Haiku 4.5** is fastest and cheapest, **Sonnet 5** is noticeably smarter for about 2× the cost, **Opus 5** is the most capable at about 5× |
+| **Model** | Which AI does the thinking. **Auto** *(default, recommended)* uses the cheapest model for most questions and **Opus 5.5**, the most capable, for SIMnet, worksheets and drag-and-drop — the bar shows **↑ Opus 5.5** when it steps up. Or pick one to use every time: **Haiku 4.5** is fastest and cheapest, **Sonnet 5** is noticeably smarter for about 2× the cost, **Opus 5.5** is the most capable at about 4× |
 | **Notes** *(optional)* | Extra context to improve accuracy, e.g. *"This is financial accounting — use GAAP conventions."* Fine to leave blank |
 | **Troubleshooting** | *Check this page* — see [Troubleshooting](#troubleshooting). *Copy last prompt* copies exactly what was sent to Claude last time |
 
@@ -163,7 +163,7 @@ You're billed by Anthropic for what you use. With the default model:
 | 100 questions | **about 5 cents** |
 | $5 of credit | **around 10,000 questions** |
 
-Switching to Sonnet 5 costs about twice that, Opus 5 about five times. Even so, $5 lasts most people a very long time.
+On **Auto**, the harder questions (SIMnet, worksheets, drag-and-drop) go to Opus 5.5, which costs about four times as much — around a cent each. Picking Sonnet 5 for everything costs about twice the default, Opus 5.5 about four times. Even so, $5 lasts most people a very long time.
 
 ---
 
@@ -198,8 +198,11 @@ Refresh the page. If it's still missing, go to `chrome://extensions` and check P
 **Canvas: nothing happens, or "Couldn't find an answer here"**
 Canvas has two quiz systems. This works with **Classic Quizzes** — the address bar shows `/quizzes/` followed by `/take`. The newer *New Quizzes* (the address shows `/assignments/`, and the quiz sits in a box inside the page) isn't supported yet.
 
+**"Claude declined to answer this one"**
+Claude's safety filters occasionally turn down a question — mostly ones that look like advanced biology or computer-security research. It automatically tries a different model first; this message means that one declined too. Answer that question yourself and press play to carry on, or pick a different model under **More → Model**.
+
 **It picked a wrong answer**
-It isn't perfect, especially on harder material. Under **More**, try setting **Model** to Sonnet 5, or add course context in **Notes**.
+It isn't perfect, especially on harder material. Under **More**, try setting **Model** to Opus 5.5, or add course context in **Notes**.
 
 ---
 

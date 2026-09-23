@@ -90,9 +90,9 @@ test(async check => {
   const { page, $ } = open(SHEET, { storage: { mode: 'answer' }, reply: fill4 });
   check('model: Auto out of the box', $('model').value === 'auto', $('model').value);
   check('model: menu has Auto and the three models',
-    [...$('model').options].map(o => o.textContent).join() === 'Auto,Haiku 4.5,Sonnet 5,Opus 5');
+    [...$('model').options].map(o => o.textContent).join() === 'Auto,Haiku 4.5,Sonnet 5,Opus 5.5');
   page.pressPlay(); await settle(page);
-  check('model: Auto upgrades a worksheet', page.requests[0]?.model === 'claude-sonnet-5', page.requests[0]?.model);
+  check('model: Auto upgrades a worksheet to Opus 5.5', page.requests[0]?.model === 'claude-opus-5-5', page.requests[0]?.model);
 });
 
 test(async check => {

@@ -69,7 +69,7 @@ const run = async (html, opts) => {
     const v = id => doc.getElementById(id).value;
     check('accounting worksheet: every cell filled',
       v('w1') === '-500' && v('w2') === '500' && v('w3') === '1500' && v('w4') === '500', final);
-    check('accounting worksheet: upgraded model', page.requests[0]?.model === 'claude-sonnet-5',
+    check('accounting worksheet: upgraded model', page.requests[0]?.model === 'claude-opus-5-5',
       page.requests[0]?.model);
     check('accounting worksheet: cells labelled by column and row',
       JSON.stringify(page.requests[0]?.messages).includes('Deferred Revenue — Adjustment'));
@@ -91,7 +91,7 @@ const run = async (html, opts) => {
   });
 
   // ── Every model gets a request it accepts ──────────────────────────────
-  for (const model of ['claude-haiku-4-5', 'claude-sonnet-5', 'claude-opus-5']) test(async check => {
+  for (const model of ['claude-haiku-4-5', 'claude-sonnet-5', 'claude-opus-5-5']) test(async check => {
     const { page, final } = await run(MC, {
       storage: { ...ANSWER_ONLY, model, autoUpgrade: false },
       reply: b => as(b, { action: 'click', index: 0 }) });
@@ -106,6 +106,66 @@ const run = async (html, opts) => {
     check(`${model}: request in the shape it accepts`, ok && req.model === model,
       JSON.stringify({ model: req.model, last: last?.role, t: req.temperature, oc: !!req.output_config }));
     check(`${model}: answers`, page.w.document.getElementById('a').checked, final);
+  });
+
+  // ── Opus 5.5 specifics ─────────────────────────────────────────────────
+  test(async check => {
+    const { page, final } = await run(MC, {
+      storage: { ...ANSWER_ONLY, model: 'claude-opus-5-5', autoUpgrade: false },
+      reply: b => as(b, { action: 'click', index: 0 }) });
+    const req = page.requests[0] ?? {}, headers = page.requestHeaders[0] ?? {};
+    check('opus 5.5: never sends a thinking setting (it can\'t be turned off; sending one is a 400)',
+      req.thinking === undefined, JSON.stringify(req.thinking));
+    check('opus 5.5: effort set to low, not left on its medium default',
+      req.output_config?.effort === 'low', JSON.stringify(req.output_config?.effort));
+    check('opus 5.5: room for its thinking as well as the answer', req.max_tokens >= 8000, req.max_tokens);
+    check('opus 5.5: opts into fallback if a safety filter declines',
+      req.fallbacks === 'default' && headers['anthropic-beta'] === 'server-side-fallback-2026-07-01',
+      `${JSON.stringify(req.fallbacks)} / ${headers['anthropic-beta']}`);
+    check('opus 5.5: answers', page.w.document.getElementById('a').checked, final);
+  });
+  test(async check => {
+    const { page } = await run(MC, {
+      storage: { ...ANSWER_ONLY, model: 'claude-sonnet-5', autoUpgrade: false },
+      reply: b => as(b, { action: 'click', index: 0 }) });
+    check('other models: no fallback field or beta header',
+      page.requests[0]?.fallbacks === undefined && !page.requestHeaders[0]?.['anthropic-beta']);
+  });
+  test(async check => {
+    // What a fallback-served reply looks like: marker, thinking, then the answer
+    const { page, final } = await run(MC, {
+      storage: { ...ANSWER_ONLY, model: 'claude-opus-5-5', autoUpgrade: false },
+      reply: () => ({ json: { stop_reason: 'end_turn', content: [
+        { type: 'fallback', from: { model: 'claude-opus-5-5' }, to: { model: 'claude-opus-5' } },
+        { type: 'thinking', thinking: '' },
+        { type: 'text', text: '{"action":"click","index":0}' }
+      ] } }) });
+    check('a reply served by the fallback model still answers',
+      page.w.document.getElementById('a').checked && !page.isError(), final);
+  });
+  test(async check => {
+    const { page, final } = await run(MC, {
+      storage: { ...ANSWER_ONLY, model: 'claude-opus-5-5', autoUpgrade: false },
+      reply: () => ({ json: { stop_reason: 'refusal', content: [],
+                              stop_details: { type: 'refusal', category: 'bio' } } }) });
+    check('a declined question says so, not "invalid JSON"',
+      /declined to answer/.test(final) && page.isError(), final);
+    check('a declined question is not asked again', page.requests.length === 1, `${page.requests.length} calls`);
+    check('a declined question clicks nothing', !page.w.document.querySelector('input:checked'));
+  });
+  test(async check => {
+    const { final } = await run(MC, {
+      storage: { ...ANSWER_ONLY, model: 'claude-opus-5-5', autoUpgrade: false },
+      reply: () => ({ json: { stop_reason: 'max_tokens', content: [{ type: 'thinking', thinking: '' }] } }) });
+    check('running out of room says so, not "invalid JSON"', /ran out of room/.test(final), final);
+  });
+  test(async check => {
+    const { page } = await run(MC, {
+      storage: { ...ANSWER_ONLY, model: 'claude-opus-5', autoUpgrade: false },
+      reply: b => as(b, { action: 'click', index: 0 }) });
+    check('a saved Opus 5 carries over to Opus 5.5',
+      page.requests[0]?.model === 'claude-opus-5-5' && page.store.model === 'claude-opus-5-5',
+      `${page.requests[0]?.model} / ${page.store.model}`);
   });
 
   // ── Errors say what to do ──────────────────────────────────────────────

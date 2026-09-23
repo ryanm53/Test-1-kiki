@@ -994,7 +994,7 @@ function bgSend(msg, cb) {
   const MODEL_LIST = [
     { id: 'claude-haiku-4-5', label: 'Haiku 4.5', note: 'Fastest and cheapest — about $0.05 per 100 questions.' },
     { id: 'claude-sonnet-5',  label: 'Sonnet 5',  note: 'Noticeably better at the subject matter. Roughly 2× the cost.' },
-    { id: 'claude-opus-5',    label: 'Opus 5',    note: 'Most capable, and slower. Roughly 5× the cost.' }
+    { id: 'claude-opus-5-5',  label: 'Opus 5.5',  note: 'Most capable, and slower. Roughly 4× the cost.' }
   ];
   const DEFAULT_MODEL = 'claude-haiku-4-5';
 
@@ -1092,6 +1092,12 @@ function bgSend(msg, cb) {
 
       notes = s.notes ?? '';
       notesInput.value = notes;
+
+      // Opus 5.5 replaced Opus 5 in the menu; a saved Opus 5 carries over
+      if (s.model === 'claude-opus-5') {
+        s.model = 'claude-opus-5-5';
+        store.set({ model: s.model });
+      }
 
       // Auto is the old default pairing: cheapest model, upgrade switched on
       const named = MODEL_LIST.some(m => m.id === s.model) ? s.model : DEFAULT_MODEL;

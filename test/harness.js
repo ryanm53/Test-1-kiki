@@ -26,6 +26,7 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
 
   const store = { apiKey: 'sk-ant-test', autoContinue: true, ...storage };
   const requests = [];
+  const requestHeaders = [];  // headers sent with each of those, same order
   const debuggerCalls = [];   // trusted input sent through chrome.debugger
   const pageMessages = [];    // everything the background asked the page
   let contentListener = null, backgroundListener = null;
@@ -77,8 +78,14 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
   const fakeFetch = async (url, init) => {
     const body = JSON.parse(init.body);
     requests.push(body);
+    requestHeaders.push(init.headers ?? {});
     const out = typeof reply === 'function' ? reply(body, requests.length) : reply;
-    // An object reply is an HTTP failure: { status, body }
+    // { json } is a whole successful reply, for shapes a plain text answer
+    // can't express: a decline, a fallback, running out of room
+    if (out && typeof out === 'object' && out.json) {
+      return { ok: true, status: 200, json: async () => out.json, text: async () => JSON.stringify(out.json) };
+    }
+    // Any other object reply is an HTTP failure: { status, body }
     if (out && typeof out === 'object') {
       return { ok: false, status: out.status, json: async () => ({}), text: async () => out.body ?? '' };
     }
@@ -99,7 +106,7 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
 
   const shadow = () => w.document.getElementById('__cap-host')?.shadowRoot;
   return {
-    w, store, requests, debuggerCalls, pageMessages,
+    w, store, requests, requestHeaders, debuggerCalls, pageMessages,
     send: msg => new Promise(res => backgroundListener(msg, { tab: { id: 1 } }, res)),
     status: () => shadow()?.getElementById('statusText')?.textContent ?? '',
     isError: () => !!shadow()?.getElementById('statusText')?.classList.contains('err'),

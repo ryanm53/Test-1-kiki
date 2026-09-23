@@ -99,7 +99,7 @@ per model in the `MODELS` table:
 - **Prefill** (Haiku 4.5): the request ends with an assistant turn containing
   `{"action":"`, so the reply is already mid-JSON and cannot begin with prose. The
   prefix is stitched back on before parsing.
-- **Structured outputs** (Sonnet 5, Opus 5): prefill returns a 400 on these models, so
+- **Structured outputs** (Sonnet 5, Opus 5.5): prefill returns a 400 on these models, so
   they get `output_config.format` with a JSON schema instead, which constrains the whole
   response shape rather than just its opening.
 
@@ -107,10 +107,18 @@ Either way a bracket-counting fallback extracts the first complete `{...}` block
 trailing text appears after the closing brace, and the parsed action is validated against
 its required fields before execution.
 
-Two other per-model differences are handled in the same table: `temperature` is rejected
-on Sonnet 5 / Opus 5, and Opus 5 thinks by default — so it needs a larger `max_tokens`,
-runs at `effort: low`, and response parsing looks for the `text` block rather than
-`content[0]`, since thinking blocks come first.
+Other per-model differences are handled in the same table: `temperature` is rejected
+on Sonnet 5 / Opus 5.5, and Opus 5.5 always thinks — it can't be turned off, and the
+thinking counts against `max_tokens` — so it gets 8000 and `effort: low` (its default is
+`medium`). Response parsing looks for the `text` block rather than `content[0]`, since
+thinking blocks (and, after a fallback, a `fallback` marker block) come first.
+
+Opus 5.5's safety classifiers can decline a request: HTTP 200, `stop_reason: "refusal"`,
+no answer. It opts into server-side fallback (`fallbacks: "default"`, header
+`server-side-fallback-2026-07-01`), which re-runs a declined request on the model
+Anthropic recommends for that category. A refusal that survives the fallback is reported
+as such and not retried. A saved `claude-opus-5` (the model Opus 5.5 replaced in the
+menu) is read as `claude-opus-5-5`.
 
 ### Drag-and-drop via trusted input
 

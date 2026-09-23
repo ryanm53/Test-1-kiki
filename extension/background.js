@@ -1,23 +1,34 @@
 // Per-model request differences. Prefill (seeding the reply with `{"action":"`)
-// is rejected with a 400 on Sonnet 5 / Opus 5, as is `temperature`, so those
+// is rejected with a 400 on Sonnet 5 / Opus 5.5, as is `temperature`, so those
 // models get structured outputs instead — which constrains the response to the
 // schema at the API level and is a stronger guarantee than prefill anyway.
-// Opus 5 also thinks by default, so it needs room under max_tokens.
+//
+// Opus 5.5 always thinks — it can't be switched off — and the thinking counts
+// against max_tokens, so it gets far more room than the reply itself needs;
+// only what's used is billed. Its default effort is medium, so low is set
+// explicitly. Its safety filters can decline a question outright (biology is
+// among them), so it opts into Anthropic's server-side fallback, which re-runs
+// a declined question on the model recommended for that kind of decline.
 const MODELS = {
-  'claude-haiku-4-5': { label: 'Haiku 4.5', note: 'Fastest, cheapest', maxTokens: 200,  prefill: true, temperature: true },
-  'claude-sonnet-5':  { label: 'Sonnet 5',  note: 'Smarter, ~2x cost', maxTokens: 2048, effort: 'low' },
-  'claude-opus-5':    { label: 'Opus 5',    note: 'Smartest, ~5x cost', maxTokens: 2048, effort: 'low' }
+  'claude-haiku-4-5': { label: 'Haiku 4.5', maxTokens: 200,  prefill: true, temperature: true },
+  'claude-sonnet-5':  { label: 'Sonnet 5',  maxTokens: 2048, effort: 'low' },
+  'claude-opus-5-5':  { label: 'Opus 5.5',  maxTokens: 8000, effort: 'low', fallbacks: true }
 };
 const DEFAULT_MODEL = 'claude-haiku-4-5';
 
-// Worksheets and drag questions need real reasoning — multi-step arithmetic in
-// one case, spatial planning over several moves in the other — where the cheap
-// model tends to fumble. One tier up, only for those, so ordinary multiple
-// choice keeps costing what it costs.
+// Opus 5.5 replaced Opus 5 in the menu: newer, more capable, and cheaper per
+// token. A saved choice of Opus 5 carries over to it.
+const MODEL_ALIASES = { 'claude-opus-5': 'claude-opus-5-5' };
+const resolveModel = id => MODELS[id] ? id : MODELS[MODEL_ALIASES[id]] ? MODEL_ALIASES[id] : DEFAULT_MODEL;
+
+// Worksheets, drag questions and SIMnet need real reasoning — multi-step
+// arithmetic, spatial planning over several moves, a procedure — where the
+// cheap model tends to fumble. Those go to Opus 5.5; everything else keeps
+// costing what it costs.
 const UPGRADE_TO = {
-  'claude-haiku-4-5': 'claude-sonnet-5',
-  'claude-sonnet-5':  'claude-opus-5',
-  'claude-opus-5':    'claude-opus-5'
+  'claude-haiku-4-5': 'claude-opus-5-5',
+  'claude-sonnet-5':  'claude-opus-5-5',
+  'claude-opus-5-5':  'claude-opus-5-5'
 };
 
 function pickModel(baseModel, pageData, autoUpgrade) {
@@ -158,7 +169,7 @@ function apiErrorMessage(status, body) {
 
 // Overloads and dropped connections are common and temporary, so retry them
 // once before surfacing anything to the user.
-async function postToApi(apiKey, requestBody) {
+async function postToApi(apiKey, requestBody, betas = []) {
   let lastNetworkError = null;
 
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -170,7 +181,8 @@ async function postToApi(apiKey, requestBody) {
           'content-type': 'application/json',
           'x-api-key': apiKey,
           'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true'
+          'anthropic-dangerous-direct-browser-access': 'true',
+          ...(betas.length ? { 'anthropic-beta': betas.join(',') } : {})
         },
         body: JSON.stringify(requestBody)
       });
@@ -190,7 +202,7 @@ async function postToApi(apiKey, requestBody) {
 }
 
 async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = [], isCanvas = false) {
-  const model = MODELS[modelId] ? modelId : DEFAULT_MODEL;
+  const model = resolveModel(modelId);
   const cfg = MODELS[model];
 
   const elementList = elements
@@ -250,7 +262,16 @@ ${elementList || '(none found)'}`;
     if (cfg.effort) requestBody.output_config.effort = cfg.effort;
   }
 
-  const response = await postToApi(apiKey, requestBody);
+  // "default" lets Anthropic pick the fallback by the reason for the decline,
+  // so there's no fallback model here to keep up to date. Its beta header is
+  // this exact value; the older array form uses a different one.
+  const betas = [];
+  if (cfg.fallbacks) {
+    requestBody.fallbacks = 'default';
+    betas.push('server-side-fallback-2026-07-01');
+  }
+
+  const response = await postToApi(apiKey, requestBody, betas);
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
@@ -263,7 +284,20 @@ ${elementList || '(none found)'}`;
   } catch (_) {
     throw new Error('Claude sent back a reply that could not be read. Try again.');
   }
-  // Find the text block specifically — thinking models emit other block types first
+  // A decline arrives as a normal reply with stop_reason "refusal" — after any
+  // fallback has also declined — and carries no answer. Reading on would
+  // report it as garbled JSON; and trying the same question again would only
+  // be declined again.
+  if (data.stop_reason === 'refusal') {
+    const err = new Error(
+      "Claude declined to answer this one. Do it yourself, or pick a different model under More → Model."
+    );
+    err.final = true;
+    throw err;
+  }
+
+  // Find the text block specifically — thinking models emit other block types
+  // first, and a fallback adds a marker block of its own
   const text = data.content?.find(b => b.type === 'text')?.text ?? '';
   // Prefill responses are only the completion, so restore the seeded prefix
   const cleaned = (cfg.prefill ? '{"action":"' + text : text).trim();
@@ -290,6 +324,9 @@ ${elementList || '(none found)'}`;
 
   const parsed = extractJson(cleaned);
   if (!parsed) {
+    if (data.stop_reason === 'max_tokens') {
+      throw new Error('Claude ran out of room before answering. Try again, or pick a different model under More → Model.');
+    }
     throw new Error(`Claude returned invalid JSON: ${cleaned.slice(0, 300)}`);
   }
 
@@ -686,7 +723,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         lastError = result?.error ?? 'Execution returned failure without an error message';
       } catch (e) {
         lastError = e.message;
-        if (e.message.startsWith('Rate limit')) {
+        if (e.message.startsWith('Rate limit') || e.final) {
           return { success: false, error: lastError };
         }
       }
@@ -834,7 +871,7 @@ async function checkPage(tabId) {
   }
 
   lines.push(await checkKey(cleanKey(apiKey)));
-  const base = MODELS[model] ? model : DEFAULT_MODEL;
+  const base = resolveModel(model);
   const auto = autoUpgrade !== false && base === DEFAULT_MODEL;
   lines.push({ info: true, text: auto
     ? `Model: Auto — ${MODELS[base].label}, a smarter one for hard questions`
@@ -873,7 +910,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     const { apiKey: rawKey, model: savedModel, autoUpgrade } =
       await chrome.storage.local.get(['apiKey', 'model', 'autoUpgrade']).catch(() => ({}));
-    const baseModel = MODELS[savedModel] ? savedModel : DEFAULT_MODEL;
+    const baseModel = resolveModel(savedModel);
     const apiKey = cleanKey(rawKey);
     if (!apiKey) {
       sendResponse({ success: false, error: 'No API key saved. Enter it in the extension popup and click Save.' });
