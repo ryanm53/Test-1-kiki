@@ -11,6 +11,8 @@ const SUITES = [
   ['test-load.js',       'content.js loads and the control bar mounts'],
   ['test-resilience.js', 'survives re-injection, extension reload, body wipe'],
   ['test-drag.js',       'the control bar can be dragged and stays put'],
+  ['test-platforms.js',  'SIMnet, Connect and Canvas on the same default settings'],
+  ['test-canvas.js',     'Canvas quizzes: whole page, one at a time, never submits'],
   ['test-labels.js',     'accounting worksheet: column/row labels'],
   ['test-aria.js',       'the same, on an ARIA grid instead of a table'],
   ['test-sheet.js',      'spreadsheet <td> cells are recognised'],

@@ -90,6 +90,18 @@ it was done is what gets graded.
 Click a ribbon tab first when the control you need is on another tab.
 Reply {"action":"none"} once the task described is complete.`;
 
+// Canvas shows a whole quiz on one page, so one reply has to cover every
+// question rather than the single one the base prompt assumes.
+const CANVAS_HINT = `
+
+This page holds SEVERAL questions. Each choice is tagged with the question it
+belongs to. Answer ALL of them in ONE reply using clickMany: exactly one choice
+for each single-answer question, and every correct choice for a "select all"
+question. Choices marked (selected) are already ticked — leave them out.
+If there are typed blanks as well, answer the choices first; you will get a
+second turn for the blanks, using fill.
+Reply {"action":"none"} once every question has an answer.`;
+
 // A short account of what has already been done this question. Without it each
 // step is decided from a bare screenshot of the DOM, with no way to tell step
 // one of a procedure from step four — so steps get repeated or skipped.
@@ -177,7 +189,7 @@ async function postToApi(apiKey, requestBody) {
   );
 }
 
-async function callClaude(apiKey, notes, pageText, elements, refTexts = [], modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = []) {
+async function callClaude(apiKey, notes, pageText, elements, refTexts = [], modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = [], isCanvas = false) {
   const model = MODELS[modelId] ? modelId : DEFAULT_MODEL;
   const cfg = MODELS[model];
 
@@ -208,14 +220,14 @@ async function callClaude(apiKey, notes, pageText, elements, refTexts = [], mode
     : '';
 
   const userContent = `${notesSection}${historySection}Page text:
-${pageText.slice(0, isWorksheet ? 3000 : isSimnet ? 1500 : 800)}${refSection}
+${pageText.slice(0, isWorksheet || isCanvas ? 3000 : isSimnet ? 1500 : 800)}${refSection}
 
 Elements (click by index):
 ${elementList || '(none found)'}`;
 
   // Kept so the exact prompt can be inspected from the widget without opening
   // the service worker console.
-  const mode = isSimnet ? '  (simnet mode)' : isWorksheet ? '  (worksheet mode)' : '';
+  const mode = isSimnet ? '  (simnet mode)' : isWorksheet ? '  (worksheet mode)' : isCanvas ? '  (canvas mode)' : '';
   const debugText = `model: ${model}${mode}\n\n${userContent}`;
   console.log(`[PageAgent]\n${debugText}`);
   chrome.storage.local.set({ lastPrompt: debugText });
@@ -224,8 +236,11 @@ ${elementList || '(none found)'}`;
     model,
     // A fills array covering a whole worksheet needs far more room than a
     // single index does
-    max_tokens: isWorksheet ? Math.max(cfg.maxTokens, 1500) : cfg.maxTokens,
-    system: SYSTEM_PROMPT + (isSimnet ? SIMNET_HINT : isWorksheet ? WORKSHEET_HINT : ''),
+    // One index per question adds up on a long quiz
+    max_tokens: isWorksheet ? Math.max(cfg.maxTokens, 1500)
+              : isCanvas    ? Math.max(cfg.maxTokens, 600)
+              : cfg.maxTokens,
+    system: SYSTEM_PROMPT + (isSimnet ? SIMNET_HINT : isWorksheet ? WORKSHEET_HINT : isCanvas ? CANVAS_HINT : ''),
     messages: [{ role: 'user', content: userContent }]
   };
 
@@ -549,6 +564,19 @@ const MAX_STEPS_DRAG   = 8;
 // being torn down before it finishes.
 const MAX_STEPS_SIMNET = 6;
 
+// True when every question on the page has at least one choice ticked.
+// Pages with typed blanks don't qualify: an empty blank carries no flag, so
+// whether it's answered can't be told from here.
+function everyQuestionAnswered(elements) {
+  const byQuestion = new Map();
+  for (const e of elements) {
+    if (e.type !== 'radio' && e.type !== 'checkbox') return false;
+    const q = e.question ?? '';
+    byQuestion.set(q, byQuestion.get(q) || !!e.selected);
+  }
+  return byQuestion.size > 0 && [...byQuestion.values()].every(Boolean);
+}
+
 // Tells the control bar the run is still moving. Fire and forget: the bar
 // lives in the top frame, may not exist at all (popup-driven runs), and a
 // failure to report progress must never stop the run itself.
@@ -571,6 +599,8 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
 
   let budget = MAX_STEPS_SIMPLE;
   let completed = 0;
+  let isCanvas = false;
+  let isSimnet = false;
   const history = [];   // what has been done so far on this question
 
   for (let step = 0; step < budget; step++) {
@@ -595,7 +625,13 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
         // arguments, confirm — so it needs room for several steps. Set from the
         // scrape rather than from the action, since the page says what it is
         // before the first move is chosen.
-        if (pageData.isSimnet) budget = MAX_STEPS_SIMNET;
+        if (pageData.isSimnet) { isSimnet = true; budget = MAX_STEPS_SIMNET; }
+        // Choices in one reply, typed blanks in a second — only when there
+        // are blanks, so a plain multiple-choice page costs one call.
+        if (pageData.isCanvas) {
+          isCanvas = true;
+          budget = Math.max(budget, pageData.hasBlanks ? 2 : 1);
+        }
 
         // The question prose often lives in the outer page while the answer
         // grid is inside the iframe, so pull both or the amounts to work from
@@ -609,7 +645,7 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
         }
 
         usedModel = pickModel(baseModel, pageData, autoUpgrade);
-        const action = await callClaude(apiKey, notes, pageText, pageData.elements, refTexts, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history);
+        const action = await callClaude(apiKey, notes, pageText, pageData.elements, refTexts, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas);
 
         const bad = badIndexes(action, pageData.elements.length);
         if (bad.length) {
@@ -619,7 +655,10 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
         if (action.action === 'none') {
           // Before any action: nothing on screen is answerable.
           // After a move: the drag arrangement is complete.
-          if (completed === 0) return { success: true, action, noAnswer: true, usedModel };
+          // Except on a Canvas page whose questions all have an answer already
+          // — arriving back on one, say — where "none" means move on.
+          const alreadyDone = isCanvas && everyQuestionAnswered(pageData.elements);
+          if (completed === 0 && !alreadyDone) return { success: true, action, noAnswer: true, usedModel };
           finished = true;
           stepDone = true;
           break;
@@ -694,14 +733,45 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
     if (finished) break;
   }
 
+  // SIMnet has no confidence rating or Next button of the Connect kind, and
+  // going round again would start fiddling with a task that's already done.
+  if (isSimnet) {
+    return { success: true, usedModel, finished: 'Task done. Check it, then move to the next one.' };
+  }
+
+  // Canvas: no confidence rating, and a Next button only in one-question-at-
+  // a-time quizzes. When there is no Next, the page is answered and the quiz
+  // is waiting to be handed in — which is the student's decision, so stop
+  // here rather than going round again. Also stop in answer-only mode.
+  if (isCanvas) {
+    const done = { success: true, usedModel, finished: 'Answered. Check it over, then submit it yourself.' };
+    if (!postClicks.length) return done;
+    if (cancelledRuns.has(tabId)) {
+      cancelledRuns.delete(tabId);
+      return { success: false, error: 'Stopped.', usedModel };
+    }
+    const next = await sendToTab(tabId, {
+      type: 'CLICK_TEXT',
+      candidates: [{ selector: 'button.next-question' }],
+      timeoutMs: 1500
+    }, frameId).catch(() => null);
+    return next?.success ? { success: true, message: 'Done', usedModel } : done;
+  }
+
   // Direct clicks (confidence button, next button) — no Claude needed
   for (const click of postClicks) {
     if (cancelledRuns.has(tabId)) {
       cancelledRuns.delete(tabId);
       return { success: false, error: 'Stopped.', usedModel };
     }
-    const result = await sendToTab(tabId, { type: 'CLICK_TEXT', candidates: click.candidates }, frameId);
+    const result = await sendToTab(tabId, {
+      type: 'CLICK_TEXT',
+      candidates: click.candidates,
+      // An optional button that isn't there shouldn't cost the full wait
+      ...(click.optional ? { timeoutMs: 2500 } : {})
+    }, frameId);
     if (!result?.success) {
+      if (click.optional) continue;
       return { success: false, error: `Could not find "${click.label}" button: ${result?.error ?? ''}` };
     }
     await new Promise(r => setTimeout(r, 400));

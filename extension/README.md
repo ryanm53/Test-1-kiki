@@ -122,6 +122,29 @@ drag moves are driven through that, using `chrome.debugger` +
 lazily — only once a drag actually starts — so ordinary questions never trigger the
 "being debugged" banner, and it always detaches in a `finally`.
 
+### Per-platform behaviour
+
+`scrape()` identifies the page and the background adapts, so no setting has to
+change between sites.
+
+- **Connect** — the ordinary path. After answering, the preset's post-clicks run:
+  High Confidence (optional — skipped when absent, e.g. worksheets) then Next.
+- **SIMnet** — detected by its grid (`td.grdbdy-cell`). Up to six steps per task,
+  then the run ends with a note: no Connect post-clicks, and no second pass that
+  would start editing a finished task.
+- **Canvas Classic Quizzes** — detected by `#questions .display_question`. Every
+  question on the page is scraped regardless of scroll position, each choice
+  tagged with its own `.question_text` (the fieldset legend is a generic
+  screen-reader "Answers" and useless for this). One `clickMany` answers the
+  page; a second step only if there are typed blanks. Afterwards it clicks
+  `button.next-question` if one exists, and otherwise stops. It never offers the
+  model Submit Quiz. One-at-a-time Next is a full page load, so the loop is
+  carried across it by a short-lived note in the tab's `sessionStorage`,
+  refreshed by each step's heartbeat and deleted by anything that ends a run.
+
+Nothing starts a run except the play button or that note. (An earlier hook
+auto-ran on any `pushState` navigation, on any site — removed.)
+
 ### Token usage
 
 The request is kept small: a short system prompt, page text truncated to 800

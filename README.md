@@ -2,7 +2,9 @@
 
 A Chrome extension that reads the question on screen and answers it for you, then moves to the next one.
 
-Built for McGraw Hill Connect / Recharge. It handles multiple choice, "select all that apply", fill-in-the-blank, and drag-and-drop ordering questions.
+Works on **McGraw Hill Connect**, **SIMnet** (McGraw Hill's practice Excel), and **Canvas quizzes**. It handles multiple choice, true/false, "select all that apply", fill-in-the-blank, accounting worksheets, and drag-and-drop ordering questions.
+
+It works out which site it's on by itself — you can go from a SIMnet assignment to a Canvas quiz to Connect without changing any settings.
 
 ---
 
@@ -99,9 +101,13 @@ If yours is short, or starts with `apikey_`, it's the wrong one. The real key is
 
 ## Step 5 — Use it
 
-Press the **play button ▶**.
+Press the **play button ▶**. What happens next depends on the site:
 
-It reads the question, picks an answer, clicks it, then clicks **High Confidence** and **Next Question**, and keeps going through the whole quiz on its own.
+| Site | What it does |
+|---|---|
+| **Connect** | Answers, clicks **High Confidence** and **Next Question**, and keeps going through the whole assignment on its own |
+| **Canvas** | Answers **every question on the page** in one go. If the quiz shows one question at a time, it clicks **Next** and keeps going. **It never presses Submit Quiz** — when it's done it says *"Answered. Check it over, then submit it yourself."* |
+| **SIMnet** | Does the task on screen (switching ribbon tabs, opening dialogs and so on), then stops and says *"Task done."* Go to the next task yourself and press play again |
 
 Press the same button again — it's now a **stop button ⏸** — to halt at any point.
 
@@ -117,7 +123,10 @@ The bar shows you what's happening as it goes:
 | **Ready** | Idle, waiting for you |
 | **Answering… · 7** | Working on a question. It's done 7 so far |
 | **Next question… · 7** | Waiting for the next question to load |
+| **Answering… · step 2/6** | Working through a task that takes several steps (SIMnet) |
 | **Paused · 7** | Stopped, 7 answered |
+| **Answered. Check it over, then submit it yourself.** | Canvas page done. Look it over and hand it in when you're happy |
+| **Task done. Check it, then move to the next one.** | SIMnet task done |
 | **Rate limited · 45s** | Went too fast for the API. It waits and resumes automatically — just leave it |
 | *Amber text* | Something went wrong. The message explains what |
 
@@ -129,10 +138,10 @@ Click the **gear ⚙** to open these.
 
 | Setting | What it does |
 |---|---|
-| **Mode** | *Answer, confidence, next* does the full flow. *Answer only* stops after picking the answer, so you click through yourself |
+| **Mode** | *Answer, confidence, next* does the full flow — leave it on this everywhere; sites without a confidence rating (Canvas, SIMnet) just skip that part. *Answer only* stops after picking the answer, so you click through yourself |
 | **Auto-continue** | On: works through the whole quiz. Off: does one question per press of play |
 | **Model** | Which AI does the thinking. **Haiku 4.5** is the default — fastest and cheapest. **Sonnet 5** is noticeably smarter for about 2× the cost. **Opus 5** is the most capable, about 5× |
-| **Upgrade on hard questions** | On by default. Multi-blank worksheets and drag-and-drop questions need real reasoning, so those automatically use one tier up while everything else stays on your pick. When it upgrades, the status bar shows **↑ Sonnet 5** so you can see it happen. Turn this off to always use your chosen model |
+| **Upgrade on hard questions** | On by default. SIMnet tasks, multi-blank worksheets and drag-and-drop questions need real reasoning, so those automatically use one tier up while everything else stays on your pick. When it upgrades, the status bar shows **↑ Sonnet 5** so you can see it happen. Turn this off to always use your chosen model |
 | **Notes** *(optional)* | Extra context to improve accuracy, e.g. *"This is financial accounting — use GAAP conventions."* Fine to leave blank |
 | **API Key** | Your key from Step 3 |
 | **Reference Tabs** | Paste the address of another open tab (your textbook, notes, a study guide) and it reads that as source material when answering |
@@ -172,6 +181,9 @@ Check that your API key is saved (gear → API Key), and that your account actua
 
 **The bar disappeared**
 Refresh the page. If it's still missing, go to `chrome://extensions` and check Page Agent is still enabled — and that you haven't moved or deleted the folder from Step 1.
+
+**Canvas: nothing happens, or "Couldn't find an answer here"**
+Canvas has two quiz systems. This works with **Classic Quizzes** — the address bar shows `/quizzes/` followed by `/take`. The newer *New Quizzes* (the address shows `/assignments/`, and the quiz sits in a box inside the page) isn't supported yet.
 
 **It picked a wrong answer**
 It isn't perfect, especially on harder material. Try switching the **Model** to Sonnet 5, or add course context in **Notes**.

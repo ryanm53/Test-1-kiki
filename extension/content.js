@@ -214,7 +214,12 @@ function describeEl(el) {
     // plenty of ordinary elements carry an "active" or "is-selected" class for
     // styling, and flagging those would tell Claude an answer had already been
     // chosen when it had not.
-    selected: (cellAddress(el) && /select|active|focused/i.test(el.className)) || undefined
+    selected: (cellAddress(el) && /select|active|focused/i.test(el.className))
+      // A ticked radio or checkbox is the real state, not a styling guess, and
+      // knowing it stops a second pass from re-answering (and so un-ticking)
+      // a select-all-that-apply choice.
+      || (/^(radio|checkbox)$/.test(el.getAttribute('type') || '') && el.checked === true)
+      || undefined
   };
 }
 
@@ -280,6 +285,52 @@ function scrape() {
       text: (root.innerText ?? '').slice(0, 5000),
       elements: _lastElements.map(describeEl),
       isSimnet: true,      // multi-step procedure, worth the stronger model
+      isWorksheet: false,
+      isDrag: false
+    };
+  }
+
+  // Canvas Classic Quizzes put every question on one page by default, usually
+  // far taller than the window. Each choice's wording is in a <label> beside
+  // the input and the question itself sits in .question_text. The ordinary
+  // path below only sees what's on screen and tags every choice with the
+  // screen-reader legend ("Answers"), so choices lose track of which question
+  // they belong to. Take every question on the page, and name each choice's
+  // question explicitly.
+  const canvasQs = Array.from(document.querySelectorAll('#questions .display_question'))
+    .filter(isRendered);
+  if (canvasQs.length) {
+    const questionOf = q => {
+      const name = q.querySelector('.question_name')?.innerText?.trim() ?? '';
+      const text = (q.querySelector('.question_text')?.innerText ?? '').trim();
+      return name ? `${name}: ${text}` : text;
+    };
+
+    const els = [], owners = [];
+    for (const q of canvasQs) {
+      // Not filtered by visibility: themes restyle the native radio, and a
+      // hidden input still answers the question when clicked.
+      const inputs = q.querySelectorAll(
+        'input[type="radio"], input[type="checkbox"], input[type="text"], input[type="number"], select'
+      );
+      for (const el of inputs) { els.push(el); owners.push(q); }
+    }
+
+    // Deliberately nothing else. Next is clicked by the background once the
+    // page is answered, and Submit Quiz is final — handing in the quiz is the
+    // student's call, never the model's.
+    _lastElements = els.slice(0, 150);
+    const described = _lastElements.map((el, i) => ({
+      ...describeEl(el),
+      question: questionOf(owners[i]).slice(0, 200)
+    }));
+
+    return {
+      text: canvasQs.map(questionOf).join('\n\n').slice(0, 5000),
+      elements: described,
+      isCanvas: true,
+      // Typed answers go in a second step after the choices are clicked
+      hasBlanks: _lastElements.some(el => el.tagName === 'SELECT' || /^(text|number)$/.test(el.type)),
       isWorksheet: false,
       isDrag: false
     };
@@ -867,16 +918,20 @@ function bgSend(msg, cb) {
   let errorMsg  = '';
   let rateSecs  = 0;
   let stepNote  = '';      // "step 2/6" during a multi-step task
+  let infoMsg   = '';      // a finished run's closing note — not an error
 
   let runToken = 0;        // bumped on stop so in-flight replies are ignored
   let pollTimer = null, rateTimer = null, watchdog = null;
-  let lastRunAt = 0;
 
   const PRESETS = [
     {
       label: 'Answer, confidence, next',
       postClicks: [
-        { label: 'High Confidence', candidates: [{ selector: '[data-automation-id="confidence-buttons--high_confidence"]' }, { ariaLabel: 'High Confidence' }] },
+        // Optional: Connect's worksheets and other sites have no confidence
+        // rating, and should go straight to Next rather than stop with an error.
+        // Where Connect does need it, Next stays disabled without it — so a
+        // genuinely missed click still surfaces, just one step later.
+        { label: 'High Confidence', optional: true, candidates: [{ selector: '[data-automation-id="confidence-buttons--high_confidence"]' }, { ariaLabel: 'High Confidence' }] },
         { label: 'Next Question',   candidates: [{ selector: '.next-button' }, { text: 'Next Question' }, { text: 'Next' }] }
       ]
     },
@@ -921,6 +976,7 @@ function bgSend(msg, cb) {
 
     let cls = 'idle', text = 'Ready';
     if (errorMsg)        { cls = 'err';  text = errorMsg; }
+    else if (infoMsg && !isRunning && !waiting) { cls = 'idle'; text = infoMsg; }
     else if (rateSecs)   { cls = 'hold'; text = `Rate limited · ${rateSecs}s`; }
     else if (paused)     { cls = 'hold'; text = 'Paused'; }
     else if (isRunning)  { cls = 'run';  text = 'Answering…' + stepNote; }
@@ -938,7 +994,29 @@ function bgSend(msg, cb) {
     statusWrap.classList.toggle('err', !!errorMsg);
   }
 
+  // Some quizzes load a whole new page for every question — Canvas's one-at-a-
+  // time Next does — and that restarts this script with the loop forgotten.
+  // A note in the tab's sessionStorage carries it across. Only a fresh note
+  // counts, and anything that ends a run deletes it, so a page opened later
+  // never starts clicking by itself.
+  const RESUME_KEY = '__pageAgentResume';
+  const RESUME_WINDOW_MS = 60000;
+  function markResume() {
+    try { sessionStorage.setItem(RESUME_KEY, JSON.stringify({ at: Date.now(), answered })); } catch (_) {}
+  }
+  function clearResume() {
+    try { sessionStorage.removeItem(RESUME_KEY); } catch (_) {}
+  }
+  function takeResume() {
+    try {
+      const v = JSON.parse(sessionStorage.getItem(RESUME_KEY) || 'null');
+      sessionStorage.removeItem(RESUME_KEY);
+      return v && Date.now() - v.at < RESUME_WINDOW_MS ? v : null;
+    } catch (_) { return null; }
+  }
+
   function fail(msg) {
+    clearResume();
     errorMsg = msg;
     isRunning = waiting = false;
     render();
@@ -976,6 +1054,14 @@ function bgSend(msg, cb) {
 
       renderRefs();
       render();
+
+      // Arrived here by the loop's own Next click: carry on. The previous
+      // page's run finished (it clicked Next), so count it.
+      const resume = takeResume();
+      if (resume && hasKey && autoContinue) {
+        answered = (Number(resume.answered) || 0) + 1;
+        setTimeout(() => { if (!isRunning && !waiting) triggerRun(); }, 1200);
+      }
     }
   );
 
@@ -1177,6 +1263,7 @@ function bgSend(msg, cb) {
     if (isRunning || waiting || rateSecs > 0) { stopAll(); return; }
     if (!extensionAlive()) { fail(RELOAD_MSG); return; }
     errorMsg = '';
+    infoMsg = '';
     paused = false;
     answered = 0;
     lastModel = '';
@@ -1189,6 +1276,7 @@ function bgSend(msg, cb) {
     // The background runs a multi-step loop of its own; without telling it to
     // stop, this would only quieten the widget while it kept on clicking.
     bgSend({ type: 'STOP_RUN' });
+    clearResume();
     clearTimeout(pollTimer);
     clearTimeout(rateTimer);
     clearTimeout(watchdog);
@@ -1219,8 +1307,9 @@ function bgSend(msg, cb) {
     isRunning = true;
     waiting = false;
     errorMsg = '';
-    lastRunAt = Date.now();
     stepNote = '';
+    infoMsg = '';
+    if (autoContinue) markResume(); else clearResume();
     render();
 
     armWatchdog(token);
@@ -1253,6 +1342,15 @@ function bgSend(msg, cb) {
 
         lastModel = result.usedModel ?? '';
         answered++;
+
+        if (result.finished) {
+          // The page is answered and the rest is up to the student
+          clearResume();
+          infoMsg = result.finished;
+          render();
+          return;
+        }
+
         if (!autoContinue) { render(); return; }
 
         // Wait for the page to actually change before the next question
@@ -1297,34 +1395,13 @@ function bgSend(msg, cb) {
   progressHook = (step, budget) => {
     if (!isRunning) return;
     armWatchdog(runToken);
+    if (autoContinue) markResume();
     // A one-step question is the normal case and needs no commentary; a
     // procedure that takes several says where it has got to.
     stepNote = budget > 1 ? ` · step ${step}/${budget}` : '';
     render();
   };
 
-  // ── Auto-run on SPA navigation ─────────────────────────────────────────────
-  let lastAutoUrl = '', autoTimer = null;
-  const COOLDOWN = 5000;
-
-  function scheduleAutoRun() {
-    clearTimeout(autoTimer);
-    autoTimer = setTimeout(() => {
-      if (isRunning || waiting || paused || !autoContinue || !hasKey) return;
-      const url = location.href;
-      if (url === lastAutoUrl) return;
-      if (Date.now() - lastRunAt < COOLDOWN) return;
-      lastAutoUrl = url;
-      triggerRun();
-    }, 700);
-  }
-
-  window.addEventListener('popstate', scheduleAutoRun);
-  window.addEventListener('hashchange', scheduleAutoRun);
-  for (const m of ['pushState', 'replaceState']) {
-    const orig = history[m].bind(history);
-    history[m] = (...a) => { orig(...a); scheduleAutoRun(); };
-  }
 
   render();
   document.body.appendChild(host);
@@ -1452,7 +1529,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     // Poll until the button appears and is not disabled (up to 5s)
     (async () => {
       const candidates = msg.candidates || [];
-      const deadline = Date.now() + 5000;
+      // Optional buttons (Canvas's Next, absent on the last page) shouldn't
+      // cost the full wait before we conclude they aren't there.
+      const deadline = Date.now() + (Number(msg.timeoutMs) > 0 ? Number(msg.timeoutMs) : 5000);
 
       function findIt() {
         const all = Array.from(document.querySelectorAll('button, [role="button"], a'));
