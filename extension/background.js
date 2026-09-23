@@ -37,10 +37,15 @@ function pickModel(baseModel, pageData, autoUpgrade) {
   return hard ? (UPGRADE_TO[baseModel] ?? baseModel) : baseModel;
 }
 
+// Keys a SIMnet step may press. Kept in step with KEY_CODES in content.js.
+const KEY_NAMES = ['Enter', 'Escape', 'Tab', 'Delete', 'Backspace', 'F2', 'F4',
+                   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
+const CELL_REF = /^[A-Z]{1,3}[1-9]\d{0,5}$/;
+
 const ACTION_SCHEMA = {
   type: 'object',
   properties: {
-    action:  { type: 'string', enum: ['click', 'clickMany', 'fill', 'dragMove', 'doubleClick', 'rightClick', 'type', 'key', 'none'] },
+    action:  { type: 'string', enum: ['click', 'clickMany', 'fill', 'dragMove', 'doubleClick', 'rightClick', 'type', 'key', 'selectRange', 'none'] },
     index:   { type: 'integer' },
     indexes: { type: 'array', items: { type: 'integer' } },
     fills:   {
@@ -54,7 +59,12 @@ const ACTION_SCHEMA = {
     },
     dir:     { type: 'string', enum: ['up', 'down', 'left', 'right'] },
     text:    { type: 'string' },
-    key:     { type: 'string', enum: ['Enter', 'Escape', 'Tab'] },
+    key:     { type: 'string', enum: KEY_NAMES },
+    cell:    { type: 'string' },
+    from:    { type: 'string' },
+    to:      { type: 'string' },
+    shift:   { type: 'boolean' },
+    ctrl:    { type: 'boolean' },
     steps:   { type: 'integer' }
   },
   required: ['action'],
@@ -111,8 +121,23 @@ Besides click, Excel needs these:
 {"action":"type","text":"...","index":N} — type into element N (a box, a cell).
   Leave out index to type into whatever is already being edited, such as the
   name box that appears after double-clicking a sheet tab.
-{"action":"key","key":"Enter"} — press Enter, Escape or Tab, e.g. to confirm
-  what you typed.
+{"action":"key","key":"Enter"} — press a key: Enter, Escape, Tab, Delete,
+  Backspace, F2 (edit the cell), F4, ArrowUp/Down/Left/Right, Home, End. Add
+  "ctrl":true or "shift":true for a shortcut such as Ctrl+Home.
+{"action":"selectRange","from":"A4","to":"G9"} — select a block of cells.
+
+Any cell can be named directly: use "cell":"B7" in place of "index" with
+click, doubleClick, rightClick or type — listed or not. Add "shift":true to a
+click to extend a selection, or "ctrl":true to add to it (e.g. ctrl-click a
+second sheet tab to group the sheets).
+To select whole columns or rows, type the reference (C:C, or 5:7) into the
+Name Box — the box showing the current cell, like "G1" — and press Enter.
+Formatting applies to what is selected: select the cells first, then use the
+ribbon or dialog.
+A dropdown list shows its choices as options=[...]; pick one with
+{"action":"fill","fills":[{"index":N,"value":"<the option's text>"}]}.
+Marks after an item: (on) a toggle that is on, like Bold; (selected) the
+current tab or item; (open) an expanded menu; (disabled) not usable yet.
 
 Reply {"action":"none"} only once the page shows the task is complete — the
 new name on the tab, the value in the cell, the dialog closed. If it doesn't
@@ -141,7 +166,8 @@ function badIndexes(action, count) {
   const check = i => {
     if (!Number.isInteger(i) || i < 0 || i >= count) out.push(String(i));
   };
-  if (['click', 'dragMove', 'doubleClick', 'rightClick'].includes(action.action)) check(action.index);
+  if (action.action === 'dragMove') check(action.index);
+  if (['click', 'doubleClick', 'rightClick'].includes(action.action) && action.cell === undefined) check(action.index);
   if (action.action === 'type' && action.index !== undefined) check(action.index);
   if (action.action === 'clickMany') (action.indexes ?? []).forEach(check);
   if (action.action === 'fill') (action.fills ?? []).forEach(f => check(f?.index));
@@ -149,20 +175,23 @@ function badIndexes(action, count) {
 }
 
 function actionSummary(action, elements) {
+  const mods = (action.ctrl ? 'ctrl+' : '') + (action.shift ? 'shift+' : '');
   const name = i => {
+    if (action.cell && i === action.index) return `cell ${action.cell}`;
     const e = elements[i];
     if (!e) return `[${i}]`;
     return `"${(e.text || e.cell || e.tag || '').slice(0, 40)}"`;
   };
   switch (action.action) {
-    case 'click':     return `clicked ${name(action.index)}`;
+    case 'click':     return `${mods}clicked ${name(action.index)}`;
     case 'clickMany': return `selected ${(action.indexes ?? []).map(name).join(', ')}`;
     case 'fill':      return (action.fills ?? []).map(f => `typed "${f.value}" into ${name(f.index)}`).join('; ');
     case 'dragMove':  return `moved ${name(action.index)} ${action.dir} x${action.steps ?? 1}`;
     case 'doubleClick': return `double-clicked ${name(action.index)}`;
     case 'rightClick':  return `right-clicked ${name(action.index)}`;
-    case 'type':      return `typed "${action.text}"${action.index !== undefined ? ` into ${name(action.index)}` : ''}`;
-    case 'key':       return `pressed ${action.key}`;
+    case 'type':      return `typed "${action.text}"${action.cell || action.index !== undefined ? ` into ${name(action.index)}` : ''}`;
+    case 'key':       return `pressed ${(action.ctrl ? 'Ctrl+' : '') + (action.shift ? 'Shift+' : '')}${action.key}`;
+    case 'selectRange': return `selected ${action.from}:${action.to}`;
     default:          return action.action;
   }
 }
@@ -234,6 +263,8 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
       if (el.text) parts.push(`"${el.text.slice(0, 80)}"`);
       if (el.placeholder) parts.push(`placeholder="${el.placeholder}"`);
       if (el.value) parts.push(`value="${el.value}"`);
+      if (el.options) parts.push(`options=[${el.options.join(' | ')}]`);
+      if (el.state) parts.push(`(${el.state})`);
       if (el.fresh) parts.push('(just appeared)');
       if (el.name) parts.push(`name="${el.name}"`);
       if (el.cell) parts.push(`cell=${el.cell}`);
@@ -354,17 +385,27 @@ ${elementList || '(none found)'}`;
     throw new Error(`Claude returned invalid JSON: ${cleaned.slice(0, 300)}`);
   }
 
-  if (!['click', 'clickMany', 'fill', 'dragMove', 'doubleClick', 'rightClick', 'type', 'key', 'none'].includes(parsed.action)) {
+  if (!['click', 'clickMany', 'fill', 'dragMove', 'doubleClick', 'rightClick', 'type', 'key', 'selectRange', 'none'].includes(parsed.action)) {
     throw new Error(`Unexpected action: ${JSON.stringify(parsed.action)}`);
   }
-  if ((parsed.action === 'doubleClick' || parsed.action === 'rightClick') && typeof parsed.index !== 'number') {
-    throw new Error(`${parsed.action} requires a numeric index, got: ${JSON.stringify(parsed.index)}`);
+  // A cell address stands in for an index; normalise and check it
+  for (const f of ['cell', 'from', 'to']) {
+    if (parsed[f] === undefined) continue;
+    parsed[f] = String(parsed[f]).trim().toUpperCase().replace(/\$/g, '');
+    if (!CELL_REF.test(parsed[f])) throw new Error(`${f} must be a cell address like B7, got: ${JSON.stringify(parsed[f])}`);
+  }
+  if (['click', 'doubleClick', 'rightClick'].includes(parsed.action)
+      && typeof parsed.index !== 'number' && parsed.cell === undefined) {
+    throw new Error(`${parsed.action} needs an index or a cell, got neither`);
+  }
+  if (parsed.action === 'selectRange' && (!parsed.from || !parsed.to)) {
+    throw new Error(`selectRange needs from and to, got: ${JSON.stringify({ from: parsed.from, to: parsed.to })}`);
   }
   if (parsed.action === 'type' && (typeof parsed.text !== 'string' || !parsed.text.length)) {
     throw new Error(`type requires the text to type, got: ${JSON.stringify(parsed.text)}`);
   }
-  if (parsed.action === 'key' && !['Enter', 'Escape', 'Tab'].includes(parsed.key)) {
-    throw new Error(`key must be Enter, Escape or Tab, got: ${JSON.stringify(parsed.key)}`);
+  if (parsed.action === 'key' && !KEY_NAMES.includes(parsed.key)) {
+    throw new Error(`key must be one of ${KEY_NAMES.join(', ')}; got: ${JSON.stringify(parsed.key)}`);
   }
   if (parsed.action === 'fill') {
     const ok = Array.isArray(parsed.fills)
@@ -374,7 +415,7 @@ ${elementList || '(none found)'}`;
       throw new Error(`fill requires a non-empty fills array of {index,value}, got: ${JSON.stringify(parsed.fills)}`);
     }
   }
-  if (parsed.action === 'click' && typeof parsed.index !== 'number') {
+  if (parsed.action === 'click' && typeof parsed.index !== 'number' && parsed.cell === undefined) {
     throw new Error(`click requires a numeric index, got: ${JSON.stringify(parsed.index)}`);
   }
   if (parsed.action === 'clickMany') {
@@ -604,10 +645,11 @@ async function findQuestionFrame(tabId) {
 // starts — multiple choice still costs exactly one API call.
 const MAX_STEPS_SIMPLE = 1;
 const MAX_STEPS_DRAG   = 8;
-// Most tasks are 2-5 steps (select, open dialog, set, confirm). Kept tight
-// because every step is a model call, and a long run risks the service worker
-// being torn down before it finishes.
-const MAX_STEPS_SIMNET = 6;
+// Most tasks are 2-5 steps; a dialog task runs to 6-7 (select the cells, open
+// the dialog, switch its tab, set a field or two, OK). Every step is a model
+// call, so no more than that: a task still unfinished after 8 is stuck, and
+// says so. Heartbeats keep a long run from being mistaken for a hung one.
+const MAX_STEPS_SIMNET = 8;
 
 // True when every question on the page has at least one choice ticked.
 // Pages with typed blanks don't qualify: an empty blank carries no flag, so

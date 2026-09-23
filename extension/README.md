@@ -142,12 +142,20 @@ change between sites.
   would start editing a finished task.
 - **SIMnet moves** — besides click, SIMnet steps can `doubleClick`, `rightClick`,
   `type` (into element N, or into whatever is being edited when no index is
-  given) and `key` (Enter/Escape/Tab); only the SIMnet prompt describes them.
-  Clicks and keys are simulated, as SIMnet acts on simulated events; typing
-  sets a text box's value directly, and a grid cell — which edits only on real
-  key presses — gets focused and then real keystrokes via the debugger. A run
-  that uses all six steps without the model reporting the task complete is an
-  error ("Used all 6 steps…"), never "Finished".
+  given), `key` (Enter, Escape, Tab, Delete, Backspace, F2, F4, arrows,
+  Home, End — with `ctrl`/`shift`), and `selectRange` (`from`/`to`: click the
+  first cell, shift-click the last). Clicks take `shift`/`ctrl` too, and any
+  cell can be targeted by address (`cell: "B7"`, resolved via SIMnet's
+  `cell-B7` ids) instead of by index, so cells needn't be in the list.
+  Addresses are normalised (`$a$5` -> `A5`) and validated. Only the SIMnet
+  prompt describes these. Clicks and keys are simulated, as SIMnet acts on
+  simulated events; typing sets a text box's value directly, and a grid cell
+  — which edits only on real key presses — gets focused and then real
+  keystrokes via the debugger. Each SIMnet control carries its state — `(on)`
+  from aria-pressed, `(selected)`, `(open)` from aria-expanded, `(disabled)`
+  — and a `<select>` its choices and current value, everywhere. Up to 8 steps;
+  a run that uses them all without the model reporting the task complete is
+  an error ("Used all 8 steps…"), never "Finished".
 - **SIMnet menus** — the element list is capped (130), and SIMnet's ribbon alone
   nearly fills it, while dropdowns, submenus and dialogs are added at the end
   of the page. So each look compares against the previous one (a `WeakSet` of

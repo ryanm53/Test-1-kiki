@@ -114,7 +114,7 @@ test(async check => {
     <button class="shell-btn" aria-label="Home">Home</button><button class="shell-btn" aria-label="Insert">Insert</button>
     <table><tr>${grid}</tr></table></div></body>`;
   const { page, final } = await run(html, { reply: (b, n) => as(b, { action: 'click', index: n % 2 }) });
-  check('out of steps: reported as unfinished', /Used all 6 steps without finishing/.test(final) && page.isError(), final);
+  check('out of steps: reported as unfinished', /Used all 8 steps without finishing/.test(final) && page.isError(), final);
   check('out of steps: never "Finished"', !/Finished/.test(final));
 });
 
@@ -127,6 +127,91 @@ test(async check => {
   check('a password is never read out', byLabel('Password')?.value === undefined);
   check('a text box shows what it holds', byLabel('Name')?.value === 'Ken');
   check('a tick box shows no "on"', byLabel('Agree')?.value === undefined);
+});
+
+// ── The rest of what a SIMnet exercise asks for ───────────────────────────
+const events = (w, el, types) => {
+  const got = [];
+  for (const t of types) el.addEventListener(t, e => got.push({ t, shift: e.shiftKey, ctrl: e.ctrlKey, key: e.key, code: e.keyCode }));
+  return got;
+};
+const PLAIN = task => `<body><div role="main"><p>${task}</p>
+  <button class="shell-btn" aria-label="Bold" aria-pressed="true">B</button>
+  <button class="shell-btn" aria-label="Format" aria-expanded="true">Format</button>
+  <button class="shell-btn" aria-label="Paste" aria-disabled="true">Paste</button>
+  <div role="tab" id="t1" aria-selected="true">Dec 2</div><div role="tab" id="t2">Dec 9</div>
+  <select aria-label="Category" id="cat"><option>General</option><option>Number</option><option>Currency</option></select>
+  <table><tr>${grid}</tr></table></div></body>`;
+const one = (action, then = { action: 'none' }) => (b, n) => as(b, n === 1 ? action : then);
+
+test(async check => {
+  // The task doesn't name the cell, so it isn't among the few cells listed
+  const page = boot(PLAIN('Enter the Friday total.'), { installLayout: flat, url: 'https://simnet.mheducation.com/exam',
+    reply: one({ action: 'click', cell: 'A45' }) });
+  const r = await page.scrape();
+  const got = events(page.w, page.w.document.getElementById('cell-A45'), ['click']);
+  page.pressPlay(); await settle(page);
+  check('a cell that is not in the list can still be named',
+    !r.elements.some(e => e.cell === 'A45') && got.length > 0, `clicks: ${got.length}`);
+  check('its step reads as the cell', JSON.stringify(page.requests[1]?.messages).includes('clicked cell A45'));
+});
+
+test(async check => {
+  const page = boot(PLAIN('Select A2:A5.'), { installLayout: flat, url: 'https://simnet.mheducation.com/exam',
+    reply: one({ action: 'selectRange', from: 'a2', to: '$A$5' }) });
+  const first = events(page.w, page.w.document.getElementById('cell-A2'), ['mousedown']);
+  const last = events(page.w, page.w.document.getElementById('cell-A5'), ['mousedown', 'click']);
+  page.pressPlay(); await settle(page);
+  check('selectRange: clicks the first cell', first.length === 1 && !first[0].shift);
+  check('selectRange: shift-clicks the last', last.length >= 2 && last.every(e => e.shift), JSON.stringify(last));
+  check('selectRange: addresses are tidied ("a2", "$A$5")', JSON.stringify(page.requests[1]?.messages).includes('selected A2:A5'));
+});
+
+test(async check => {
+  const page = boot(PLAIN('Group Dec 2 and Dec 9.'), { installLayout: flat, url: 'https://simnet.mheducation.com/exam',
+    reply: one({ action: 'click', index: 4, ctrl: true }) });
+  const got = events(page.w, page.w.document.getElementById('t2'), ['mousedown', 'click']);
+  page.pressPlay(); await settle(page);
+  check('ctrl-click holds Ctrl through the whole click', got.length >= 2 && got.every(e => e.ctrl), JSON.stringify(got));
+});
+
+test(async check => {
+  const page = boot(PLAIN('Go to A1.'), { installLayout: flat, url: 'https://simnet.mheducation.com/exam',
+    reply: one({ action: 'key', key: 'Home', ctrl: true }) });
+  const got = events(page.w, page.w.document.body, ['keydown']);
+  page.pressPlay(); await settle(page);
+  check('Ctrl+Home is pressed as Ctrl+Home', got[0]?.key === 'Home' && got[0]?.ctrl && got[0]?.code === 36, JSON.stringify(got));
+  check('and reads that way in the history', JSON.stringify(page.requests[1]?.messages).includes('pressed Ctrl+Home'));
+});
+
+test(async check => {
+  const page = boot(PLAIN('Set the category to Currency.'), { installLayout: flat, url: 'https://simnet.mheducation.com/exam',
+    reply: (b, n) => n === 1
+      ? as(b, { action: 'fill', fills: [{ index: Number(/\[(\d+)\][^\n]*"Category"/.exec(b.messages[0].content)[1]), value: 'Currency' }] })
+      : as(b, { action: 'none' }) });
+  page.pressPlay(); await settle(page);
+  const list = page.requests[0]?.messages[0].content ?? '';
+  check('a dropdown shows its choices and what is chosen',
+    /"Category"[^\n]*value="General"[^\n]*options=\[General \| Number \| Currency\]/.test(list),
+    list.split('\n').find(l => /Category/.test(l)));
+  check('and one is picked by its text', page.w.document.getElementById('cat').value === 'Currency');
+});
+
+test(async check => {
+  const page = boot(PLAIN('Anything.'), { installLayout: flat, url: 'https://simnet.mheducation.com/exam', reply: 'x' });
+  const r = await page.scrape();
+  const st = t => r.elements.find(e => e.text === t)?.state;
+  check('a toggle that is on says so', st('Bold') === 'on', st('Bold'));
+  check('an open menu says so', st('Format') === 'open', st('Format'));
+  check('an unusable control says so', st('Paste') === 'disabled', st('Paste'));
+  check('the current tab says so', st('Dec 2') === 'selected' && st('Dec 9') === undefined);
+});
+
+test(async check => {
+  const page = boot(PLAIN('x'), { installLayout: flat, url: 'https://simnet.mheducation.com/exam',
+    reply: b => as(b, { action: 'click', cell: 'not-a-cell' }) });
+  page.pressPlay(); const final = await settle(page);
+  check('a malformed cell address is refused', /must be a cell address/.test(final), final);
 });
 
 Promise.all(cases.map(async fn => {

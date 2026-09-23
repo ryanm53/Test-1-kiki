@@ -211,7 +211,11 @@ function describeEl(el) {
     placeholder: el.getAttribute('placeholder') || null,
     // Never a password; never a tick box, whose value is just "on"
     value: (isTextBox(el) && el.type !== 'password' && !el.isContentEditable && el.value)
-      ? String(el.value).slice(0, 60) : undefined,
+      ? String(el.value).slice(0, 60)
+      : el.tagName === 'SELECT' ? (el.selectedOptions?.[0]?.textContent.trim() || undefined) : undefined,
+    // A dropdown list's choices, so one can be picked by its text
+    options: el.tagName === 'SELECT'
+      ? Array.from(el.options).slice(0, 20).map(o => o.textContent.trim()).filter(Boolean) : undefined,
     name: el.getAttribute('name') || null,
     question: question || null,
     sheet: isSheetCell(el) || undefined,
@@ -316,7 +320,7 @@ function scrape() {
     _lastElements = [...controls, ...referenced, ...populated];
     return {
       text: (root.innerText ?? '').slice(0, 5000),
-      elements: _lastElements.map(el => ({ ...describeEl(el), fresh: fresh.has(el) || undefined })),
+      elements: _lastElements.map(el => ({ ...describeEl(el), state: stateOf(el), fresh: fresh.has(el) || undefined })),
       isSimnet: true,      // multi-step procedure, worth the stronger model
       isWorksheet: false,
       isDrag: false
@@ -416,6 +420,18 @@ function editingNow() {
   return a && a !== document.body && a.id !== '__cap-host' ? a : null;
 }
 
+// Whether a ribbon toggle is on, a tab chosen, a menu open, a control usable —
+// without it a step can't tell a task done from a task not started
+function stateOf(el) {
+  const s = [];
+  if (el.getAttribute('aria-pressed') === 'true' ||
+      (el.getAttribute('aria-checked') === 'true' && !/^(checkbox|radio)$/.test(el.type || ''))) s.push('on');
+  if (el.getAttribute('aria-selected') === 'true') s.push('selected');
+  if (el.getAttribute('aria-expanded') === 'true') s.push('open');
+  if (el.disabled || el.getAttribute('aria-disabled') === 'true') s.push('disabled');
+  return s.length ? s.join(', ') : undefined;
+}
+
 function centreOf(el) {
   const r = el.getBoundingClientRect();
   return { bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
@@ -431,7 +447,34 @@ function pickElement(index) {
   return { el };
 }
 
-const KEY_CODES = { Enter: 13, Escape: 27, Tab: 9 };
+// SIMnet's cells carry their address in the id (cell-B7), so any cell can
+// be named directly — listed or not
+function cellByAddress(ref) {
+  return document.getElementById(`cell-${String(ref).toUpperCase()}`);
+}
+function pickTarget(action) {
+  if (action.cell !== undefined) {
+    const el = cellByAddress(action.cell);
+    return el ? { el } : { error: `Cell ${action.cell} isn't on this sheet` };
+  }
+  return pickElement(action.index);
+}
+
+const KEY_CODES = {
+  Enter: 13, Escape: 27, Tab: 9, Delete: 46, Backspace: 8, F2: 113, F4: 115,
+  ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, Home: 36, End: 35
+};
+
+// A block of cells: click the first, shift-click the last, as a person would
+function selectRange(from, to) {
+  const a = cellByAddress(from), b = cellByAddress(to);
+  if (!a) return { success: false, error: `Cell ${from} isn't on this sheet` };
+  if (!b) return { success: false, error: `Cell ${to} isn't on this sheet` };
+  a.scrollIntoView({ behavior: 'auto', block: 'center' });
+  realClick(a);
+  realClick(b, { shift: true });
+  return { success: true };
+}
 
 function setFieldValue(el, value) {
   el.focus();
@@ -467,10 +510,11 @@ function setFieldValue(el, value) {
 // act on mousedown/mouseup instead, so a click alone leaves the selection
 // untouched — the element appears clicked while nothing actually happens.
 // Sending the whole sequence matches what a real click produces.
-function realClick(el) {
+function realClick(el, mods = {}) {
   const r = el.getBoundingClientRect();
   const o = { bubbles: true, cancelable: true,
-              clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+              clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+              shiftKey: !!mods.shift, ctrlKey: !!mods.ctrl, metaKey: !!mods.ctrl };
   el.dispatchEvent(new PointerEvent('pointerover', { ...o, isPrimary: true }));
   el.dispatchEvent(new MouseEvent('mouseover', o));
   el.dispatchEvent(new PointerEvent('pointerdown', { ...o, isPrimary: true }));
@@ -478,7 +522,10 @@ function realClick(el) {
   if (typeof el.focus === 'function') el.focus({ preventScroll: true });
   el.dispatchEvent(new PointerEvent('pointerup', { ...o, isPrimary: true }));
   el.dispatchEvent(new MouseEvent('mouseup', o));
-  el.click();
+  // el.click() can't carry Shift or Ctrl; a held key needs a click event of
+  // its own
+  if (mods.shift || mods.ctrl) el.dispatchEvent(new MouseEvent('click', o));
+  else el.click();
 }
 
 async function execute(action) {
@@ -554,8 +601,10 @@ async function execute(action) {
     // ── Excel moves (SIMnet) ───────────────────────────────────────────────
     // Simulated rather than real input: SIMnet acts on simulated clicks, and
     // simulated events can't be misrouted by where the browser's focus is.
+    if (action.action === 'selectRange') return selectRange(action.from, action.to);
+
     if (action.action === 'doubleClick' || action.action === 'rightClick') {
-      const { el, error } = pickElement(action.index);
+      const { el, error } = pickTarget(action);
       if (error) return { success: false, error };
       el.scrollIntoView({ behavior: 'auto', block: 'center' });
       await new Promise(r => setTimeout(r, 120));
@@ -578,8 +627,8 @@ async function execute(action) {
 
     if (action.action === 'type') {
       let target = null;
-      if (action.index !== undefined) {
-        const { el, error } = pickElement(action.index);
+      if (action.index !== undefined || action.cell !== undefined) {
+        const { el, error } = pickTarget(action);
         if (error) return { success: false, error };
         el.scrollIntoView({ behavior: 'auto', block: 'center' });
         realClick(el);
@@ -607,7 +656,10 @@ async function execute(action) {
       const target = editingNow() ?? document.body;
       for (const type of ['keydown', 'keypress', 'keyup']) {
         if (type === 'keypress' && action.key !== 'Enter') continue;
-        const ev = new KeyboardEvent(type, { key: action.key, code: action.key, bubbles: true, cancelable: true });
+        const ev = new KeyboardEvent(type, {
+          key: action.key, code: action.key, bubbles: true, cancelable: true,
+          ctrlKey: !!action.ctrl, metaKey: !!action.ctrl, shiftKey: !!action.shift
+        });
         // Older page code reads keyCode/which, which the constructor won't set
         Object.defineProperty(ev, 'keyCode', { get: () => code });
         Object.defineProperty(ev, 'which', { get: () => code });
@@ -618,17 +670,11 @@ async function execute(action) {
 
     // ── Single click ───────────────────────────────────────────────────────
     if (action.action === 'click') {
-      const { index } = action;
-      if (typeof index !== 'number' || index < 0 || index >= _lastElements.length) {
-        return { success: false, error: `Index ${index} out of range (${_lastElements.length} elements)` };
-      }
-      const el = _lastElements[index];
-      if (!document.contains(el)) {
-        return { success: false, error: `Element [${index}] is no longer in the DOM` };
-      }
+      const { el, error } = pickTarget(action);
+      if (error) return { success: false, error };
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       await new Promise(r => setTimeout(r, 150));
-      realClick(el);
+      realClick(el, { shift: action.shift, ctrl: action.ctrl });
       return { success: true };
     }
 
