@@ -161,7 +161,7 @@ are direct DOM lookups that never touch the API.
 | File | Purpose |
 |------|---------|
 | `manifest.json` | Manifest V3: permissions, content script, service worker |
-| `background.js` | Service worker: Claude API calls, retry loop, reference tab scraping |
+| `background.js` | Service worker: Claude API calls, retry loop, frame targeting, trusted input |
 | `content.js` | Injected on every page: scrapes elements, executes actions, control bar UI |
 | `popup.html` | Static card pointing at the on-page control bar |
 

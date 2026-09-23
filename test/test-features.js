@@ -239,14 +239,6 @@ const run = async (html, opts) => {
     check('with the key saved, play runs', page.requests.length === 1);
   });
   test(async check => {
-    const { page } = await run(MC, {
-      storage: { ...ANSWER_ONLY, refUrls: ['https://textbook.example/ch3'] },
-      refTabs: [{ url: 'https://textbook.example/ch3/assets', text: 'An asset is a resource controlled by the entity.' }],
-      reply: b => as(b, { action: 'click', index: 0 }) });
-    check('reference tabs: their text reaches Claude',
-      JSON.stringify(page.requests[0]?.messages).includes('An asset is a resource controlled'));
-  });
-  test(async check => {
     const { page } = await run(MC, { storage: { ...ANSWER_ONLY, notes: 'Use GAAP conventions.' },
                                      reply: b => as(b, { action: 'click', index: 0 }) });
     const sent = JSON.stringify(page.requests[0]);

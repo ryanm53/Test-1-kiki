@@ -10,7 +10,7 @@ const vm = require('vm');
 // EXT_DIR lets a suite be pointed at an older copy, to prove it catches a bug
 const EXT = process.env.EXT_DIR || path.join(__dirname, '..', 'extension');
 
-function boot(html, { reply, storage = {}, installLayout, beforeLoad, refTabs = [] } = {}) {
+function boot(html, { reply, storage = {}, installLayout, beforeLoad } = {}) {
   const dom = new JSDOM(html, {
     url: 'https://school.instructure.com/courses/1/quizzes/2/take',
     pretendToBeVisual: true,
@@ -50,13 +50,7 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, refTabs = 
       onMessage: { addListener: f => { backgroundListener = f; } }
     },
     tabs: {
-      // Other open tabs, for the Reference Tabs feature: { url, text }
-      query: async () => refTabs.map((t, i) => ({ id: 100 + i, url: t.url })),
       sendMessage: (tabId, msg, opts, cb) => {
-        if (tabId >= 100) {
-          setTimeout(() => cb && cb({ text: refTabs[tabId - 100].text, elements: [] }), 0);
-          return;
-        }
         // Chrome answers asynchronously; so does this
         setTimeout(() => {
           const keepOpen = contentListener(msg, {}, res => cb && cb(res));

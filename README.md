@@ -145,7 +145,6 @@ Click the **gear ⚙** to open these.
 | **Upgrade on hard questions** | On by default. SIMnet tasks, multi-blank worksheets and drag-and-drop questions need real reasoning, so those automatically use one tier up while everything else stays on your pick. When it upgrades, the status bar shows **↑ Sonnet 5** so you can see it happen. Turn this off to always use your chosen model |
 | **Notes** *(optional)* | Extra context to improve accuracy, e.g. *"This is financial accounting — use GAAP conventions."* Fine to leave blank |
 | **API Key** | Your key from Step 3 |
-| **Reference Tabs** | Paste the address of another open tab (your textbook, notes, a study guide) and it reads that as source material when answering |
 | **Troubleshooting** | *Check this page* — see [Troubleshooting](#troubleshooting). *Copy last prompt* copies exactly what was sent to Claude last time |
 
 ---

@@ -189,7 +189,7 @@ async function postToApi(apiKey, requestBody) {
   );
 }
 
-async function callClaude(apiKey, notes, pageText, elements, refTexts = [], modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = [], isCanvas = false) {
+async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = [], isCanvas = false) {
   const model = MODELS[modelId] ? modelId : DEFAULT_MODEL;
   const cfg = MODELS[model];
 
@@ -207,11 +207,6 @@ async function callClaude(apiKey, notes, pageText, elements, refTexts = [], mode
     })
     .join('\n');
 
-  const refSection = refTexts.length
-    ? '\n\nReference material from your designated tabs:\n' +
-      refTexts.map(r => `--- ${r.url} ---\n${r.text}`).join('\n\n')
-    : '';
-
   // Optional user context (subject, conventions, hints) — omitted when blank
   const notesSection = notes ? `Notes from the user: ${notes}\n\n` : '';
 
@@ -220,7 +215,7 @@ async function callClaude(apiKey, notes, pageText, elements, refTexts = [], mode
     : '';
 
   const userContent = `${notesSection}${historySection}Page text:
-${pageText.slice(0, isWorksheet || isCanvas ? 3000 : isSimnet ? 1500 : 800)}${refSection}
+${pageText.slice(0, isWorksheet || isCanvas ? 3000 : isSimnet ? 1500 : 800)}
 
 Elements (click by index):
 ${elementList || '(none found)'}`;
@@ -330,31 +325,6 @@ ${elementList || '(none found)'}`;
   }
 
   return parsed;
-}
-
-// Find open tabs matching the saved reference URLs and scrape their text.
-// Matches by checking if a tab's URL starts with the stored URL string,
-// so "https://example.com/chapter1" matches that page and any sub-path.
-async function getReferenceContent(refUrls) {
-  if (!refUrls || refUrls.length === 0) return [];
-
-  const allTabs = await chrome.tabs.query({}).catch(() => []);
-  const results = [];
-
-  for (const refUrl of refUrls) {
-    const match = allTabs.find(t => t.url && t.url.startsWith(refUrl));
-    if (!match) continue;
-    try {
-      const data = await sendToTab(match.id, { type: 'SCRAPE' });
-      if (data?.text) {
-        results.push({ url: match.url, text: data.text.slice(0, 2000) });
-      }
-    } catch (_) {
-      // Tab might not have content script (e.g. chrome:// page) — skip silently
-    }
-  }
-
-  return results;
 }
 
 // ── Trusted input via the Chrome debugger protocol ───────────────────────────
@@ -588,8 +558,7 @@ function reportProgress(tabId, step, budget) {
   } catch (_) { /* no listener — nothing to report to */ }
 }
 
-async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true) {
-  const refTexts = await getReferenceContent(refUrls);
+async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true) {
   let usedModel = baseModel;   // reported back so the UI can show an upgrade
 
   // Resolve once per run: every scrape, click and fill must hit the same frame
@@ -645,7 +614,7 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
         }
 
         usedModel = pickModel(baseModel, pageData, autoUpgrade);
-        const action = await callClaude(apiKey, notes, pageText, pageData.elements, refTexts, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas);
+        const action = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas);
 
         const bad = badIndexes(action, pageData.elements.length);
         if (bad.length) {
@@ -886,14 +855,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return;
     }
 
-    // Popup sends refUrls; floating widget loads them from storage
-    const refUrls = msg.refUrls
-      ?? (await chrome.storage.local.get('refUrls').catch(() => ({}))).refUrls
-      ?? [];
-
     let result;
     try {
-      result = await runGoal(apiKey, msg.notes ?? '', tabId, refUrls, msg.postClicks ?? [], baseModel, autoUpgrade !== false);
+      result = await runGoal(apiKey, msg.notes ?? '', tabId, msg.postClicks ?? [], baseModel, autoUpgrade !== false);
     } catch (e) {
       // Anything unexpected still has to come back as an answer. Without this
       // the reply never arrives and the widget sits on "Answering…" forever.

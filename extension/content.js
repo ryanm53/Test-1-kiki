@@ -801,20 +801,6 @@ function bgSend(msg, cb) {
   }
   .switch.on::after { transform: translateX(16px); }
 
-  /* Reference list */
-  .ref-row span {
-    flex: 1; font-size: 12px;
-    color: rgba(235, 235, 245, 0.62);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .ref-del {
-    flex-shrink: 0; border: none; background: transparent;
-    color: rgba(235, 235, 245, 0.3);
-    font-size: 15px; line-height: 1; cursor: pointer; padding: 2px 0;
-    transition: color 0.15s;
-  }
-  .ref-del:hover { color: #FF453A; }
-  .empty { font-size: 12.5px; color: rgba(235,235,245,0.3); padding: 11px; text-align: center; }
 </style>
 
 <div id="root">
@@ -866,16 +852,6 @@ function bgSend(msg, cb) {
         </div>
       </div>
 
-      <div class="label">Reference Tabs</div>
-      <div class="group">
-        <div class="row">
-          <input type="url" id="refUrl" placeholder="https://…" spellcheck="false" />
-          <button class="inline-btn" id="addRef">Add</button>
-        </div>
-        <div id="refList"></div>
-      </div>
-      <div class="row-hint">Open tabs it can read as source material.</div>
-
       <div class="label">Troubleshooting</div>
       <div class="group">
         <div class="row">
@@ -908,7 +884,6 @@ function bgSend(msg, cb) {
   const presetSel = $('preset'), notesInput = $('notes'), autoSw = $('autoSw');
   const modelSel = $('model'), modelHint = $('modelHint'), upgradeSw = $('upgradeSw');
   const keyInput = $('key'), saveKeyBtn = $('saveKey');
-  const refInput = $('refUrl'), addRefBtn = $('addRef'), refList = $('refList');
   const copyPromptBtn = $('copyPrompt');
   const checkPageBtn = $('checkPage'), checkResult = $('checkResult');
 
@@ -919,7 +894,6 @@ function bgSend(msg, cb) {
   let notes = '';          // optional user context, sent only when non-empty
   let autoContinue = true;
   let autoUpgrade = true;
-  let refUrls = [];
   let hasKey = false;
   let lastModel = '';    // model the most recent question actually used
 
@@ -1037,7 +1011,7 @@ function bgSend(msg, cb) {
 
   // ── Persistence ────────────────────────────────────────────────────────────
   store.get(
-    ['lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'refUrls', 'model', 'barPos'],
+    ['lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'model', 'barPos'],
     s => {
       presetIndex = PRESETS[s.lastPresetIndex] ? s.lastPresetIndex : 0;
       presetSel.value = String(presetIndex);
@@ -1055,7 +1029,6 @@ function bgSend(msg, cb) {
       showModelHint();
 
       if (s.apiKey) { keyInput.value = s.apiKey; hasKey = true; }
-      if (Array.isArray(s.refUrls)) refUrls = s.refUrls;
 
       // Where the user last parked the bar. Clamped on the way in, so a
       // position saved on a bigger screen still lands somewhere visible.
@@ -1065,7 +1038,6 @@ function bgSend(msg, cb) {
         orientPanel();
       }
 
-      renderRefs();
       render();
 
       // Arrived here by the loop's own Next click: carry on. The previous
@@ -1119,47 +1091,6 @@ function bgSend(msg, cb) {
   });
   keyInput.addEventListener('keydown', e => { if (e.key === 'Enter') saveKeyBtn.click(); });
 
-  function renderRefs() {
-    refList.innerHTML = '';
-    if (!refUrls.length) {
-      const d = document.createElement('div');
-      d.className = 'empty';
-      d.textContent = 'None added';
-      refList.appendChild(d);
-      return;
-    }
-    refUrls.forEach((url, i) => {
-      const row = document.createElement('div');
-      row.className = 'row ref-row';
-      const s = document.createElement('span');
-      s.textContent = url.replace(/^https?:\/\//, '');
-      s.title = url;
-      const b = document.createElement('button');
-      b.className = 'ref-del';
-      b.textContent = '✕';
-      b.addEventListener('click', () => {
-        refUrls.splice(i, 1);
-        store.set({ refUrls });
-        renderRefs();
-      });
-      row.append(s, b);
-      refList.appendChild(row);
-    });
-  }
-
-  function addRef() {
-    const u = refInput.value.trim();
-    if (!u) return;
-    if (!/^https?:\/\//.test(u)) { fail('URL must start with http:// or https://'); return; }
-    if (!refUrls.includes(u)) {
-      refUrls.push(u);
-      store.set({ refUrls });
-      renderRefs();
-    }
-    refInput.value = '';
-  }
-  addRefBtn.addEventListener('click', addRef);
-  refInput.addEventListener('keydown', e => { if (e.key === 'Enter') addRef(); });
 
   checkPageBtn.addEventListener('click', () => {
     checkPageBtn.textContent = 'Checking…';
