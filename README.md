@@ -123,6 +123,7 @@ The bar shows you what's happening as it goes:
 | **Ready** | Idle, waiting for you |
 | **Answering… · 7** | Working on a question. It's done 7 so far |
 | **Next question… · 7** | Waiting for the next question to load |
+| **Click Next when ready** | *Answer only* mode: it's answered, and waits for you to move on |
 | **Answering… · step 2/6** | Working through a task that takes several steps (SIMnet) |
 | **Paused · 7** | Stopped, 7 answered |
 | **Answered. Check it over, then submit it yourself.** | Canvas page done. Look it over and hand it in when you're happy |
@@ -145,6 +146,7 @@ Click the **gear ⚙** to open these.
 | **Notes** *(optional)* | Extra context to improve accuracy, e.g. *"This is financial accounting — use GAAP conventions."* Fine to leave blank |
 | **API Key** | Your key from Step 3 |
 | **Reference Tabs** | Paste the address of another open tab (your textbook, notes, a study guide) and it reads that as source material when answering |
+| **Troubleshooting** | *Check this page* — see [Troubleshooting](#troubleshooting). *Copy last prompt* copies exactly what was sent to Claude last time |
 
 ---
 
@@ -163,6 +165,14 @@ Switching to Sonnet 5 costs about twice that, Opus 5 about five times. Even so, 
 ---
 
 ## Troubleshooting
+
+**Start here, whatever the problem:** open the gear ⚙, scroll to **Troubleshooting**, and press **Run** next to **Check this page**. In a couple of seconds it tells you:
+
+- what kind of page it thinks you're on, and how many questions it can see (*"Canvas quiz · 4 questions, 14 answers to pick from"*)
+- whether your API key works — and if not, why
+- which model and mode you're using
+
+A ✗ on any line tells you what's wrong. If you ask someone for help, send them a screenshot of this.
 
 **"API key is invalid" or a 401 error**
 You almost certainly pasted the key **ID** instead of the key. See the warning in Step 3 — the real one starts `sk-ant-api03-` and is very long. Also check for a stray space at the start or end.

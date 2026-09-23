@@ -10,7 +10,7 @@ const vm = require('vm');
 // EXT_DIR lets a suite be pointed at an older copy, to prove it catches a bug
 const EXT = process.env.EXT_DIR || path.join(__dirname, '..', 'extension');
 
-function boot(html, { reply, storage = {}, installLayout, beforeLoad } = {}) {
+function boot(html, { reply, storage = {}, installLayout, beforeLoad, refTabs = [] } = {}) {
   const dom = new JSDOM(html, {
     url: 'https://school.instructure.com/courses/1/quizzes/2/take',
     pretendToBeVisual: true,
@@ -26,6 +26,7 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad } = {}) {
 
   const store = { apiKey: 'sk-ant-test', autoContinue: true, ...storage };
   const requests = [];
+  const debuggerCalls = [];   // trusted input sent through chrome.debugger
   let contentListener = null, backgroundListener = null;
 
   // ── the page side ───────────────────────────────────────────────────────
@@ -49,8 +50,13 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad } = {}) {
       onMessage: { addListener: f => { backgroundListener = f; } }
     },
     tabs: {
-      query: async () => [],
+      // Other open tabs, for the Reference Tabs feature: { url, text }
+      query: async () => refTabs.map((t, i) => ({ id: 100 + i, url: t.url })),
       sendMessage: (tabId, msg, opts, cb) => {
+        if (tabId >= 100) {
+          setTimeout(() => cb && cb({ text: refTabs[tabId - 100].text, elements: [] }), 0);
+          return;
+        }
         // Chrome answers asynchronously; so does this
         setTimeout(() => {
           const keepOpen = contentListener(msg, {}, res => cb && cb(res));
@@ -66,7 +72,8 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad } = {}) {
       set: async o => { Object.assign(store, o); }
     } },
     debugger: {
-      attach: async () => {}, detach: async () => {}, sendCommand: async () => {},
+      attach: async () => {}, detach: async () => {},
+      sendCommand: async (target, method, params) => { debuggerCalls.push({ method, ...params }); },
       onDetach: { addListener: () => {} }
     }
   };
@@ -74,7 +81,12 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad } = {}) {
   const fakeFetch = async (url, init) => {
     const body = JSON.parse(init.body);
     requests.push(body);
-    const text = typeof reply === 'function' ? reply(body, requests.length) : reply;
+    const out = typeof reply === 'function' ? reply(body, requests.length) : reply;
+    // An object reply is an HTTP failure: { status, body }
+    if (out && typeof out === 'object') {
+      return { ok: false, status: out.status, json: async () => ({}), text: async () => out.body ?? '' };
+    }
+    const text = out;
     return {
       ok: true, status: 200,
       json: async () => ({ content: [{ type: 'text', text }] }),
@@ -91,7 +103,8 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad } = {}) {
 
   const shadow = () => w.document.getElementById('__cap-host')?.shadowRoot;
   return {
-    w, store, requests,
+    w, store, requests, debuggerCalls,
+    send: msg => new Promise(res => backgroundListener(msg, { tab: { id: 1 } }, res)),
     status: () => shadow()?.getElementById('statusText')?.textContent ?? '',
     isError: () => !!shadow()?.getElementById('statusText')?.classList.contains('err'),
     pressPlay: () => shadow().getElementById('go').dispatchEvent(new w.MouseEvent('click', { bubbles: true })),

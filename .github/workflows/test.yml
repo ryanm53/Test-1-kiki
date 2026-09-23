@@ -1,0 +1,19 @@
+# Runs the full test suite on every push, so a change that breaks something
+# shows a red ✗ next to the commit on GitHub before anyone installs it.
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm test

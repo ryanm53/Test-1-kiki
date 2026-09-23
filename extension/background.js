@@ -780,6 +780,74 @@ async function runGoal(apiKey, notes, tabId, refUrls = [], postClicks = [], base
   return { success: true, message: 'Done', usedModel };
 }
 
+// Pasting a key can pick up invisible characters (a trailing newline, a
+// zero-width space from a web page) that make a valid key fail.
+function cleanKey(raw) {
+  return raw ? String(raw).replace(/[^\x20-\x7E]/g, '').trim() : '';
+}
+
+// ── "Check this page" ──────────────────────────────────────────────────────
+// The test suite runs against copies of each site's pages; this checks the
+// real one. It answers the questions that matter when something "doesn't
+// work": can the extension see the question, and does the key work.
+
+function describePage(p, frameId) {
+  if (p?.error) return { ok: false, text: `Couldn't read this page: ${p.error}` };
+  const els = p?.elements ?? [];
+  const where = frameId ? ' (inside an embedded frame)' : '';
+  const n = (k, word) => `${k} ${word}${k === 1 ? '' : 's'}`;
+
+  if (p.isSimnet) {
+    const cells = els.filter(e => e.cell).length;
+    return { ok: true, text: `SIMnet · ${n(els.length - cells, 'control')}, ${n(cells, 'cell')}${where}` };
+  }
+  if (p.isCanvas) {
+    const questions = new Set(els.map(e => e.question)).size;
+    return { ok: questions > 0,
+             text: `Canvas quiz · ${n(questions, 'question')}, ${n(els.length, 'answer')} to pick from${where}` };
+  }
+  if (p.isWorksheet) {
+    const fields = els.filter(e => e.sheet || /^(input|textarea|select)$/.test(e.tag)).length;
+    return { ok: true, text: `Worksheet · ${n(fields, 'blank')}${where}` };
+  }
+  if (p.isDrag) return { ok: true, text: `Drag and drop · ${n(els.length, 'item')}${where}` };
+  if (!els.length) {
+    return { ok: false, text: 'Nothing to answer found. Is a question showing on screen?' };
+  }
+  return { ok: true, text: `Question page · ${n(els.length, 'thing')} to click or fill${where}` };
+}
+
+async function checkKey(apiKey) {
+  if (!apiKey) return { ok: false, text: 'No API key saved. Paste it into API Key below and click Save.' };
+  try {
+    // The smallest request there is: a one-token reply from the cheapest model
+    const r = await postToApi(apiKey, {
+      model: 'claude-haiku-4-5', max_tokens: 1,
+      messages: [{ role: 'user', content: 'Hi' }]
+    });
+    if (r.ok) return { ok: true, text: 'API key works' };
+    return { ok: false, text: apiErrorMessage(r.status, await r.text().catch(() => '')) };
+  } catch (e) {
+    return { ok: false, text: e.message };
+  }
+}
+
+async function checkPage(tabId) {
+  const lines = [];
+  const { apiKey, model } = await chrome.storage.local.get(['apiKey', 'model']).catch(() => ({}));
+
+  const frameId = await findQuestionFrame(tabId);
+  try {
+    lines.push(describePage(await sendToTab(tabId, { type: 'SCRAPE' }, frameId), frameId));
+  } catch (e) {
+    lines.push({ ok: false, text: `Couldn't read this page: ${e.message}` });
+  }
+
+  lines.push(await checkKey(cleanKey(apiKey)));
+  lines.push({ info: true, text: `Model: ${MODELS[model]?.label ?? MODELS[DEFAULT_MODEL].label}` });
+  return { lines };
+}
+
 // Tabs whose current run has been stopped from the widget. The loop checks
 // this between steps: without it, pressing stop only silenced the UI while the
 // background carried on clicking.
@@ -793,13 +861,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  if (msg.type === 'CHECK_PAGE') {
+    const id = msg.tabId ?? sender.tab?.id;
+    checkPage(id).then(sendResponse, e => sendResponse({ lines: [{ ok: false, text: e.message }] }));
+    return true;
+  }
+
   if (msg.type !== 'RUN_GOAL') return;
 
   (async () => {
     const { apiKey: rawKey, model: savedModel, autoUpgrade } =
       await chrome.storage.local.get(['apiKey', 'model', 'autoUpgrade']).catch(() => ({}));
     const baseModel = MODELS[savedModel] ? savedModel : DEFAULT_MODEL;
-    const apiKey = rawKey ? rawKey.replace(/[^\x20-\x7E]/g, '').trim() : '';
+    const apiKey = cleanKey(rawKey);
     if (!apiKey) {
       sendResponse({ success: false, error: 'No API key saved. Enter it in the extension popup and click Save.' });
       return;

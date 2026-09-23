@@ -626,6 +626,12 @@ function bgSend(msg, cb) {
     text-overflow: ellipsis;
   }
   #statusText { overflow: hidden; text-overflow: ellipsis; }
+  #checkResult { margin: 8px 3px 0; font-size: 12px; line-height: 1.55; color: rgba(235,235,245,0.75); }
+  #checkResult:empty { display: none; }
+  #checkResult .ok::before  { content: '✓  '; color: #30D158; font-weight: 600; }
+  #checkResult .bad         { color: #FF9F96; }
+  #checkResult .bad::before { content: '✗  '; font-weight: 600; }
+  #checkResult .info        { color: rgba(235,235,245,0.45); }
   #statusText.err { color: #FF9F96; white-space: normal; font-size: 12px; line-height: 1.35; }
   #status.err { max-width: 250px; white-space: normal; }
 
@@ -873,11 +879,16 @@ function bgSend(msg, cb) {
       <div class="label">Troubleshooting</div>
       <div class="group">
         <div class="row">
+          <span class="row-label">Check this page</span>
+          <button class="inline-btn" id="checkPage">Run</button>
+        </div>
+        <div class="row">
           <span class="row-label">Copy last prompt</span>
           <button class="inline-btn" id="copyPrompt">Copy</button>
         </div>
       </div>
-      <div class="row-hint">Copies exactly what was last sent to Claude, for diagnosing wrong answers.</div>
+      <div id="checkResult"></div>
+      <div class="row-hint">Check this page shows what it can see here and whether your key works. Copy last prompt copies exactly what was last sent to Claude, for diagnosing wrong answers.</div>
 
     </div>
   </div>
@@ -899,6 +910,7 @@ function bgSend(msg, cb) {
   const keyInput = $('key'), saveKeyBtn = $('saveKey');
   const refInput = $('refUrl'), addRefBtn = $('addRef'), refList = $('refList');
   const copyPromptBtn = $('copyPrompt');
+  const checkPageBtn = $('checkPage'), checkResult = $('checkResult');
 
   gear.innerHTML = ICON_GEAR;
 
@@ -919,6 +931,7 @@ function bgSend(msg, cb) {
   let rateSecs  = 0;
   let stepNote  = '';      // "step 2/6" during a multi-step task
   let infoMsg   = '';      // a finished run's closing note — not an error
+  let waitingForUser = false;  // answer-only: the student clicks Next
 
   let runToken = 0;        // bumped on stop so in-flight replies are ignored
   let pollTimer = null, rateTimer = null, watchdog = null;
@@ -980,7 +993,7 @@ function bgSend(msg, cb) {
     else if (rateSecs)   { cls = 'hold'; text = `Rate limited · ${rateSecs}s`; }
     else if (paused)     { cls = 'hold'; text = 'Paused'; }
     else if (isRunning)  { cls = 'run';  text = 'Answering…' + stepNote; }
-    else if (waiting)    { cls = 'run';  text = 'Next question…'; }
+    else if (waiting)    { cls = 'run';  text = waitingForUser ? 'Click Next when ready' : 'Next question…'; }
 
     if (answered > 0 && !errorMsg) text += ` · ${answered}`;
     // Show the model only when it differs from the one picked in settings
@@ -1147,6 +1160,27 @@ function bgSend(msg, cb) {
   }
   addRefBtn.addEventListener('click', addRef);
   refInput.addEventListener('keydown', e => { if (e.key === 'Enter') addRef(); });
+
+  checkPageBtn.addEventListener('click', () => {
+    checkPageBtn.textContent = 'Checking…';
+    checkPageBtn.disabled = true;
+    bgSend({ type: 'CHECK_PAGE' }, (res, sendError) => {
+      checkPageBtn.textContent = 'Run';
+      checkPageBtn.disabled = false;
+      const lines = sendError ? [{ ok: false, text: sendError }]
+                  : res?.lines ?? [{ ok: false, text: 'No response from the extension. Refresh this page and try again.' }];
+      if (!sendError) {
+        lines.push({ info: true, text: `Mode: ${PRESETS[presetIndex].label} · auto-continue ${autoContinue ? 'on' : 'off'}` });
+      }
+      // textContent, never innerHTML: these lines carry page and API text
+      checkResult.replaceChildren(...lines.map(l => {
+        const d = document.createElement('div');
+        d.className = l.info ? 'info' : l.ok ? 'ok' : 'bad';
+        d.textContent = l.text;
+        return d;
+      }));
+    });
+  });
 
   copyPromptBtn.addEventListener('click', () => {
     store.get('lastPrompt', ({ lastPrompt }) => {
@@ -1360,12 +1394,16 @@ function bgSend(msg, cb) {
     );
   }
 
-  // Poll until the question content changes, then run again. 5s fallback so a
-  // page that re-renders identically never strands the loop.
+  // Poll until the question content changes, then run again. When we clicked
+  // Next ourselves, a 5s fallback means a page that re-renders identically
+  // never strands the loop. In answer-only mode the student clicks Next, and
+  // however long they take, running again before they do would only go back
+  // over the question just answered — so there, wait for them.
   function waitForPageChange(snapshot, token) {
     waiting = true;
+    waitingForUser = PRESETS[presetIndex].postClicks.length === 0;
     render();
-    const deadline = Date.now() + 5000;
+    const deadline = waitingForUser ? Infinity : Date.now() + 5000;
     (function check() {
       if (token !== runToken) return;
       const root = document.querySelector('[role="main"], main, article, form') ?? document.body;

@@ -205,8 +205,38 @@ npm install
 npm test
 ```
 
-jsdom, no browser. Each suite pins a bug that actually shipped: worksheet
-column/row labelling, spreadsheet cell detection, SIMnet's ribbon surviving the
-exam-chrome filter, SIMnet behaviour *not* leaking into ordinary questions, and
-the failure handling above. Run it before pushing — several of these were
-originally caught by the test rather than by the user.
+Prints one line per area and a verdict:
+
+```
+✓ Every feature: question types, models, errors, stop, settings  (40 checks)
+✓ SIMnet, Connect and Canvas on the same default settings  (12 checks)
+...
+✓ Everything works. 11 areas, 100+ checks, 20s.
+```
+
+A broken area lists the exact checks that failed and the command to rerun it
+alone. GitHub runs the same thing on every push (`.github/workflows/test.yml`),
+so each commit shows a ✓ or ✗.
+
+**How it works.** `test/harness.js` loads the real `background.js` and
+`content.js` into jsdom and wires Chrome's messaging between them, faking only
+Claude's replies (and the debugger, which records the keys it would send). So a
+test is "this page, this reply → these clicks", through the same code a user
+runs. `test-features.js` covers every user-reachable feature; `test-platforms.js`
+runs SIMnet, Connect and Canvas on one default configuration; the smaller
+suites pin specific bugs that shipped.
+
+**Proving a test catches something.** `EXT_DIR` points the harness at another
+copy of the extension. Run a new test against the previous commit — it should
+fail there and pass now:
+
+```
+mkdir /tmp/old && git show HEAD~1:extension/content.js > /tmp/old/content.js \
+               && git show HEAD~1:extension/background.js > /tmp/old/background.js
+EXT_DIR=/tmp/old node test/test-features.js
+```
+
+**Limits.** These are copies of each site's markup, not the sites. They catch
+the extension breaking; they can't catch McGraw Hill or Instructure changing
+their pages. For that there's *Check this page* in the control bar, which
+reports what the extension can see on the real page.
