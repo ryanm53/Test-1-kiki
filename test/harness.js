@@ -10,9 +10,9 @@ const vm = require('vm');
 // EXT_DIR lets a suite be pointed at an older copy, to prove it catches a bug
 const EXT = process.env.EXT_DIR || path.join(__dirname, '..', 'extension');
 
-function boot(html, { reply, storage = {}, installLayout, beforeLoad } = {}) {
+function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}) {
   const dom = new JSDOM(html, {
-    url: 'https://school.instructure.com/courses/1/quizzes/2/take',
+    url: url ?? 'https://school.instructure.com/courses/1/quizzes/2/take',
     pretendToBeVisual: true,
     runScripts: 'outside-only'
   });
@@ -27,6 +27,7 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad } = {}) {
   const store = { apiKey: 'sk-ant-test', autoContinue: true, ...storage };
   const requests = [];
   const debuggerCalls = [];   // trusted input sent through chrome.debugger
+  const pageMessages = [];    // everything the background asked the page
   let contentListener = null, backgroundListener = null;
 
   // ── the page side ───────────────────────────────────────────────────────
@@ -51,6 +52,7 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad } = {}) {
     },
     tabs: {
       sendMessage: (tabId, msg, opts, cb) => {
+        pageMessages.push(msg);
         // Chrome answers asynchronously; so does this
         setTimeout(() => {
           const keepOpen = contentListener(msg, {}, res => cb && cb(res));
@@ -97,12 +99,14 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad } = {}) {
 
   const shadow = () => w.document.getElementById('__cap-host')?.shadowRoot;
   return {
-    w, store, requests, debuggerCalls,
+    w, store, requests, debuggerCalls, pageMessages,
     send: msg => new Promise(res => backgroundListener(msg, { tab: { id: 1 } }, res)),
     status: () => shadow()?.getElementById('statusText')?.textContent ?? '',
     isError: () => !!shadow()?.getElementById('statusText')?.classList.contains('err'),
     pressPlay: () => shadow().getElementById('go').dispatchEvent(new w.MouseEvent('click', { bubbles: true })),
-    scrape: () => new Promise(res => contentListener({ type: 'SCRAPE' }, {}, res))
+    scrape: () => new Promise(res => contentListener({ type: 'SCRAPE' }, {}, res)),
+    toPage: msg => new Promise(res => contentListener(msg, {}, res)),
+    shadow
   };
 }
 

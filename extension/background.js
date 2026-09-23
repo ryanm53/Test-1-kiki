@@ -801,19 +801,44 @@ async function checkKey(apiKey) {
   }
 }
 
+// A short name for the page, shown in the control bar before anything runs.
+// Only for confident signals: the bar sits on every site, and "Ready ·
+// Multiple choice" on a settings page with a radio button would be worse
+// than saying nothing.
+function pageKind(p, host) {
+  if (!p || p.error) return '';
+  if (p.isSimnet)    return 'SIMnet';
+  if (p.isCanvas)    return 'Canvas quiz';
+  if (p.isWorksheet) return 'Worksheet';
+  if (p.isDrag)      return 'Drag and drop';
+  if (/(^|\.)mheducation\.com$/.test(host ?? '')) return 'Connect';
+  return '';
+}
+
+async function detectKind(tabId, host) {
+  const frameId = await findQuestionFrame(tabId);
+  const page = await sendToTab(tabId, { type: 'SCRAPE', peek: true }, frameId).catch(() => null);
+  return pageKind(page, host);
+}
+
 async function checkPage(tabId) {
   const lines = [];
-  const { apiKey, model } = await chrome.storage.local.get(['apiKey', 'model']).catch(() => ({}));
+  const { apiKey, model, autoUpgrade } =
+    await chrome.storage.local.get(['apiKey', 'model', 'autoUpgrade']).catch(() => ({}));
 
   const frameId = await findQuestionFrame(tabId);
   try {
-    lines.push(describePage(await sendToTab(tabId, { type: 'SCRAPE' }, frameId), frameId));
+    lines.push(describePage(await sendToTab(tabId, { type: 'SCRAPE', peek: true }, frameId), frameId));
   } catch (e) {
     lines.push({ ok: false, text: `Couldn't read this page: ${e.message}` });
   }
 
   lines.push(await checkKey(cleanKey(apiKey)));
-  lines.push({ info: true, text: `Model: ${MODELS[model]?.label ?? MODELS[DEFAULT_MODEL].label}` });
+  const base = MODELS[model] ? model : DEFAULT_MODEL;
+  const auto = autoUpgrade !== false && base === DEFAULT_MODEL;
+  lines.push({ info: true, text: auto
+    ? `Model: Auto — ${MODELS[base].label}, a smarter one for hard questions`
+    : `Model: ${MODELS[base].label}` });
   return { lines };
 }
 
@@ -828,6 +853,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (id) cancelledRuns.add(id);
     sendResponse({ ok: true });
     return false;
+  }
+
+  if (msg.type === 'DETECT_PAGE') {
+    const id = sender.tab?.id;
+    if (!id) { sendResponse({ kind: '' }); return false; }
+    detectKind(id, msg.host).then(kind => sendResponse({ kind }), () => sendResponse({ kind: '' }));
+    return true;
   }
 
   if (msg.type === 'CHECK_PAGE') {

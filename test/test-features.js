@@ -202,7 +202,7 @@ const run = async (html, opts) => {
     check('check page: recognises a Canvas quiz and counts it',
       text.includes('ok: Canvas quiz · 4 questions, 14 answers'), text);
     check('check page: confirms the key works', text.includes('ok: API key works'), text);
-    check('check page: shows the settings in use', /Model: Haiku 4\.5/.test(text) && /Mode: /.test(text), text);
+    check('check page: shows the settings in use', /Model: Auto/.test(text) && /Mode: Autopilot/.test(text), text);
     check('check page: costs one tiny request, answers nothing',
       page.requests.length === 1 && page.requests[0].max_tokens === 1
       && !page.w.document.querySelector('input:checked'), JSON.stringify(page.requests));

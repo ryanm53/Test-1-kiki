@@ -783,23 +783,43 @@ function bgSend(msg, cb) {
   .inline-btn:hover { opacity: 0.7; }
   .inline-btn.done { color: #30D158; }
 
-  /* iOS switch */
-  .switch {
-    width: 40px; height: 24px; flex-shrink: 0;
-    border-radius: 999px;
-    background: rgba(120, 120, 128, 0.36);
-    position: relative; cursor: pointer;
-    transition: background 0.26s cubic-bezier(0.32,0.72,0,1);
+  /* Author styles like .row { display: flex } would otherwise beat the
+     browser's own [hidden] rule and leave hidden rows showing */
+  [hidden] { display: none !important; }
+
+  .spaced { margin-top: 15px; }
+
+  /* Segmented control, as in iOS */
+  .seg {
+    display: flex; gap: 2px; padding: 2px;
+    background: rgba(118, 118, 128, 0.24);
+    border-radius: 9px;
   }
-  .switch.on { background: #30D158; }
-  .switch::after {
-    content: ''; position: absolute; top: 2px; left: 2px;
-    width: 20px; height: 20px; border-radius: 50%;
-    background: #fff;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.28);
-    transition: transform 0.26s cubic-bezier(0.32,0.72,0,1);
+  .seg button {
+    flex: 1; border: none; background: transparent;
+    color: #f5f5f7; font-family: inherit;
+    font-size: 12.5px; font-weight: 500; letter-spacing: -0.01em;
+    padding: 7px 0; border-radius: 7px; cursor: pointer;
+    transition: background 0.2s cubic-bezier(0.32,0.72,0,1);
   }
-  .switch.on::after { transform: translateX(16px); }
+  .seg button:hover { background: rgba(255, 255, 255, 0.06); }
+  .seg button.on { background: rgba(99, 99, 102, 0.95); box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
+
+  .saved-mark { font-size: 13px; color: #30D158; }
+  .inline-btn.quiet { color: rgba(235, 235, 245, 0.45); }
+
+  /* "More" disclosure */
+  .disclosure {
+    display: flex; align-items: center; gap: 7px;
+    margin: 17px 0 0 3px; padding: 2px 0;
+    border: none; background: transparent; cursor: pointer;
+    color: rgba(235, 235, 245, 0.6); font-family: inherit; font-size: 13px;
+  }
+  .disclosure:hover { color: #f5f5f7; }
+  .disc-chev { display: inline-block; font-size: 16px; line-height: 1; transition: transform 0.2s; }
+  .disclosure[aria-expanded="true"] .disc-chev { transform: rotate(90deg); }
+  #more > .label:first-child { margin-top: 12px; }
+
 
 </style>
 
@@ -812,59 +832,60 @@ function bgSend(msg, cb) {
     <div id="body">
 
       <div class="label">Mode</div>
-      <div class="group">
-        <div class="row">
-          <select id="preset"></select>
-          <span class="chev">▼</span>
-        </div>
-        <div class="row">
-          <span class="row-label">Auto-continue</span>
-          <div class="switch" id="autoSw"></div>
-        </div>
+      <div class="seg" id="mode" role="radiogroup" aria-label="Mode">
+        <button data-mode="autopilot" role="radio">Autopilot</button>
+        <button data-mode="one" role="radio">One question</button>
+        <button data-mode="answer" role="radio">Answer only</button>
       </div>
-      <div class="row-hint">Keeps going to the next question on its own.</div>
+      <div class="row-hint" id="modeHint"></div>
 
-      <div class="label">Model</div>
-      <div class="group">
-        <div class="row">
-          <select id="model"></select>
-          <span class="chev">▼</span>
+      <div class="group spaced">
+        <div class="row" id="keySaved">
+          <span class="row-label">API key</span>
+          <span class="saved-mark">✓ Saved</span>
+          <button class="inline-btn" id="changeKey">Change</button>
         </div>
-        <div class="row">
-          <span class="row-label">Upgrade on hard questions</span>
-          <div class="switch" id="upgradeSw"></div>
-        </div>
-      </div>
-      <div class="row-hint" id="modelHint"></div>
-      <div class="row-hint">Worksheets and drag questions use one tier up, where the cheap model tends to slip. Everything else stays on your pick.</div>
-
-      <div class="label">Notes <span class="opt">Optional</span></div>
-      <div class="group">
-        <textarea id="notes" rows="3" placeholder="e.g. This is financial accounting — use GAAP conventions."></textarea>
-      </div>
-      <div class="row-hint">Course context or hints. Leave blank if you don't need it.</div>
-
-      <div class="label">API Key</div>
-      <div class="group">
-        <div class="row">
-          <input type="password" id="key" placeholder="sk-ant-api03-…" autocomplete="off" spellcheck="false" />
+        <div class="row" id="keyEdit">
+          <input type="password" id="key" placeholder="Paste your API key" autocomplete="off" spellcheck="false" />
+          <button class="inline-btn quiet" id="cancelKey">Cancel</button>
           <button class="inline-btn" id="saveKey">Save</button>
         </div>
       </div>
+      <div class="row-hint" id="keyHint">Needed to start. It begins sk-ant-api03- — the setup guide shows where to get one.</div>
 
-      <div class="label">Troubleshooting</div>
-      <div class="group">
-        <div class="row">
-          <span class="row-label">Check this page</span>
-          <button class="inline-btn" id="checkPage">Run</button>
+      <button class="disclosure" id="moreBtn" aria-expanded="false" aria-controls="more">
+        <span class="disc-chev">›</span>More
+      </button>
+      <div id="more" hidden>
+        <div class="label">Model</div>
+        <div class="group">
+          <div class="row">
+            <select id="model"></select>
+            <span class="chev">▼</span>
+          </div>
         </div>
-        <div class="row">
-          <span class="row-label">Copy last prompt</span>
-          <button class="inline-btn" id="copyPrompt">Copy</button>
+        <div class="row-hint" id="modelHint"></div>
+
+        <div class="label">Notes <span class="opt">Optional</span></div>
+        <div class="group">
+          <textarea id="notes" rows="3" placeholder="e.g. This is financial accounting — use GAAP conventions."></textarea>
         </div>
+        <div class="row-hint">Course context or hints. Leave blank if you don't need it.</div>
+
+        <div class="label">Troubleshooting</div>
+        <div class="group">
+          <div class="row">
+            <span class="row-label">Check this page</span>
+            <button class="inline-btn" id="checkPage">Run</button>
+          </div>
+          <div class="row">
+            <span class="row-label">Copy last prompt</span>
+            <button class="inline-btn" id="copyPrompt">Copy</button>
+          </div>
+        </div>
+        <div id="checkResult"></div>
+        <div class="row-hint">Check this page shows what it can see here and whether your key works. Copy last prompt copies exactly what was last sent to Claude, for diagnosing wrong answers.</div>
       </div>
-      <div id="checkResult"></div>
-      <div class="row-hint">Check this page shows what it can see here and whether your key works. Copy last prompt copies exactly what was last sent to Claude, for diagnosing wrong answers.</div>
 
     </div>
   </div>
@@ -881,20 +902,27 @@ function bgSend(msg, cb) {
   const goBtn = $('go'), gear = $('gear'), panel = $('panel'), closeBtn = $('close');
   const bar = $('bar');
   const dot = $('dot'), statusText = $('statusText'), statusWrap = $('status');
-  const presetSel = $('preset'), notesInput = $('notes'), autoSw = $('autoSw');
-  const modelSel = $('model'), modelHint = $('modelHint'), upgradeSw = $('upgradeSw');
-  const keyInput = $('key'), saveKeyBtn = $('saveKey');
+  const modeSeg = $('mode'), modeHint = $('modeHint'), notesInput = $('notes');
+  const modelSel = $('model'), modelHint = $('modelHint');
+  const keyInput = $('key'), saveKeyBtn = $('saveKey'), cancelKeyBtn = $('cancelKey');
+  const keySavedRow = $('keySaved'), keyEditRow = $('keyEdit'), keyHint = $('keyHint');
+  const changeKeyBtn = $('changeKey'), moreBtn = $('moreBtn'), more = $('more');
   const copyPromptBtn = $('copyPrompt');
   const checkPageBtn = $('checkPage'), checkResult = $('checkResult');
 
   gear.innerHTML = ICON_GEAR;
 
   // ── State ──────────────────────────────────────────────────────────────────
-  let presetIndex = 0;     // which post-answer flow; also supplies postClicks
+  let mode = 'autopilot';  // one of MODES, below
+  let presetIndex = 0;     // which post-answer flow; set by the mode
+  let autoContinue = true; // whether to go on to the next question; set by the mode
   let notes = '';          // optional user context, sent only when non-empty
-  let autoContinue = true;
-  let autoUpgrade = true;
   let hasKey = false;
+  let pageKind = '';       // what the page looks like — "Canvas quiz" — shown when idle
+  // Declared up here, not beside the detection code, because the settings
+  // loader below can call into it synchronously (when the extension has just
+  // been reloaded) — before a later `let` would exist.
+  let detectTimer = null, detectedHref = '', retriedHref = '';
   let lastModel = '';    // model the most recent question actually used
 
   let isRunning = false;   // a request is in flight
@@ -925,10 +953,41 @@ function bgSend(msg, cb) {
     { label: 'Answer only', postClicks: [] }
   ];
 
-  PRESETS.forEach((p, i) => {
-    const o = document.createElement('option');
-    o.value = i; o.textContent = p.label;
-    presetSel.appendChild(o);
+  // One choice for the user, standing for a post-answer flow plus whether to
+  // continue. These used to be two controls whose combinations weren't named
+  // anywhere; the old settings are still written, so the run logic is unchanged.
+  const MODES = {
+    autopilot: { label: 'Autopilot',    preset: 0, autoContinue: true,
+                 hint: 'Answers, rates confidence, clicks Next, and keeps going.' },
+    one:       { label: 'One question', preset: 0, autoContinue: false,
+                 hint: 'Answers one question and clicks Next, then stops. Press play for each.' },
+    answer:    { label: 'Answer only',  preset: 1, autoContinue: true,
+                 hint: 'Picks the answer, then waits for you to click Next — and answers each new question as it appears.' }
+  };
+
+  // For someone upgrading: read the mode their old two settings amounted to
+  function legacyMode(s) {
+    if (s.lastPresetIndex === 1) return 'answer';
+    if (s.autoContinue === false) return 'one';
+    return 'autopilot';
+  }
+
+  function setMode(m, save) {
+    mode = MODES[m] ? m : 'autopilot';
+    presetIndex = MODES[mode].preset;
+    autoContinue = MODES[mode].autoContinue;
+    for (const b of modeSeg.querySelectorAll('button')) {
+      const on = b.dataset.mode === mode;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-checked', String(on));
+    }
+    modeHint.textContent = MODES[mode].hint;
+    if (save) store.set({ mode, lastPresetIndex: presetIndex, autoContinue });
+  }
+
+  modeSeg.addEventListener('click', e => {
+    const b = e.target.closest('button[data-mode]');
+    if (b) setMode(b.dataset.mode, true);
   });
 
   // Keep in sync with MODELS in background.js
@@ -939,18 +998,29 @@ function bgSend(msg, cb) {
   ];
   const DEFAULT_MODEL = 'claude-haiku-4-5';
 
-  MODEL_LIST.forEach(m => {
+  // Auto is the cheap model with an upgrade for hard questions — what the old
+  // "Upgrade on hard questions" switch did, without a second control. Picking
+  // a model by name means that model every time.
+  const AUTO = {
+    id: 'auto', label: 'Auto',
+    note: 'Recommended. The cheapest model for most questions, and a smarter one for SIMnet, worksheets and drag-and-drop.'
+  };
+  [AUTO, ...MODEL_LIST].forEach(m => {
     const o = document.createElement('option');
     o.value = m.id; o.textContent = m.label;
     modelSel.appendChild(o);
   });
 
+  // The model a run starts on; Auto may upgrade from it
+  const baseModel = () => modelSel.value === 'auto' ? DEFAULT_MODEL : modelSel.value;
+
   function showModelHint() {
-    modelHint.textContent = MODEL_LIST.find(m => m.id === modelSel.value)?.note ?? '';
+    modelHint.textContent = [AUTO, ...MODEL_LIST].find(m => m.id === modelSel.value)?.note ?? '';
   }
 
   modelSel.addEventListener('change', () => {
-    store.set({ model: modelSel.value });
+    const auto = modelSel.value === 'auto';
+    store.set({ model: baseModel(), autoUpgrade: auto });
     showModelHint();
   });
 
@@ -961,7 +1031,7 @@ function bgSend(msg, cb) {
     goBtn.classList.toggle('active', active);
     goBtn.title = active ? 'Stop' : 'Start';
 
-    let cls = 'idle', text = 'Ready';
+    let cls = 'idle', text = hasKey ? 'Ready' : 'Add your API key to start';
     if (errorMsg)        { cls = 'err';  text = errorMsg; }
     else if (infoMsg && !isRunning && !waiting) { cls = 'idle'; text = infoMsg; }
     else if (rateSecs)   { cls = 'hold'; text = `Rate limited · ${rateSecs}s`; }
@@ -969,9 +1039,14 @@ function bgSend(msg, cb) {
     else if (isRunning)  { cls = 'run';  text = 'Answering…' + stepNote; }
     else if (waiting)    { cls = 'run';  text = waitingForUser ? 'Click Next when ready' : 'Next question…'; }
 
+    // Before anything has happened, say what the page looks like, so it's
+    // plain the question was recognised before anything is spent on it
+    const idle = hasKey && !errorMsg && !infoMsg && !isRunning && !waiting && !paused && !rateSecs;
+    if (idle && answered === 0 && pageKind) text += ` · ${pageKind}`;
+
     if (answered > 0 && !errorMsg) text += ` · ${answered}`;
-    // Show the model only when it differs from the one picked in settings
-    if (lastModel && lastModel !== modelSel.value && !errorMsg) {
+    // Show the model only when it differs from the one the run started on
+    if (lastModel && lastModel !== baseModel() && !errorMsg) {
       text += ` · ↑ ${MODEL_LIST.find(m => m.id === lastModel)?.label ?? lastModel}`;
     }
 
@@ -1011,24 +1086,24 @@ function bgSend(msg, cb) {
 
   // ── Persistence ────────────────────────────────────────────────────────────
   store.get(
-    ['lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'model', 'barPos'],
+    ['mode', 'lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'model', 'barPos'],
     s => {
-      presetIndex = PRESETS[s.lastPresetIndex] ? s.lastPresetIndex : 0;
-      presetSel.value = String(presetIndex);
+      setMode(MODES[s.mode] ? s.mode : legacyMode(s), false);
 
       notes = s.notes ?? '';
       notesInput.value = notes;
 
-      autoContinue = s.autoContinue !== false;
-      autoSw.classList.toggle('on', autoContinue);
-
-      autoUpgrade = s.autoUpgrade !== false;
-      upgradeSw.classList.toggle('on', autoUpgrade);
-
-      modelSel.value = MODEL_LIST.some(m => m.id === s.model) ? s.model : DEFAULT_MODEL;
+      // Auto is the old default pairing: cheapest model, upgrade switched on
+      const named = MODEL_LIST.some(m => m.id === s.model) ? s.model : DEFAULT_MODEL;
+      const auto = s.autoUpgrade !== false && named === DEFAULT_MODEL;
+      modelSel.value = auto ? 'auto' : named;
+      // An older pairing like "Sonnet, upgrading on hard questions" has no
+      // place in the new list; it becomes plain Sonnet, as the menu shows it
+      if (!auto && s.autoUpgrade !== false) store.set({ autoUpgrade: false });
       showModelHint();
 
-      if (s.apiKey) { keyInput.value = s.apiKey; hasKey = true; }
+      hasKey = !!s.apiKey;
+      showKeyEditor(!hasKey);
 
       // Where the user last parked the bar. Clamped on the way in, so a
       // position saved on a bigger screen still lands somewhere visible.
@@ -1039,6 +1114,7 @@ function bgSend(msg, cb) {
       }
 
       render();
+      scheduleDetect(1500);
 
       // Arrived here by the loop's own Next click: carry on. The previous
       // page's run finished (it clicked Next), so count it.
@@ -1050,11 +1126,6 @@ function bgSend(msg, cb) {
     }
   );
 
-  presetSel.addEventListener('change', () => {
-    presetIndex = parseInt(presetSel.value) || 0;
-    store.set({ lastPresetIndex: presetIndex });
-  });
-
   let notesDebounce = null;
   notesInput.addEventListener('input', () => {
     clearTimeout(notesDebounce);
@@ -1064,32 +1135,72 @@ function bgSend(msg, cb) {
     }, 400);
   });
 
-  upgradeSw.addEventListener('click', () => {
-    autoUpgrade = !autoUpgrade;
-    upgradeSw.classList.toggle('on', autoUpgrade);
-    store.set({ autoUpgrade });
-  });
-
-  autoSw.addEventListener('click', () => {
-    autoContinue = !autoContinue;
-    autoSw.classList.toggle('on', autoContinue);
-    store.set({ autoContinue });
-  });
+  // A saved key is set-and-forget, so it shrinks to one line. The editor never
+  // shows the saved key back: Change starts from an empty box.
+  function showKeyEditor(editing) {
+    keySavedRow.hidden = editing;
+    keyEditRow.hidden = !editing;
+    cancelKeyBtn.hidden = !hasKey;     // nothing to go back to without one
+    keyHint.hidden = hasKey;
+    keyInput.value = '';
+  }
 
   saveKeyBtn.addEventListener('click', () => {
     const k = keyInput.value.trim();
-    if (!k) return;
+    if (!k) { keyInput.focus(); return; }
     store.set({ apiKey: k }, () => {
       hasKey = true;
-      saveKeyBtn.textContent = 'Saved';
-      saveKeyBtn.classList.add('done');
-      setTimeout(() => {
-        saveKeyBtn.textContent = 'Save';
-        saveKeyBtn.classList.remove('done');
-      }, 1600);
+      errorMsg = '';
+      showKeyEditor(false);
+      render();
+      scheduleDetect(0, true);
     });
   });
+  changeKeyBtn.addEventListener('click', () => { showKeyEditor(true); keyInput.focus(); });
+  cancelKeyBtn.addEventListener('click', () => showKeyEditor(false));
   keyInput.addEventListener('keydown', e => { if (e.key === 'Enter') saveKeyBtn.click(); });
+
+  // Model, notes and troubleshooting: available, out of the way
+  moreBtn.addEventListener('click', () => {
+    const open = more.hidden;
+    more.hidden = !open;
+    moreBtn.setAttribute('aria-expanded', String(open));
+  });
+
+  // ── Recognising the page ──────────────────────────────────────────────────
+  // Asks the background what the page is — it knows which frame holds the
+  // question — once the page has had a moment to draw, and again when the
+  // address changes. Reading the page never involves Claude, and is done as a
+  // peek that leaves a run's element list alone.
+  function scheduleDetect(delay, force) {
+    clearTimeout(detectTimer);
+    detectTimer = setTimeout(() => detectPage(force), delay);
+  }
+  function detectPage(force) {
+    if (!hasKey || isRunning || waiting || document.hidden) return;
+    if (!force && location.href === detectedHref) return;
+    const href = detectedHref = location.href;
+    bgSend({ type: 'DETECT_PAGE', host: location.hostname }, res => {
+      if (href !== location.href) return;      // moved on in the meantime
+      pageKind = res?.kind ?? '';
+      render();
+      // A page that draws its question late gets exactly one more look.
+      // Most pages aren't quizzes at all, so never more than one.
+      if (!pageKind && retriedHref !== href) {
+        retriedHref = href;
+        scheduleDetect(3500, true);
+      }
+    });
+  }
+  // Web apps change address without reloading the page
+  let seenHref = location.href;
+  setInterval(() => {
+    if (location.href === seenHref) return;
+    seenHref = location.href;
+    pageKind = '';
+    render();
+    scheduleDetect(1500);
+  }, 1000);
 
 
   checkPageBtn.addEventListener('click', () => {
@@ -1101,7 +1212,7 @@ function bgSend(msg, cb) {
       const lines = sendError ? [{ ok: false, text: sendError }]
                   : res?.lines ?? [{ ok: false, text: 'No response from the extension. Refresh this page and try again.' }];
       if (!sendError) {
-        lines.push({ info: true, text: `Mode: ${PRESETS[presetIndex].label} · auto-continue ${autoContinue ? 'on' : 'off'}` });
+        lines.push({ info: true, text: `Mode: ${MODES[mode].label}` });
       }
       // textContent, never innerHTML: these lines carry page and API text
       checkResult.replaceChildren(...lines.map(l => {
@@ -1399,10 +1510,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === 'SCRAPE') {
+    // A peek (recognising the page, Check this page) must leave alone the
+    // list a run's clicks point into, or an idle look could shift an index
+    // between a run's read and its click.
+    const kept = _lastElements;
     try {
       sendResponse(scrape());
     } catch (e) {
       sendResponse({ error: e.message, text: '', elements: [] });
+    } finally {
+      if (msg.peek) _lastElements = kept;
     }
     return false;
   }

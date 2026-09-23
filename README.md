@@ -90,9 +90,9 @@ If yours is short, or starts with `apikey_`, it's the wrong one. The real key is
 ## Step 4 — Set it up
 
 1. Open your quiz in Chrome and go to a question
-2. Look at the **bottom-left corner** of the page. There's a small dark bar with a **play button ▶** and a **gear ⚙**
+2. Look at the **bottom-left corner** of the page. There's a small dark bar with a **play button ▶** and a **gear ⚙**. It says *"Add your API key to start"*
 3. Click the **gear** to open settings
-4. Paste your API key into the **API Key** box and click **Save**. It turns green and says "Saved"
+4. Paste your API key into the box and click **Save**. The box folds away to one line: **API key ✓ Saved**
 5. Leave everything else on its defaults
 
 > **No bar in the corner?** Refresh the page. The extension only loads into pages that were opened or refreshed after you installed it.
@@ -120,7 +120,8 @@ The bar shows you what's happening as it goes:
 
 | What it says | Meaning |
 |---|---|
-| **Ready** | Idle, waiting for you |
+| **Add your API key to start** | No key saved yet — see Step 4 |
+| **Ready · Canvas quiz** | Idle, and it has recognised the page: *Connect*, *SIMnet*, *Canvas quiz*, *Worksheet* or *Drag and drop*. On other sites it just says **Ready** |
 | **Answering… · 7** | Working on a question. It's done 7 so far |
 | **Next question… · 7** | Waiting for the next question to load |
 | **Click Next when ready** | *Answer only* mode: it's answered, and waits for you to move on |
@@ -135,16 +136,19 @@ The bar shows you what's happening as it goes:
 
 ## Settings
 
-Click the **gear ⚙** to open these.
+Click the **gear ⚙** to open these. Most people only ever need the first two.
 
 | Setting | What it does |
 |---|---|
-| **Mode** | *Answer, confidence, next* does the full flow — leave it on this everywhere; sites without a confidence rating (Canvas, SIMnet) just skip that part. *Answer only* stops after picking the answer, so you click through yourself |
-| **Auto-continue** | On: works through the whole quiz. Off: does one question per press of play |
-| **Model** | Which AI does the thinking. **Haiku 4.5** is the default — fastest and cheapest. **Sonnet 5** is noticeably smarter for about 2× the cost. **Opus 5** is the most capable, about 5× |
-| **Upgrade on hard questions** | On by default. SIMnet tasks, multi-blank worksheets and drag-and-drop questions need real reasoning, so those automatically use one tier up while everything else stays on your pick. When it upgrades, the status bar shows **↑ Sonnet 5** so you can see it happen. Turn this off to always use your chosen model |
+| **Mode** | **Autopilot** *(default)*: answers, rates confidence, clicks Next, and keeps going through the whole thing. **One question**: does one question, clicks Next, then stops — press play for each. **Answer only**: picks the answer and waits for you to click Next, then answers the next one when it appears. Sites without a confidence rating (Canvas, SIMnet) just skip that part |
+| **API key** | Your key from Step 3. Once saved it's one line; **Change** replaces it |
+
+Tap **More** for the rest:
+
+| Setting | What it does |
+|---|---|
+| **Model** | Which AI does the thinking. **Auto** *(default, recommended)* uses the cheapest model for most questions and a smarter one for SIMnet, worksheets and drag-and-drop — the bar shows **↑ Sonnet 5** when it steps up. Or pick one to use every time: **Haiku 4.5** is fastest and cheapest, **Sonnet 5** is noticeably smarter for about 2× the cost, **Opus 5** is the most capable at about 5× |
 | **Notes** *(optional)* | Extra context to improve accuracy, e.g. *"This is financial accounting — use GAAP conventions."* Fine to leave blank |
-| **API Key** | Your key from Step 3 |
 | **Troubleshooting** | *Check this page* — see [Troubleshooting](#troubleshooting). *Copy last prompt* copies exactly what was sent to Claude last time |
 
 ---
@@ -165,7 +169,7 @@ Switching to Sonnet 5 costs about twice that, Opus 5 about five times. Even so, 
 
 ## Troubleshooting
 
-**Start here, whatever the problem:** open the gear ⚙, scroll to **Troubleshooting**, and press **Run** next to **Check this page**. In a couple of seconds it tells you:
+**Start here, whatever the problem:** open the gear ⚙, tap **More**, and press **Run** next to **Check this page**. In a couple of seconds it tells you:
 
 - what kind of page it thinks you're on, and how many questions it can see (*"Canvas quiz · 4 questions, 14 answers to pick from"*)
 - whether your API key works — and if not, why
@@ -186,7 +190,7 @@ Drag questions need Chrome's debugger, and only one thing can use that at a time
 It hit a question type it doesn't understand. Answer that one yourself, then press play to carry on.
 
 **Nothing happens when I press play**
-Check that your API key is saved (gear → API Key), and that your account actually has credit on it.
+Check that the gear ⚙ shows **API key ✓ Saved**, and that your account actually has credit on it. **Check this page** tests both.
 
 **The bar disappeared**
 Refresh the page. If it's still missing, go to `chrome://extensions` and check Page Agent is still enabled — and that you haven't moved or deleted the folder from Step 1.
@@ -195,7 +199,7 @@ Refresh the page. If it's still missing, go to `chrome://extensions` and check P
 Canvas has two quiz systems. This works with **Classic Quizzes** — the address bar shows `/quizzes/` followed by `/take`. The newer *New Quizzes* (the address shows `/assignments/`, and the quiz sits in a box inside the page) isn't supported yet.
 
 **It picked a wrong answer**
-It isn't perfect, especially on harder material. Try switching the **Model** to Sonnet 5, or add course context in **Notes**.
+It isn't perfect, especially on harder material. Under **More**, try setting **Model** to Sonnet 5, or add course context in **Notes**.
 
 ---
 

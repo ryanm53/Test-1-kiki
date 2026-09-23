@@ -142,6 +142,19 @@ change between sites.
   carried across it by a short-lived note in the tab's `sessionStorage`,
   refreshed by each step's heartbeat and deleted by anything that ends a run.
 
+The control bar names the page before anything runs ("Ready · Canvas quiz").
+It asks the background (`DETECT_PAGE`), which picks the question frame and
+reads it with `SCRAPE {peek: true}` — a read that restores `_lastElements`
+afterwards, so an idle look can never shift the indexes a run is about to
+click. *Check this page* peeks the same way. Detection happens once per
+address (plus one retry for late-drawing pages), never calls Claude, and is
+skipped until a key is saved.
+
+Settings are stored under their original keys (`lastPresetIndex`,
+`autoContinue`, `model`, `autoUpgrade`) plus `mode`; the panel's Mode and
+Model menus are views over them, and older saved settings are read back into
+the nearest new choice.
+
 Nothing starts a run except the play button or that note. (An earlier hook
 auto-ran on any `pushState` navigation, on any site — removed.)
 
