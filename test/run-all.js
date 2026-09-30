@@ -16,6 +16,7 @@ const SUITES = [
   ['test-simnet-verdict.js', "SIMnet: reads its right/wrong popup, retries with the hint, spares the last attempt"],
   ['test-simnet-real.js', 'SIMnet: every failure in a real exercise log, replayed'],
   ['test-log.js',        'Answer log: records runs and verdicts, thumbs-down, download, clear'],
+  ['test-connect-log.js', 'Connect: a real accounting log replayed, sums and all'],
   ['test-platforms.js',  'SIMnet, Connect and Canvas on the same default settings'],
   ['test-canvas.js',     'Canvas quizzes: whole page, one at a time, never submits'],
   ['test-resilience.js', 'Survives re-injection, extension reload, pages that wipe the bar'],

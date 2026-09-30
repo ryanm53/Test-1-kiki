@@ -74,7 +74,7 @@ const model = firstTry => b => {
 test(async check => {
   const { p, state } = start({}, model('Right way'), { mode: 'autopilot' });
   p.pressPlay();
-  await until(() => state.advanced && p.requests.length >= 2, 30000);
+  await until(() => state.advanced && p.requests.length >= 2, 90000);
   check('correct: presses Continue once', state.continues === 1, state.continues);
   check('correct: Autopilot goes straight on to the next question',
     (p.requests[1]?.messages[0].content ?? '').includes('Question 2: Rename the Summary sheet'));

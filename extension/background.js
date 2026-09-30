@@ -33,8 +33,32 @@ const UPGRADE_TO = {
 
 function pickModel(baseModel, pageData, autoUpgrade) {
   if (!autoUpgrade) return baseModel;
-  const hard = pageData?.isWorksheet || pageData?.isDrag || pageData?.isSimnet;
+  const hard = pageData?.isWorksheet || pageData?.isDrag || pageData?.isSimnet || isMath(pageData);
   return hard ? (UPGRADE_TO[baseModel] ?? baseModel) : baseModel;
+}
+
+// A multiple-choice page answered with a click that picks no choice at all
+const isChoice = e => e?.tag === 'input' && /^(radio|checkbox)$/.test(e.type ?? '');
+function missedTheChoices(action, elements) {
+  if (!elements.some(isChoice)) return false;
+  const picked = action.action === 'click' ? [action.index]
+               : action.action === 'clickMany' ? (action.indexes ?? []) : null;
+  return !!picked && !picked.some(i => isChoice(elements[i]));
+}
+
+// A question to work out rather than recall: "Allowance of $5,000, write-offs
+// of $4,000, estimate of $9,000 — by how much did assets change?" The cheap
+// model answers in one breath with no room to work, and in a real accounting
+// log it got every one of these wrong or gave up. Three or more amounts
+// (dollars or percentages) across the question and its choices marks one.
+// Canvas is left out: a whole quiz on one page would count every question's.
+const AMOUNT = /\$\s?\d[\d,]*(?:\.\d+)?|\b\d+(?:\.\d+)?\s?%/g;
+function isMath(pageData) {
+  if (!pageData || pageData.isCanvas) return false;
+  const questions = [...new Set((pageData.elements ?? []).map(e => e.question).filter(Boolean))];
+  const choices = (pageData.elements ?? []).map(e => e.text ?? '').join('\n');
+  const text = `${pageData.text ?? ''}\n${questions.join('\n')}\n${choices}`;
+  return new Set(text.match(AMOUNT) ?? []).size >= 3;
 }
 
 // Keys a SIMnet step may press. Kept in step with KEY_CODES in content.js.
@@ -277,6 +301,17 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
   const model = resolveModel(modelId);
   const cfg = MODELS[model];
 
+  // The question each control belongs to. Usually one for the whole page,
+  // and then it's stated once, in full: repeated beside every element it was
+  // cut to 120 characters, which dropped the amounts a calculation needs.
+  // (Canvas already puts every question in the page text.)
+  const questions = [...new Set(elements.map(el => el.question).filter(Boolean))]
+    .filter((q, _, all) => !all.some(o => o !== q && o.includes(q)));
+  const perElementQuestion = isCanvas || questions.length > 1;
+  const questionSection = !isCanvas && questions.length
+    ? `Question${questions.length > 1 ? 's' : ''}:\n${questions.slice(0, 3).map(q => q.slice(0, 1500)).join('\n\n')}\n\n`
+    : '';
+
   const elementList = elements
     .map((el, i) => {
       const parts = [`[${i}]`, el.tag];
@@ -291,7 +326,7 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
       if (el.name) parts.push(`name="${el.name}"`);
       if (el.cell) parts.push(`cell=${el.cell}`);
       if (el.selected) parts.push('(selected)');
-      if (el.question) parts.push(`(question: "${el.question.slice(0, 120)}")`);
+      if (el.question && perElementQuestion) parts.push(`(question: "${el.question.slice(0, 120)}")`);
       return parts.join(' ');
     })
     .join('\n');
@@ -309,8 +344,8 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
     ? `SIMnet marked your previous attempt at this task INCORRECT and gave this hint:\n"${retryHint}"\nThe task has been reset. Follow the hint's steps exactly, one per reply.\n\n`
     : '';
 
-  const userContent = `${notesSection}${retrySection}${historySection}Page text:
-${pageText.slice(0, isWorksheet || isCanvas ? 3000 : isSimnet ? 1500 : 800)}
+  const userContent = `${notesSection}${retrySection}${historySection}${questionSection}Page text:
+${pageText.slice(0, isWorksheet || isCanvas ? 3000 : isSimnet ? 1500 : 2000)}
 
 Elements (click by index):
 ${elementList || '(none found)'}`;
@@ -781,6 +816,9 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   let retryHint = '';
   let round = 0;
   let ungradedDone = 0;    // "done" claims SIMnet didn't grade, this round
+  let escalated = false;   // Auto gave the question to the stronger model after the cheap one gave up
+  const canEscalate = () => autoUpgrade && !escalated
+    && !!UPGRADE_TO[baseModel] && UPGRADE_TO[baseModel] !== usedModel;
 
   rounds: for (;;) {
   steps: for (let step = 0; step < budget; step++) {
@@ -838,7 +876,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
           } catch (_) { /* outer frame unreachable — use what we have */ }
         }
 
-        usedModel = pickModel(baseModel, pageData, autoUpgrade);
+        usedModel = escalated ? (UPGRADE_TO[baseModel] ?? baseModel) : pickModel(baseModel, pageData, autoUpgrade);
         const { action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint);
 
         log?.steps.push({
@@ -850,6 +888,14 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         const bad = badIndexes(action, pageData.elements.length);
         if (bad.length) {
           throw new Error(`Referred to item ${bad.join(', ')}, which isn't on the page.`);
+        }
+
+        // Clicking the question's own box, or a confidence button, answers
+        // nothing — the real log has both. Same treatment as giving up.
+        if (!isSimnet && !isCanvas && completed === 0 && missedTheChoices(action, pageData.elements) && canEscalate()) {
+          escalated = true;
+          attempt--;
+          continue;
         }
 
         if (action.action === 'none') {
@@ -874,7 +920,13 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
                      error: "It thinks it's done, but SIMnet hasn't graded anything. Check it and finish this one yourself." };
           }
           const alreadyDone = isCanvas && everyQuestionAnswered(pageData.elements);
-          if (completed === 0 && !alreadyDone) return { success: true, action, noAnswer: true, usedModel };
+          if (completed === 0 && !alreadyDone) {
+            // On Auto, the cheap model saying "none" on a question it could
+            // see is usually it giving up, not the page having no question.
+            // One more look, from the stronger model, before stopping.
+            if (canEscalate()) { escalated = true; attempt--; continue; }
+            return { success: true, action, noAnswer: true, usedModel };
+          }
           finished = true;
           saidDone = true;
           stepDone = true;

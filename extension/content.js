@@ -51,6 +51,21 @@ function inViewport(el) {
       && r.right >= 0 && r.left <= window.innerWidth;
 }
 
+// The part of the page the question is in, to skip nav, header and footer.
+// Not simply the first main/article/form: a page can have several, and the
+// first may be empty — McGraw Hill's has one, which left the model the first
+// 120 characters of each question and none of its dollar amounts. The one
+// holding the most controls wins; if none has any text, the whole page.
+function pageRoot() {
+  let best = null, most = -1;
+  for (const el of document.querySelectorAll('[role="main"], main, article, form')) {
+    if ((el.innerText ?? '').trim().length < 20) continue;
+    const n = el.querySelectorAll(INTERACTIVE_SEL).length;
+    if (n > most) { best = el; most = n; }
+  }
+  return best ?? document.body;
+}
+
 // Resolve an element's accessible label, including aria-labelledby chains.
 // Many platforms (e.g. Angular quiz apps) store the visible answer text in a
 // separate <span> pointed to by aria-labelledby rather than inside the input.
@@ -91,11 +106,11 @@ function nearestQuestionText(el) {
       if (promptId) {
         const promptEl = document.getElementById(promptId);
         const t = promptEl?.innerText?.trim();
-        if (t) return t.slice(0, 200);
+        if (t) return t.slice(0, 1500);
       }
       // Fallback: use the legend text itself if it's meaningful
       const legendText = legend.innerText?.trim();
-      if (legendText && legendText.length > 5) return legendText.slice(0, 200);
+      if (legendText && legendText.length > 5) return legendText.slice(0, 1500);
     }
   }
   // Generic fallback: walk up looking for a .prompt or similar container
@@ -104,7 +119,7 @@ function nearestQuestionText(el) {
     const prompt = node.querySelector('.prompt, [class*="question-text"], [class*="questionText"]');
     if (prompt) {
       const t = prompt.innerText?.trim();
-      if (t) return t.slice(0, 200);
+      if (t) return t.slice(0, 1500);
     }
     node = node.parentElement;
   }
@@ -232,8 +247,7 @@ function describeEl(el) {
 
 function scrape() {
   // Prefer the main content area to skip nav/header/footer noise
-  const root = document.querySelector('[role="main"], main, article, form')
-             ?? document.body;
+  const root = pageRoot();
 
   const all = Array.from(document.querySelectorAll(INTERACTIVE_SEL)).filter(isRendered);
 
@@ -1922,8 +1936,7 @@ function bgSend(msg, cb) {
         }
 
         // Wait for the page to actually change before the next question
-        const root = document.querySelector('[role="main"], main, article, form') ?? document.body;
-        waitForPageChange((root.innerText ?? '').slice(0, 400), token);
+        waitForPageChange((pageRoot().innerText ?? '').slice(0, 3000), token);
       }
     );
   }
@@ -1940,8 +1953,7 @@ function bgSend(msg, cb) {
     const deadline = waitingForUser ? Infinity : Date.now() + 5000;
     (function check() {
       if (token !== runToken) return;
-      const root = document.querySelector('[role="main"], main, article, form') ?? document.body;
-      const now = (root.innerText ?? '').slice(0, 400);
+      const now = (pageRoot().innerText ?? '').slice(0, 3000);
       if (now !== snapshot || Date.now() > deadline) {
         waiting = false;
         triggerRun();

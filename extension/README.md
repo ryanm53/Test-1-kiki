@@ -120,6 +120,20 @@ Anthropic recommends for that category. A refusal that survives the fallback is 
 as such and not retried. A saved `claude-opus-5` (the model Opus 5.5 replaced in the
 menu) is read as `claude-opus-5-5`.
 
+### Auto model choice
+
+On **Auto** (the default: Haiku 4.5 with `autoUpgrade` on), `pickModel` sends a page to
+Opus 5.5 when it needs working out rather than recall: SIMnet, worksheets, drag
+questions, and calculation questions — three or more distinct dollar amounts or
+percentages across the question and its choices (`isMath`; Canvas excepted, since a
+whole quiz on one page would add up every question's). A real accounting log had Haiku
+wrong or giving up on every one of those. Everything else stays on Haiku.
+
+Haiku can still give up on a question it could see. On Auto, a first-step `none`, or a
+click that picks no radio/checkbox on a page that has them (the question's own box, a
+confidence button), is taken as that: the step is re-asked once of Opus 5.5 before the
+run stops. With a model picked by hand, nothing is re-routed.
+
 ### Drag-and-drop via trusted input
 
 McGraw Hill's drag questions are built on **react-beautiful-dnd**, which ignores
@@ -137,7 +151,11 @@ change between sites.
 
 - **Connect** — the ordinary path. After answering, the preset's post-clicks run:
   High Confidence (optional — skipped when absent, e.g. worksheets) then Next.
-- **SIMnet** — detected by its grid (`td.grdbdy-cell`). Up to six steps per task,
+  The page text comes from `pageRoot()`: of the page's main/article/form areas,
+  the one with text that holds the most controls. Connect's first such area is an
+  empty form, and taking the first one left the model no page text at all. The
+  question each control sits under is stated once, in full, above the page text.
+- **SIMnet** — detected by its grid (`td.grdbdy-cell`). Up to eight steps per task,
   then the run ends with a note: no Connect post-clicks, and no second pass that
   would start editing a finished task.
 - **SIMnet moves** — besides click, SIMnet steps can `doubleClick`, `rightClick`,
@@ -219,7 +237,7 @@ auto-ran on any `pushState` navigation, on any site — removed.)
 ### Token usage
 
 The request is kept small: a short system prompt, a compact action object back, and
-only as much of the page as the platform needs. Page text is cut to 800 characters on
+only as much of the page as the platform needs. Page text is cut to 2,000 characters on
 ordinary questions, 1,500 on SIMnet and 3,000 on worksheets and Canvas. Elements are
 capped per platform: 25 on-screen ones for ordinary questions, 60 on worksheets, 150 on
 a whole-page Canvas quiz and 130 on SIMnet (newly opened menus first).
