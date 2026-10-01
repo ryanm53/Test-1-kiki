@@ -2,7 +2,7 @@
 
 A Chrome extension that reads the question on screen and answers it for you, then moves to the next one.
 
-Works on **McGraw Hill Connect**, **SIMnet** (McGraw Hill's practice Excel), and **Canvas quizzes**. It handles multiple choice, true/false, "select all that apply", fill-in-the-blank, accounting worksheets, and drag-and-drop ordering questions.
+Works on **McGraw Hill Connect**, **SIMnet** (McGraw Hill's practice Excel), and **Canvas quizzes**. It handles multiple choice, true/false, "select all that apply", fill-in-the-blank, dropdowns, accounting worksheets (including ones split into **Required 1 / Required 2** tabs), and drag-and-drop ordering questions.
 
 It works out which site it's on by itself — you can go from a SIMnet assignment to a Canvas quiz to Connect without changing any settings.
 
@@ -105,7 +105,7 @@ Press the **play button ▶**. What happens next depends on the site:
 
 | Site | What it does |
 |---|---|
-| **Connect** | Answers, clicks **High Confidence** and **Next Question**, and keeps going through the whole assignment on its own |
+| **Connect** | Answers, clicks **High Confidence** and **Next Question**, and keeps going through the whole assignment on its own. A worksheet split into tabs (**Required 1**, **Required 2**…) has every tab answered before it moves on, dropdowns included. A big worksheet on Opus 5.5 can take a minute or two |
 | **Canvas** | Answers **every question on the page** in one go. If the quiz shows one question at a time, it clicks **Next** and keeps going. **It never presses Submit Quiz** — when it's done it says *"Answered. Check it over, then submit it yourself."* |
 | **SIMnet** | Does the task on screen — ribbon tabs and their menus and submenus, dialogs, selecting cells, ranges, whole columns and rows, sheet tabs (rename, group, color, hide, add), right-click menus, typing and pressing keys. SIMnet then grades it: when it's **correct**, Autopilot presses Continue and goes on to the next question by itself. When it's **incorrect**, it reads SIMnet's hint and tries **once** more following it. It never spends your **last attempt**: if another try would use it, or the second try is also wrong, it stops and shows you the hint to finish it yourself |
 

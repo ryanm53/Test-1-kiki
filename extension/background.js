@@ -103,7 +103,7 @@ const SYSTEM_PROMPT = `Answer the quiz question on screen correctly. Reply with 
 {"action":"click","index":N} — one answer
 {"action":"clickMany","indexes":[N,M]} — "select all that apply"; include every correct choice
 {"action":"dragMove","index":N,"dir":"up|down|left|right","steps":K} — drag question. up/down reorders an item within its own list; left/right moves it into a DIFFERENT list or drop zone. Item labels state which list they're in and their position — to place an unplaced choice into a drop zone use left/right, not up/down. One move per reply; you see the result and can move again.
-{"action":"fill","fills":[{"index":N,"value":"answer"}]} — fill in the blank(s); one entry per input box, fill every blank in the question
+{"action":"fill","fills":[{"index":N,"value":"answer"}]} — fill in the blank(s); one entry per input box, fill every blank in the question. A dropdown (shown with options=[...]) is filled the same way, with the exact text of the option to pick
 {"action":"none"} — question fully answered, or nothing answerable on screen
 N = an index from the list. Never invent an index. Output only the JSON completion.`;
 
@@ -117,8 +117,16 @@ adjustment cell of the Deferred Revenue column.
 Work the amounts out from the prose above the table, and keep the columns internally
 consistent: ending balance = balance before adjustment + adjustment.
 Prorate by the months actually elapsed, not a full year.
-Values must be plain numbers — no $, no commas, minus sign for a reduction.
-A blank that is already correct at 0 still needs 0 entered.`;
+Values must be plain numbers — no $, no commas, minus sign for a reduction. Where
+the page gives its own rule for signs ("amounts to be deducted should be indicated
+by a minus sign"), follow it.
+A blank that is already correct at 0 still needs 0 entered.
+A date with two lines ("(line 1 of 2)", "(line 2 of 2)") is one event recorded as two
+entries — for instance, the two sides of a collection or a write-off.
+Dropdowns are filled with the exact text of one of their options; a row named by a
+dropdown needs its dropdown filled as well as its amounts.
+If the question is split into parts (tabs such as Required 1, Required 2), answer
+only the part on screen — the others get their own turn.`;
 
 // SIMnet simulates Excel, so a task is a procedure rather than an answer, and
 // the procedure itself is graded.
@@ -361,7 +369,8 @@ ${elementList || '(none found)'}`;
     // A fills array covering a whole worksheet needs far more room than a
     // single index does
     // One index per question adds up on a long quiz
-    max_tokens: isWorksheet ? Math.max(cfg.maxTokens, 1500)
+    // — and thinking first, on a model that thinks: twice its usual room.
+    max_tokens: isWorksheet ? Math.max(cfg.maxTokens * 2, 1500 + 20 * elements.length)
               : isCanvas    ? Math.max(cfg.maxTokens, 600)
               : cfg.maxTokens,
     system: SYSTEM_PROMPT + (isSimnet ? SIMNET_HINT : isWorksheet ? WORKSHEET_HINT : isCanvas ? CANVAS_HINT : ''),
@@ -376,8 +385,9 @@ ${elementList || '(none found)'}`;
   } else {
     // Prefill 400s on these models; constrain the response shape instead
     requestBody.output_config = { format: { type: 'json_schema', schema: ACTION_SCHEMA } };
-    // A retry is the last automatic chance at the task, so it thinks harder
-    if (cfg.effort) requestBody.output_config.effort = retryHint ? 'medium' : cfg.effort;
+    // A retry is the last automatic chance at the task, and a worksheet is a
+    // whole problem's worth of linked entries, so those think harder
+    if (cfg.effort) requestBody.output_config.effort = (retryHint || isWorksheet) ? 'medium' : cfg.effort;
   }
 
   // "default" lets Anthropic pick the fallback by the reason for the decline,
@@ -783,6 +793,14 @@ function reportProgress(tabId, step, budget) {
   } catch (_) { /* no listener — nothing to report to */ }
 }
 
+// Tells the bar the run is alive while a long request is out
+function heartbeat(tabId, step, budget) {
+  let timer;
+  const beat = () => { reportProgress(tabId, step, budget); timer = setTimeout(beat, 20000); };
+  timer = setTimeout(beat, 20000);
+  return () => clearTimeout(timer);
+}
+
 async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true, log = null) {
   let usedModel = baseModel;   // reported back so the UI can show an upgrade
 
@@ -816,6 +834,8 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   let retryHint = '';
   let round = 0;
   let ungradedDone = 0;    // "done" claims SIMnet didn't grade, this round
+  let parts = null;        // a question split into tabs (Required 1, Required 2)
+  const doneParts = [];    // ...and the ones answered this run
   let escalated = false;   // Auto gave the question to the stronger model after the cheap one gave up
   const canEscalate = () => autoUpgrade && !escalated
     && !!UPGRADE_TO[baseModel] && UPGRADE_TO[baseModel] !== usedModel;
@@ -876,8 +896,13 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
           } catch (_) { /* outer frame unreachable — use what we have */ }
         }
 
+        if (!isSimnet && !isCanvas) parts = pageData.parts ?? null;
         usedModel = escalated ? (UPGRADE_TO[baseModel] ?? baseModel) : pickModel(baseModel, pageData, autoUpgrade);
-        const { action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint);
+        // A worksheet on Opus can think for longer than the bar's silence
+        // timer, which would call the run dead mid-answer
+        const stopBeat = heartbeat(tabId, step + 1, budget);
+        const { action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint)
+          .finally(stopBeat);
 
         log?.steps.push({
           round: round + 1, step: step + 1, attempt: attempt + 1,
@@ -919,7 +944,9 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
             return { success: false, usedModel,
                      error: "It thinks it's done, but SIMnet hasn't graded anything. Check it and finish this one yourself." };
           }
-          const alreadyDone = isCanvas && everyQuestionAnswered(pageData.elements);
+          // Or on a part of a question answered earlier, with another to go
+          const alreadyDone = (isCanvas && everyQuestionAnswered(pageData.elements))
+            || !!parts?.some(p => !p.current && !doneParts.includes(p.text));
           if (completed === 0 && !alreadyDone) {
             // On Auto, the cheap model saying "none" on a question it could
             // see is usually it giving up, not the page having no question.
@@ -1005,6 +1032,24 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
 
     if (!stepDone) {
       return { success: false, error: `Stuck on step ${step + 1}. Last error: ${lastError}` };
+    }
+
+    // A question in parts: this one is answered, so open the next tab and
+    // answer that too, in the same run, before Next is pressed.
+    if (parts && (finished || step === budget - 1)) {
+      const here = parts.find(p => p.current)?.text ?? (doneParts.length ? null : parts[0].text);
+      if (here && !doneParts.includes(here)) doneParts.push(here);
+      const next = parts.find(p => !doneParts.includes(p.text));
+      if (next) {
+        const opened = await sendToTab(tabId, { type: 'OPEN_PART', text: next.text }, frameId).catch(() => null);
+        if (opened?.success) {
+          doneParts.push(next.text);   // so a tab that won't open can't loop
+          history.length = 0;
+          budget = step + 2;
+          await new Promise(r => setTimeout(r, 1200));
+          continue;
+        }
+      }
     }
     if (finished) break;
   }

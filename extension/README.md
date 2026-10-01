@@ -155,6 +155,25 @@ change between sites.
   the one with text that holds the most controls. Connect's first such area is an
   empty form, and taking the first one left the model no page text at all. The
   question each control sits under is stated once, in full, above the page text.
+- **Connect worksheets** — every box is sent (the cap was once 60 in all, which
+  dropped the last two dates of a 74-box table). Labels come from the table as
+  drawn (`tableGrid`), so rowspans (a date over two entry lines, labelled
+  "(line 2 of 2)") and colspans (two rows of headers) don't shift columns, and a
+  "$" cell is never a row name. A row named by a dropdown is labelled by its row
+  number. Worksheets on Opus think at `effort: medium` with twice the room, and
+  a heartbeat keeps the bar's 90s silence timer from firing mid-think.
+- **Parts** — tabs named Required 1 / Required 2 / Req A / Part 1 (`partTabs`).
+  After a part is answered the background opens the next unanswered one
+  (`OPEN_PART`) and answers it in the same run; Next is pressed once, after
+  the last. A tab is marked done when it's opened, so one that won't open
+  can't loop.
+- **Dropdowns** — a `<select>` is set by option text, matched loosely (same
+  words, then starts-with, then contains), or by value; never to a value it
+  doesn't have. A custom dropdown (`role="combobox"`, `aria-haspopup="listbox"`)
+  is opened, and the matching `role="option"` clicked. Ones whose list isn't
+  in the page until opened are opened, read and closed before the scrape, so
+  the model sees their options — once each, in the question area only, never
+  on SIMnet or a peek.
 - **SIMnet** — detected by its grid (`td.grdbdy-cell`). Up to eight steps per task,
   then the run ends with a note: no Connect post-clicks, and no second pass that
   would start editing a finished task.

@@ -22,6 +22,7 @@ const SUITES = [
   ['test-resilience.js', 'Survives re-injection, extension reload, pages that wipe the bar'],
   ['test-drag.js',       'The control bar can be dragged and stays put'],
   ['test-load.js',       'The extension loads and the control bar appears'],
+  ['test-parts.js',      'Connect: Required 1 and 2, 81-box tables, dropdowns'],
   ['test-labels.js',     'Accounting worksheet: column and row labels'],
   ['test-aria.js',       'The same, on an ARIA grid instead of a table'],
   ['test-sheet.js',      'Spreadsheet cells are recognised'],

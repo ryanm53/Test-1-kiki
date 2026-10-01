@@ -23,6 +23,8 @@ const INTERACTIVE_SEL = [
   '[role="checkbox"]',
   '[role="radio"]',
   '[role="option"]',
+  '[role="combobox"]',
+  '[aria-haspopup="listbox"]',
   '[role="listitem"]',
   '[draggable="true"]',
   '[contenteditable="true"]',
@@ -69,7 +71,7 @@ function pageRoot() {
 // Resolve an element's accessible label, including aria-labelledby chains.
 // Many platforms (e.g. Angular quiz apps) store the visible answer text in a
 // separate <span> pointed to by aria-labelledby rather than inside the input.
-function accessibleText(el) {
+function accessibleText(el, ownText = true) {
   // 1. aria-labelledby — follow every referenced ID and join their text
   const labelledBy = el.getAttribute('aria-labelledby');
   if (labelledBy) {
@@ -90,8 +92,107 @@ function accessibleText(el) {
   // 4. Ancestor <label> (inputs nested inside their label)
   const ancestorLabel = el.closest('label');
   if (ancestorLabel) return ancestorLabel.innerText.trim();
-  // 5. Element's own visible text
+  // 5. Element's own visible text — except a dropdown's, which is its
+  // options (a <select>) or what is chosen (a custom one), not its name
+  if (!ownText) return (el.getAttribute('title') || '').trim();
   return (el.innerText || el.getAttribute('title') || '').trim();
+}
+
+// A dropdown built from divs rather than a <select>: a box that opens a list
+// of options when clicked. Its options often aren't in the page until then.
+function isDropdown(el) {
+  return !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)
+    && el.matches('[role="combobox"], [aria-haspopup="listbox"]');
+}
+
+// What a dropdown offers, read off its list, and what it shows as chosen.
+// Lists a closed dropdown keeps out of the page are learnt by opening it
+// (learnDropdowns) and remembered here.
+const _dropChoices = new WeakMap();
+const _dropTried = new WeakSet();   // opened once already, list or not
+const optionText = o => (o.innerText ?? o.textContent ?? '').trim();
+function listOf(el) {
+  for (const id of (el.getAttribute('aria-controls') || el.getAttribute('aria-owns') || '').split(/\s+/)) {
+    const list = id && document.getElementById(id);
+    if (list) return list;
+  }
+  return null;
+}
+function dropdownOptions(el) {
+  const list = listOf(el);
+  const found = list ? Array.from(list.querySelectorAll('[role="option"]')).map(optionText).filter(Boolean) : [];
+  return found.length ? found : (_dropChoices.get(el) ?? null);
+}
+const chosenText = el => el.tagName === 'SELECT'
+  ? (el.selectedIndex > 0 || el.options[el.selectedIndex]?.value ? optionText(el.options[el.selectedIndex]) : '')
+  : (el.innerText ?? '').trim();
+
+// Options on screen right now: a dropdown's own list if it names one, else
+// whatever list just opened.
+function visibleOptions(el) {
+  const list = listOf(el);
+  const scope = list && isRendered(list) ? list : document;
+  return Array.from(scope.querySelectorAll('[role="option"], [role="listbox"] li'))
+    .filter(o => isRendered(o) && optionText(o));
+}
+
+// The option meant by `value`: the same words first, then one containing the
+// other — "Less: Allowance" for "Less: Allowance for uncollectible accounts".
+const squash = t => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+function bestOption(options, value, textOf) {
+  const want = squash(value);
+  if (!want) return null;
+  return options.find(o => squash(textOf(o)) === want)
+      ?? options.find(o => squash(textOf(o)).startsWith(want))
+      ?? options.find(o => { const t = squash(textOf(o)); return t && (t.includes(want) || want.includes(t)); })
+      ?? null;
+}
+
+const waitFor = async (get, ms) => {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = get();
+    if (v || Date.now() > end) return v;
+    await new Promise(r => setTimeout(r, 50));
+  }
+};
+
+function closeDropdown(el) {
+  for (const t of [el, document.activeElement, document.body]) {
+    t?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+  }
+}
+
+// Open a custom dropdown and pick an option by its text
+async function chooseFromDropdown(el, value) {
+  realClick(el);
+  const options = await waitFor(() => { const o = visibleOptions(el); return o.length ? o : null; }, 1500);
+  const pick = options && bestOption(options, value, optionText);
+  if (!pick) { closeDropdown(el); return false; }
+  pick.scrollIntoView?.({ block: 'nearest' });
+  realClick(pick);
+  return true;
+}
+
+// Learn the choices of custom dropdowns whose lists aren't in the page until
+// opened, so the model is shown them. Each is opened, read and closed.
+// Only those in the question area, and each only once: a menu button that
+// merely calls itself a listbox shouldn't be reopened on every look.
+function unreadDropdowns() {
+  return Array.from(pageRoot().querySelectorAll('[role="combobox"], [aria-haspopup="listbox"]'))
+    .filter(el => isDropdown(el) && !_dropTried.has(el) && isRendered(el) && !dropdownOptions(el))
+    .slice(0, 12);
+}
+async function learnDropdowns() {
+  for (const el of unreadDropdowns()) {
+    _dropTried.add(el);
+    realClick(el);
+    const options = await waitFor(() => { const o = visibleOptions(el); return o.length ? o : null; }, 600);
+    if (options) _dropChoices.set(el, options.map(optionText));
+    closeDropdown(el);
+    await new Promise(r => setTimeout(r, 60));
+    if (el.getAttribute('aria-expanded') === 'true') realClick(el);
+  }
 }
 
 // Find the question text a radio/checkbox belongs to.
@@ -140,22 +241,65 @@ const cellText = el => (el?.innerText ?? el?.textContent ?? '').trim();
 // Worksheet cells carry no label of their own — their meaning comes from the
 // intersection of a column header and a row header. Reconstruct that so an
 // otherwise anonymous box reads as "Deferred Revenue — December 31 Adjustment".
+// Each cell's place in the table as drawn. A rowspan ("September 17" over
+// two lines) or colspan ("Balance Sheet" over four columns) shifts everything
+// after it, so a cell's position among its row's children isn't its column.
+function tableGrid(table) {
+  const rows = Array.from(table.querySelectorAll(ROW_SEL));
+  const grid = rows.map(() => []);
+  const where = new Map();
+  rows.forEach((row, r) => {
+    let c = 0;
+    for (const cell of row.children) {
+      while (grid[r][c]) c++;
+      const rs = Math.max(1, Number(cell.getAttribute('rowspan') || cell.getAttribute('aria-rowspan')) || 1);
+      const cs = Math.max(1, Number(cell.getAttribute('colspan') || cell.getAttribute('aria-colspan')) || 1);
+      for (let i = 0; i < rs && r + i < rows.length; i++)
+        for (let j = 0; j < cs; j++) grid[r + i][c + j] = cell;
+      where.set(cell, { r, c });
+      c += cs;
+    }
+  });
+  return { rows, grid, where };
+}
+
+const DROP_SEL = 'select, [role="combobox"], [aria-haspopup="listbox"]';
+
 function tableLabel(el) {
   const cell = el.closest(CELL_SEL);
-  const row = cell?.closest(ROW_SEL);
   const table = cell?.closest(TABLE_SEL);
-  if (!cell || !row || !table) return null;
+  if (!cell || !table) return null;
+  const { rows, grid, where } = tableGrid(table);
+  const at = where.get(cell);
+  if (!at) return null;
 
-  const cells = Array.from(row.children);
-  const col = cells.indexOf(cell);
-  if (col === -1) return null;
+  const hasTargets = i =>
+    rows[i].querySelector('input, textarea, ' + DROP_SEL) ||
+    Array.from(rows[i].children).some(isSheetCell);
+  // A data row holds something answerable or names itself in the first column
+  const isData = i => hasTargets(i) || !!cellText(grid[i][0]);
+  const rowNo = () => rows.slice(0, at.r + 1).filter((_, i) => isData(i)).length;
 
-  // Row header: the nearest text to the left of this cell
+  // Row header: the first real text left of this cell. A "$" beside a box
+  // names nothing; a row named by a dropdown ("Less: Allowance…", picked by
+  // the student) says so, and which row it is.
   let rowLabel = '';
-  for (const c of cells) {
-    if (c === cell) break;
-    const t = cellText(c);
-    if (t) { rowLabel = t; break; }
+  for (let c = 0; c < at.c && !rowLabel; c++) {
+    const left = grid[at.r][c];
+    if (!left || left === cell) continue;
+    const drop = left.querySelector(DROP_SEL);
+    if (drop) {
+      const chosen = chosenText(drop);
+      rowLabel = `row ${rowNo()}, named by its dropdown (${chosen ? `"${chosen}"` : 'not chosen yet'})`;
+      break;
+    }
+    const t = cellText(left);
+    if (t && !/^[\s$€£%().,-]*$/.test(t)) {
+      rowLabel = t;
+      // One label over several lines — a date with two entries — says which
+      const span = Number(left.getAttribute('rowspan') || left.getAttribute('aria-rowspan')) || 1;
+      if (span > 1) rowLabel += ` (line ${at.r - where.get(left).r + 1} of ${span})`;
+    }
   }
 
   // Column header: walk up this column for the account name. Data rows have to
@@ -169,30 +313,28 @@ function tableLabel(el) {
   // spreadsheet widgets, whose data rows are plain <td>s with nothing
   // answerable to detect. Stopping at the nearest match keeps each section of a
   // table on its own headers.
-  const rows = Array.from(table.querySelectorAll(ROW_SEL));
-  const start = rows.indexOf(row) - 1;
-  const hasTargets = r =>
-    r.querySelector('input, textarea, select') ||
-    Array.from(r.children).some(isSheetCell);
-
+  const headerAt = i => (grid[i][at.c] && grid[i][at.c] !== cell) ? cellText(grid[i][at.c]) : '';
   let colLabel = '';
-  for (let i = start; i >= 0 && !colLabel; i--) {
-    if (hasTargets(rows[i]) || cellText(rows[i].children[0])) continue;
-    colLabel = cellText(rows[i].children[col]);
+  for (let i = at.r - 1; i >= 0 && !colLabel; i--) {
+    if (isData(i)) continue;
+    colLabel = headerAt(i);
   }
   // Layouts that label every row (a leading row-number column, say) leave the
   // strict pass with nothing, so fall back to skipping only answerable rows.
-  for (let i = start; i >= 0 && !colLabel; i--) {
-    if (hasTargets(rows[i])) continue;
-    colLabel = cellText(rows[i].children[col]);
+  for (let i = at.r - 1; i >= 0 && !colLabel; i--) {
+    if (hasTargets(i)) continue;
+    colLabel = headerAt(i);
   }
+
+  // A dropdown that names its own row
+  if (!rowLabel && el.matches(DROP_SEL)) rowLabel = `row ${rowNo()}'s name`;
 
   const label = [colLabel, rowLabel].filter(Boolean).join(' — ');
   return label || null;
 }
 
 function isTableField(el) {
-  return /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && !!el.closest(TABLE_SEL);
+  return (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || isDropdown(el)) && !!el.closest(TABLE_SEL);
 }
 
 // Spreadsheet widgets (McGraw Hill's accounting tool runs on jQuery.sheet)
@@ -215,7 +357,8 @@ const cellAddress = el => {
 function describeEl(el) {
   const question = nearestQuestionText(el);
   // Fall back to table headers when the field has no label of its own
-  const text = accessibleText(el) || tableLabel(el) || '';
+  const drop = el.tagName === 'SELECT' || isDropdown(el);
+  const text = accessibleText(el, !drop) || tableLabel(el) || '';
   return {
     tag: el.tagName.toLowerCase(),
     type: el.getAttribute('type') || null,
@@ -224,10 +367,11 @@ function describeEl(el) {
     // Never a password; never a tick box, whose value is just "on"
     value: (isTextBox(el) && el.type !== 'password' && !el.isContentEditable && el.value)
       ? String(el.value).slice(0, 60)
-      : el.tagName === 'SELECT' ? (el.selectedOptions?.[0]?.textContent.trim() || undefined) : undefined,
+      : drop ? (chosenText(el).slice(0, 80) || undefined) : undefined,
     // A dropdown list's choices, so one can be picked by its text
     options: el.tagName === 'SELECT'
-      ? Array.from(el.options).slice(0, 20).map(o => o.textContent.trim()).filter(Boolean) : undefined,
+      ? Array.from(el.options).slice(0, 30).map(o => o.textContent.trim()).filter(Boolean)
+      : isDropdown(el) ? (dropdownOptions(el)?.slice(0, 30) ?? undefined) : undefined,
     name: el.getAttribute('name') || null,
     question: question || null,
     sheet: isSheetCell(el) || undefined,
@@ -434,22 +578,57 @@ function scrape() {
   }
 
   if (isWorksheet) {
-    // Every cell, on-screen or not, first — so the cap can never truncate one
-    // away. Remaining slots go to on-screen controls (submit, nav).
+    // Every cell, on-screen or not, first. Remaining slots go to on-screen
+    // controls (submit, nav). The cap on cells is far above any real
+    // worksheet: it was once 60 in all, and a 74-box accounting table had its
+    // last two dates silently dropped.
     const rest = all.filter(el => !isTableField(el) && inViewport(el));
-    _lastElements = [...fields, ...rest].slice(0, 60);
+    _lastElements = [...fields.slice(0, 250), ...rest.slice(0, 20)];
   } else {
     // Ordinary questions fit on screen, so staying in the viewport keeps
     // offscreen nav and footer links out of the list.
     _lastElements = all.filter(inViewport).slice(0, 25);
   }
 
+  const parts = partTabs();
   return {
     text: (root.innerText ?? '').slice(0, 5000),
     elements: _lastElements.map(describeEl),
     isWorksheet,
-    isDrag
+    isDrag,
+    // A question in parts: which there are, and which is on screen
+    parts: parts.length > 1 ? parts.map(p => ({ text: p.text, current: p.current })) : undefined
   };
+}
+
+// Connect splits a long question into parts behind tabs: "Required 1",
+// "Required 2", sometimes "Req A" or "Part 1". Each is answered in turn.
+const PART_RE = /^(required|req\.?|part)\s*([0-9]{1,2}[a-z]?|[a-z])$/i;
+function partTabs() {
+  const seen = new Set();
+  const tabs = [];
+  for (const el of document.querySelectorAll('[role="tab"], button, a, li')) {
+    const text = (el.innerText ?? el.textContent ?? '').trim().replace(/\s+/g, ' ');
+    if (!PART_RE.test(text) || !isRendered(el)) continue;
+    // A tab drawn as <li><a>Required 1</a></li> is one tab, not two
+    if (tabs.some(t => t.el.contains(el) || el.contains(t.el))) {
+      const i = tabs.findIndex(t => t.el.contains(el));
+      if (i !== -1) tabs[i].el = el;   // keep the clickable inner one
+      continue;
+    }
+    if (seen.has(text.toLowerCase())) continue;
+    seen.add(text.toLowerCase());
+    tabs.push({ el, text });
+  }
+  for (const t of tabs) {
+    const li = t.el.parentElement?.tagName === 'LI' ? t.el.parentElement : null;
+    const marks = [t.el, li].filter(Boolean);
+    t.current = marks.some(m =>
+      m.getAttribute('aria-selected') === 'true'
+      || (m.getAttribute('aria-current') ?? 'false') !== 'false'
+      || /(^|[\s_-])(active|selected|current)($|[\s_-])/i.test(m.className || ''));
+  }
+  return tabs;
 }
 
 // Set a field's value so framework bindings notice. Assigning .value directly
@@ -637,18 +816,23 @@ function setFieldValue(el, value) {
   const tag = el.tagName.toLowerCase();
 
   if (tag === 'select') {
-    const opt = Array.from(el.options).find(
-      o => o.textContent.trim().toLowerCase() === value.toLowerCase() || o.value === value
-    );
-    el.value = opt ? opt.value : value;
+    // By its words, loosely — or by its value. Never a value the list
+    // doesn't have, which would leave the dropdown blank.
+    const options = Array.from(el.options);
+    const opt = options.find(o => o.value === value && o.value !== '')
+             ?? bestOption(options, value, o => o.textContent);
+    if (!opt) return false;
+    el.value = opt.value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
-    return;
+    el.dispatchEvent(new FocusEvent('blur', { bubbles: false }));
+    return true;
   }
 
   if (el.isContentEditable) {
     el.textContent = value;
     el.dispatchEvent(new InputEvent('input', { bubbles: true, data: value }));
-    return;
+    return true;
   }
 
   const proto = tag === 'textarea'
@@ -660,6 +844,7 @@ function setFieldValue(el, value) {
   el.dispatchEvent(new InputEvent('input', { bubbles: true, data: value }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
   el.dispatchEvent(new FocusEvent('blur', { bubbles: false }));
+  return true;
 }
 
 // A bare el.click() dispatches only a click event. Grids and toolbars commonly
@@ -715,7 +900,9 @@ async function execute(action) {
         }
         el.scrollIntoView({ behavior: scroll, block: 'center' });
         await new Promise(r => setTimeout(r, bulk ? 20 : 120));
-        setFieldValue(el, String(f.value ?? ''));
+        const value = String(f.value ?? '');
+        const ok = isDropdown(el) ? await chooseFromDropdown(el, value) : setFieldValue(el, value);
+        if (ok === false) failed.push(`[${i}] has no option "${value.slice(0, 40)}"`);
         await new Promise(r => setTimeout(r, settle));
       }
 
@@ -2028,14 +2215,23 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     // between a run's read and its click.
     const kept = _lastElements, keptSeen = _simSeen;
     if (msg.firstLook && !msg.peek) _simSeen = null;
-    try {
-      sendResponse(scrape());
-    } catch (e) {
-      sendResponse({ error: e.message, text: '', elements: [] });
-    } finally {
-      if (msg.peek) { _lastElements = kept; _simSeen = keptSeen; }
-    }
-    return false;
+    const look = () => {
+      try {
+        sendResponse(scrape());
+      } catch (e) {
+        sendResponse({ error: e.message, text: '', elements: [] });
+      } finally {
+        if (msg.peek) { _lastElements = kept; _simSeen = keptSeen; }
+      }
+    };
+    // Custom dropdowns whose choices aren't on the page are opened and read
+    // first, so the model sees what it can pick. Never on a peek, which only
+    // looks; never on SIMnet, whose ribbon is full of drop-downs it has to
+    // operate step by step itself.
+    const unread = !msg.peek && !document.querySelector('td.grdbdy-cell') && unreadDropdowns().length > 0;
+    if (!unread) { look(); return false; }
+    learnDropdowns().catch(() => {}).then(look);
+    return true;
   }
 
   if (msg.type === 'EXECUTE') {
@@ -2123,6 +2319,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       sendResponse({ success: true });
     })().catch(e => sendResponse({ success: false, error: e?.message ?? String(e) }));
     return true;
+  }
+
+  if (msg.type === 'OPEN_PART') {
+    const tab = partTabs().find(t => t.text === msg.text);
+    if (!tab) { sendResponse({ success: false, error: `No "${msg.text}" tab` }); return false; }
+    tab.el.scrollIntoView({ block: 'center' });
+    realClick(tab.el);
+    sendResponse({ success: true });
+    return false;
   }
 
   if (msg.type === 'CLICK_TEXT') {
