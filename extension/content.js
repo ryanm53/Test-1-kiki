@@ -1,4 +1,4 @@
-// Claude Page Agent — page side: scrapes the question, carries out the action,
+// Page Agent — page side: scrapes the question, carries out the action,
 // and draws the control bar.
 //
 // The whole file is wrapped so it can be injected a second time safely. The
@@ -1185,7 +1185,7 @@ function bgSend(msg, cb) {
     align-items: center;
     gap: 7px;
     min-width: 96px;
-    max-width: 230px;
+    max-width: 290px;
     font-size: 13px;
     letter-spacing: -0.01em;
     color: #f5f5f7;

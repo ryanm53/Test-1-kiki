@@ -146,7 +146,9 @@ The bar shows you what's happening as it goes:
 
 ## Updating to a new version
 
-When there's a new version:
+**Installed from the Chrome Web Store?** Then there's nothing to do — Chrome updates it by itself. (How to get it on the store: [store/LISTING.md](store/LISTING.md).)
+
+**Installed from this folder?** When there's a new version:
 
 1. Go to **https://github.com/ryanm53/Test-1-kiki**, click the green **Code** button, then **Download ZIP**, and unzip it
 2. Open the folder you set up in Step 1 — the one Chrome loads the extension from. **Delete what's inside its `extension` folder, and copy in the new `extension` folder's files.** Keep it in the same place: if Chrome finds it somewhere new, it treats it as a different extension, and you'd have to enter your API key and settings again

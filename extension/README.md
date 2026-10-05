@@ -287,6 +287,7 @@ are direct DOM lookups that never touch the API.
 | `manifest.json` | Manifest V3: permissions, content script, service worker |
 | `background.js` | Service worker: Claude API calls, retry loop, frame targeting, trusted input |
 | `content.js` | Injected on every page: scrapes elements, executes actions, control bar UI |
+| `../scripts/package.js` | `npm run package` builds `dist/page-agent-<version>.zip` for the Chrome Web Store; `test-package.js` checks it. The listing, privacy answers and images are in `../store/`, the privacy policy in `../PRIVACY.md` |
 | `popup.html`, `popup.js` | The toolbar button's popup: a switch to show or hide the control bar (`barHidden`), and the shortcut that does the same |
 
 ---
