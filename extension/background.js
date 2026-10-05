@@ -644,6 +644,13 @@ async function trustedKeyDrag(tabId, dir, steps) {
 // not instant.
 const MSG_TIMEOUT_MS = 20000;
 
+// Filling is the one message whose length scales with the page: a 250-box
+// worksheet, or a dozen dropdowns opened one by one, outlasts a flat 20s.
+function timeoutFor(msg) {
+  const fills = msg.type === 'EXECUTE' && Array.isArray(msg.action?.fills) ? msg.action.fills.length : 0;
+  return MSG_TIMEOUT_MS + fills * 2000;
+}
+
 function rawSend(tabId, msg, frameId) {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -651,7 +658,7 @@ function rawSend(tabId, msg, frameId) {
       if (settled) return;
       settled = true;
       reject(new Error('The page stopped responding. Refresh it and try again.'));
-    }, MSG_TIMEOUT_MS);
+    }, timeoutFor(msg));
 
     chrome.tabs.sendMessage(tabId, msg, { frameId }, response => {
       if (settled) return;
@@ -801,6 +808,16 @@ function heartbeat(tabId, step, budget) {
   return () => clearTimeout(timer);
 }
 
+// A question in an embedded frame — Connect serves its worksheets that way —
+// often has its Next button and Required tabs in the page around it. Try the
+// question's frame first, then the top one.
+async function inQuestionOrTop(tabId, frameId, msg) {
+  const here = await sendToTab(tabId, msg, frameId).catch(e => ({ success: false, error: e.message }));
+  if (here?.success || frameId === 0) return here;
+  const top = await sendToTab(tabId, { ...msg, timeoutMs: 1500 }, 0).catch(() => null);
+  return top?.success ? top : here;
+}
+
 async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true, log = null) {
   let usedModel = baseModel;   // reported back so the UI can show an upgrade
 
@@ -888,21 +905,32 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         // The question prose often lives in the outer page while the answer
         // grid is inside the iframe, so pull both or the amounts to work from
         // would be missing entirely.
+        // A peek, so the outer page's element list (and its dropdowns) are
+        // left alone — every action goes to the question's frame.
         let pageText = pageData.text;
+        let outerParts = null;
         if (frameId !== 0) {
           try {
-            const outer = await sendToTab(tabId, { type: 'SCRAPE' }, 0);
+            const outer = await sendToTab(tabId, { type: 'SCRAPE', peek: true }, 0);
             if (outer?.text) pageText = `${outer.text}\n\n${pageText}`;
+            outerParts = outer?.parts ?? null;
           } catch (_) { /* outer frame unreachable — use what we have */ }
         }
 
-        if (!isSimnet && !isCanvas) parts = pageData.parts ?? null;
+        // The Required tabs can be in the outer page when the table is in a frame
+        if (!isSimnet && !isCanvas) parts = pageData.parts ?? outerParts;
         usedModel = escalated ? (UPGRADE_TO[baseModel] ?? baseModel) : pickModel(baseModel, pageData, autoUpgrade);
         // A worksheet on Opus can think for longer than the bar's silence
         // timer, which would call the run dead mid-answer
         const stopBeat = heartbeat(tabId, step + 1, budget);
         const { action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint)
           .finally(stopBeat);
+
+        // Stop pressed while Claude was thinking: its answer is not acted on
+        if (cancelledRuns.has(tabId)) {
+          cancelledRuns.delete(tabId);
+          return { success: false, error: 'Stopped.', usedModel };
+        }
 
         log?.steps.push({
           round: round + 1, step: step + 1, attempt: attempt + 1,
@@ -987,7 +1015,8 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
             result = { success: false, error: `Filled ${action.fills.length - missed.length}/${action.fills.length}; missed ${missed.join(', ')}` };
           }
         } else {
-          result = await sendToTab(tabId, { type: 'EXECUTE', action }, frameId);
+          const stopFillBeat = heartbeat(tabId, step + 1, budget);
+          result = await sendToTab(tabId, { type: 'EXECUTE', action }, frameId).finally(stopFillBeat);
           // Grid cells take no typed-in value; they only respond to real key
           // presses, like the worksheet cells above. The page has focused the
           // cell and says so; the keys go through the debugger.
@@ -1031,7 +1060,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
     }
 
     if (!stepDone) {
-      return { success: false, error: `Stuck on step ${step + 1}. Last error: ${lastError}` };
+      return { success: false, usedModel, error: `Stuck on step ${step + 1}. Last error: ${lastError}` };
     }
 
     // A question in parts: this one is answered, so open the next tab and
@@ -1040,8 +1069,12 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
       const here = parts.find(p => p.current)?.text ?? (doneParts.length ? null : parts[0].text);
       if (here && !doneParts.includes(here)) doneParts.push(here);
       const next = parts.find(p => !doneParts.includes(p.text));
+      if (next && cancelledRuns.has(tabId)) {
+        cancelledRuns.delete(tabId);
+        return { success: false, error: 'Stopped.', usedModel };
+      }
       if (next) {
-        const opened = await sendToTab(tabId, { type: 'OPEN_PART', text: next.text }, frameId).catch(() => null);
+        const opened = await inQuestionOrTop(tabId, frameId, { type: 'OPEN_PART', text: next.text });
         if (opened?.success) {
           doneParts.push(next.text);   // so a tab that won't open can't loop
           history.length = 0;
@@ -1147,12 +1180,12 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
       cancelledRuns.delete(tabId);
       return { success: false, error: 'Stopped.', usedModel };
     }
-    const result = await sendToTab(tabId, {
+    const result = await inQuestionOrTop(tabId, frameId, {
       type: 'CLICK_TEXT',
       candidates: click.candidates,
       // An optional button that isn't there shouldn't cost the full wait
       ...(click.optional ? { timeoutMs: 2500 } : {})
-    }, frameId);
+    });
     if (!result?.success) {
       if (click.optional) continue;
       return { success: false, error: `Could not find "${click.label}" button: ${result?.error ?? ''}` };
@@ -1281,6 +1314,24 @@ async function checkPage(tabId) {
   return { lines };
 }
 
+// ── Showing and hiding the bar ─────────────────────────────────────────────
+// One setting for every page; the bar on each page follows it.
+async function toggleBar() {
+  const { barHidden } = await chrome.storage.local.get('barHidden').catch(() => ({}));
+  await chrome.storage.local.set({ barHidden: barHidden !== true });
+}
+
+// The key the user actually has for it — Chrome leaves a suggested shortcut
+// unassigned if another extension holds it, and it can be changed
+async function shortcutText() {
+  const all = await chrome.commands?.getAll?.().catch(() => []) ?? [];
+  return all.find(c => c.name === 'toggle-bar')?.shortcut ?? '';
+}
+
+try {
+  chrome.commands?.onCommand?.addListener(cmd => { if (cmd === 'toggle-bar') toggleBar(); });
+} catch (_) { /* no commands API here */ }
+
 // Tabs whose current run has been stopped from the widget. The loop checks
 // this between steps: without it, pressing stop only silenced the UI while the
 // background carried on clicking.
@@ -1292,6 +1343,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (id) cancelledRuns.add(id);
     sendResponse({ ok: true });
     return false;
+  }
+
+  if (msg.type === 'SHORTCUT') {
+    shortcutText().then(shortcut => sendResponse({ shortcut }), () => sendResponse({ shortcut: '' }));
+    return true;
   }
 
   if (msg.type === 'DETECT_PAGE') {

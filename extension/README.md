@@ -167,6 +167,19 @@ change between sites.
   (`OPEN_PART`) and answers it in the same run; Next is pressed once, after
   the last. A tab is marked done when it's opened, so one that won't open
   can't loop.
+- **Hiding the bar** — the bar's – button, the `toggle-bar` command
+  (Alt+Shift+H, rebindable at chrome://extensions/shortcuts) and the popup's
+  switch all write one setting, `barHidden`; every open page follows it
+  through `storage.onChanged`. Only the bar is hidden: a run carries on.
+- **Finding Next** — `CLICK_TEXT` matches only usable buttons, so a greyed-out
+  one earlier on the page (a question's own Next, on its last Required tab)
+  no longer hides the real one. Next and the Required tabs are looked for in
+  the question's frame, then in the page around it (`inQuestionOrTop`).
+- **Stop** — checked again the moment Claude's answer arrives, so an answer
+  that comes back after stop is never acted on.
+- **Number boxes** — `type="number"` blanks anything but a plain number, so
+  "$41,000", "7,200" and "(7,200)" are cleaned to 41000, 7200 and -7200, and a
+  box left empty by a value it refused counts as a miss.
 - **Dropdowns** — a `<select>` is set by option text, matched loosely (same
   words, then starts-with, then contains), or by value; never to a value it
   doesn't have. A custom dropdown (`role="combobox"`, `aria-haspopup="listbox"`)
@@ -274,7 +287,7 @@ are direct DOM lookups that never touch the API.
 | `manifest.json` | Manifest V3: permissions, content script, service worker |
 | `background.js` | Service worker: Claude API calls, retry loop, frame targeting, trusted input |
 | `content.js` | Injected on every page: scrapes elements, executes actions, control bar UI |
-| `popup.html` | Static card pointing at the on-page control bar |
+| `popup.html`, `popup.js` | The toolbar button's popup: a switch to show or hide the control bar (`barHidden`), and the shortcut that does the same |
 
 ---
 

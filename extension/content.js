@@ -822,7 +822,10 @@ function setFieldValue(el, value) {
     const opt = options.find(o => o.value === value && o.value !== '')
              ?? bestOption(options, value, o => o.textContent);
     if (!opt) return false;
-    el.value = opt.value;
+    // Through the native setter, as for text boxes below: React tracks the
+    // value it last set, and a plain assignment can go unnoticed
+    const setSelect = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set;
+    if (setSelect) setSelect.call(el, opt.value); else el.value = opt.value;
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
     el.dispatchEvent(new FocusEvent('blur', { bubbles: false }));
@@ -835,6 +838,10 @@ function setFieldValue(el, value) {
     return true;
   }
 
+  // A number box silently blanks anything that isn't a plain number, so
+  // "7,200", "$7,200" or an accountant's "(7,200)" is cleaned up first
+  if (el.type === 'number') value = plainNumber(value);
+
   const proto = tag === 'textarea'
     ? window.HTMLTextAreaElement.prototype
     : window.HTMLInputElement.prototype;
@@ -844,7 +851,16 @@ function setFieldValue(el, value) {
   el.dispatchEvent(new InputEvent('input', { bubbles: true, data: value }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
   el.dispatchEvent(new FocusEvent('blur', { bubbles: false }));
-  return true;
+  // A box that refused the value is a miss, not a success
+  return !(value !== '' && el.value === '');
+}
+
+function plainNumber(v) {
+  const t = String(v).trim();
+  const neg = /^\(.*\)$/.test(t) || /^-/.test(t.replace(/^\$/, ''));
+  const digits = t.replace(/[^0-9.]/g, '');
+  if (!/^\d*\.?\d+$|^\d+\.$/.test(digits)) return t;
+  return (neg ? '-' : '') + digits;
 }
 
 // A bare el.click() dispatches only a click event. Grids and toolbars commonly
@@ -902,7 +918,11 @@ async function execute(action) {
         await new Promise(r => setTimeout(r, bulk ? 20 : 120));
         const value = String(f.value ?? '');
         const ok = isDropdown(el) ? await chooseFromDropdown(el, value) : setFieldValue(el, value);
-        if (ok === false) failed.push(`[${i}] has no option "${value.slice(0, 40)}"`);
+        if (ok === false) {
+          failed.push(isDropdown(el) || el.tagName === 'SELECT'
+            ? `[${i}] has no option "${value.slice(0, 40)}"`
+            : `[${i}] wouldn't take "${value.slice(0, 40)}"`);
+        }
         await new Promise(r => setTimeout(r, settle));
       }
 
@@ -1108,6 +1128,7 @@ function bgSend(msg, cb) {
   const ICON_PLAY  = '<svg viewBox="0 0 24 24" width="15" height="15"><path d="M8 5.14v13.72L19 12z"/></svg>';
   const ICON_PAUSE = '<svg viewBox="0 0 24 24" width="15" height="15"><path d="M6.5 5h3.5v14H6.5zM14 5h3.5v14H14z"/></svg>';
   const ICON_THUMB_DOWN = '<svg viewBox="0 0 24 24" width="15" height="15"><path d="M15 3H6c-.8 0-1.5.5-1.8 1.2l-3 7c-.1.3-.2.5-.2.8v2c0 1.1.9 2 2 2h6.3l-1 4.6v.3c0 .4.2.8.4 1.1L9.8 23l6.6-6.6c.4-.4.6-.9.6-1.4V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>';
+  const ICON_HIDE  = '<svg viewBox="0 0 24 24" width="15" height="15"><path d="M5 11h14v2H5z"/></svg>';
   const ICON_GEAR  = '<svg viewBox="0 0 24 24" width="15" height="15"><path d="M12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7zm7.4-2.6l1.8 1.4-1.9 3.3-2.2-.7a7.8 7.8 0 0 1-1.6.9l-.4 2.2h-3.8l-.4-2.2a7.8 7.8 0 0 1-1.6-.9l-2.2.7-1.9-3.3 1.8-1.4a7.6 7.6 0 0 1 0-1.8L2.8 9.7l1.9-3.3 2.2.7a7.8 7.8 0 0 1 1.6-.9l.4-2.2h3.8l.4 2.2c.6.2 1.1.5 1.6.9l2.2-.7 1.9 3.3-1.8 1.4a7.6 7.6 0 0 1 0 1.8z"/></svg>';
 
   shadow.innerHTML = `
@@ -1203,6 +1224,27 @@ function bgSend(msg, cb) {
   #gear svg { fill: currentColor; display: block; }
   #gear:hover { color: #f5f5f7; background: rgba(120, 120, 128, 0.26); }
   #gear.open { color: #0A84FF; }
+
+  /* Put the bar away */
+  #hide {
+    width: 22px; height: 26px; margin-left: -6px;
+    flex-shrink: 0; border: none; background: transparent; border-radius: 7px;
+    color: rgba(235, 235, 245, 0.32);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: color 0.18s, background 0.18s;
+  }
+  #hide svg { fill: currentColor; display: block; }
+  #hide:hover { color: #f5f5f7; background: rgba(120, 120, 128, 0.26); }
+
+  /* Says how to bring a hidden bar back, then goes */
+  #toast {
+    max-width: 290px; padding: 10px 13px; border-radius: 13px;
+    font-size: 12.5px; line-height: 1.45; color: #f5f5f7;
+    opacity: 0; transition: opacity 0.25s;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+  #toast b { font-weight: 600; }
 
   /* ── Panel ── */
   #panel {
@@ -1489,8 +1531,10 @@ function bgSend(msg, cb) {
     <div id="status"><span class="dot idle" id="dot"></span><span id="statusText">Ready</span></div>
     <button id="flag" title="That answer was wrong" aria-label="That answer was wrong" hidden></button>
     <button id="gear"></button>
+    <button id="hide" title="Hide the bar" aria-label="Hide the bar"></button>
   </div>
 </div>
+<div id="toast" class="glass" role="status" hidden></div>
   `;
 
   const $ = id => shadow.getElementById(id);
@@ -1506,8 +1550,10 @@ function bgSend(msg, cb) {
   const flagBtn = $('flag'), logSw = $('logSw'), logRow = $('logRow'), logCount = $('logCount');
   const logDownloadBtn = $('logDownload'), logClearBtn = $('logClear');
   const checkPageBtn = $('checkPage'), checkResult = $('checkResult');
+  const root = $('root'), hideBtn = $('hide'), toast = $('toast');
 
   gear.innerHTML = ICON_GEAR;
+  hideBtn.innerHTML = ICON_HIDE;
   flagBtn.innerHTML = ICON_THUMB_DOWN;
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -1603,7 +1649,7 @@ function bgSend(msg, cb) {
   // a model by name means that model every time.
   const AUTO = {
     id: 'auto', label: 'Auto',
-    note: 'Recommended. The cheapest model for most questions, and a smarter one for SIMnet, worksheets and drag-and-drop.'
+    note: 'Recommended. The cheapest model for most questions, and a smarter one for SIMnet, worksheets, drag-and-drop and calculations.'
   };
   [AUTO, ...MODEL_LIST].forEach(m => {
     const o = document.createElement('option');
@@ -1688,8 +1734,10 @@ function bgSend(msg, cb) {
 
   // ── Persistence ────────────────────────────────────────────────────────────
   store.get(
-    ['mode', 'lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'model', 'barPos', 'keepLog'],
+    ['mode', 'lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'model', 'barPos', 'keepLog', 'barHidden'],
     s => {
+      setHidden(s.barHidden === true, false);
+
       setMode(MODES[s.mode] ? s.mode : legacyMode(s), false);
 
       notes = s.notes ?? '';
@@ -1940,6 +1988,49 @@ function bgSend(msg, cb) {
   gear.addEventListener('click', () => togglePanel());
   closeBtn.addEventListener('click', () => togglePanel(false));
   shadow.addEventListener('keydown', e => { if (e.key === 'Escape') togglePanel(false); });
+
+  // ── Putting the bar away ───────────────────────────────────────────────────
+  // Hidden everywhere until brought back — by the shortcut, or the switch in
+  // the toolbar button's popup — since a bar that's in the way on one page is
+  // in the way on the next. A run carries on while it's hidden.
+  let toastTimer = null;
+  function setHidden(hidden, fromHere) {
+    root.hidden = hidden;
+    if (hidden) togglePanel(false);
+    else if (host.style.top) placeAt(parseFloat(host.style.left) || 0, parseFloat(host.style.top) || 0);
+    if (!hidden) { toast.hidden = true; toast.classList.remove('show'); }
+    if (hidden && fromHere) showHiddenToast();
+  }
+
+  function showHiddenToast() {
+    bgSend({ type: 'SHORTCUT' }, res => {
+      const key = res?.shortcut;
+      // textContent pieces, not innerHTML: the shortcut is the user's own setting
+      const b = t => { const e = document.createElement('b'); e.textContent = t; return e; };
+      toast.replaceChildren('Hidden. Bring it back with ', ...(key ? [b(key), ' or '] : []),
+        'the Page Agent button in Chrome\'s toolbar.');
+      toast.hidden = false;
+      requestAnimationFrame(() => toast.classList.add('show'));
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toast.classList.remove('show');
+        toastTimer = setTimeout(() => { toast.hidden = true; }, 300);
+      }, 5000);
+    });
+  }
+
+  hideBtn.addEventListener('click', () => {
+    setHidden(true, true);
+    store.set({ barHidden: true });
+  });
+
+  // The shortcut and the popup's switch change the setting; every open page
+  // follows it
+  try {
+    chrome.storage.onChanged?.addListener((changes, area) => {
+      if (area === 'local' && changes.barHidden) setHidden(changes.barHidden.newValue === true, false);
+    });
+  } catch (_) { /* extension reloaded under this page */ }
 
   // ── Moving the bar ─────────────────────────────────────────────────────────
   // Drag it anywhere by its background; the buttons stay buttons. Where it
@@ -2338,16 +2429,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       // cost the full wait before we conclude they aren't there.
       const deadline = Date.now() + (Number(msg.timeoutMs) > 0 ? Number(msg.timeoutMs) : 5000);
 
+      // Rendered rather than on-screen: we scroll to it before clicking, and
+      // on a long page the button is often below the fold.
+      const usable = b => isRendered(b) && !b.disabled && b.getAttribute('aria-disabled') !== 'true';
       function findIt() {
-        const all = Array.from(document.querySelectorAll('button, [role="button"], a'));
+        // Only usable buttons are matched. Taking the first match and then
+        // checking it gave up whenever that one was greyed out — a question's
+        // own disabled "Next" (on its last Required tab) hid the real one.
+        const all = Array.from(document.querySelectorAll('button, [role="button"], a')).filter(usable);
         for (const c of candidates) {
           let el = null;
-          if (c.selector) el = document.querySelector(c.selector);
+          if (c.selector) el = Array.from(document.querySelectorAll(c.selector)).find(usable);
           else if (c.ariaLabel) el = all.find(b => (b.getAttribute('aria-label') || '').toLowerCase().includes(c.ariaLabel.toLowerCase()));
           else if (c.text) el = all.find(b => (b.innerText || b.textContent || '').trim().toLowerCase().includes(c.text.toLowerCase()));
-          // Rendered rather than on-screen: we scroll to it before clicking,
-          // and on a long page the button is often below the fold.
-          if (el && isRendered(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true') return el;
+          if (el) return el;
         }
         return null;
       }

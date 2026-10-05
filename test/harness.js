@@ -29,7 +29,15 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
   const requestHeaders = [];  // headers sent with each of those, same order
   const debuggerCalls = [];   // trusted input sent through chrome.debugger
   const pageMessages = [];    // everything the background asked the page
-  let contentListener = null, backgroundListener = null;
+  let contentListener = null, backgroundListener = null, commandListener = null;
+  // chrome.storage.onChanged: a write from either side reaches the page
+  const changeListeners = [];
+  const write = o => {
+    const changes = {};
+    for (const [k, v] of Object.entries(o)) changes[k] = { oldValue: store[k], newValue: v };
+    Object.assign(store, o);
+    setTimeout(() => changeListeners.forEach(f => f(changes, 'local')), 0);
+  };
 
   // ── the page side ───────────────────────────────────────────────────────
   w.chrome = {
@@ -40,10 +48,13 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
       // Chrome tells the background which tab and page a message came from
       sendMessage: (msg, cb) => backgroundListener(msg, { tab: { id: 1 }, url: w.location.href }, res => cb && cb(res))
     },
-    storage: { local: {
-      get: (k, cb) => cb({ ...store }),
-      set: (o, cb) => { Object.assign(store, o); cb && cb(); }
-    } }
+    storage: {
+      local: {
+        get: (k, cb) => cb({ ...store }),
+        set: (o, cb) => { write(o); cb && cb(); }
+      },
+      onChanged: { addListener: f => changeListeners.push(f) }
+    }
   };
 
   // ── the extension side ──────────────────────────────────────────────────
@@ -67,8 +78,12 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
     },
     storage: { local: {
       get: async k => ({ ...store }),
-      set: async o => { Object.assign(store, o); }
+      set: async o => { write(o); }
     } },
+    commands: {
+      onCommand: { addListener: f => { commandListener = f; } },
+      getAll: async () => [{ name: 'toggle-bar', shortcut: 'Alt+Shift+H', description: '' }]
+    },
     debugger: {
       attach: async () => {}, detach: async () => {},
       sendCommand: async (target, method, params) => { debuggerCalls.push({ method, ...params }); },
@@ -80,7 +95,8 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
     const body = JSON.parse(init.body);
     requests.push(body);
     requestHeaders.push(init.headers ?? {});
-    const out = typeof reply === 'function' ? reply(body, requests.length) : reply;
+    // A reply may be a promise, to stand for Claude taking its time
+    const out = await (typeof reply === 'function' ? reply(body, requests.length) : reply);
     // { json } is a whole successful reply, for shapes a plain text answer
     // can't express: a decline, a fallback, running out of room
     if (out && typeof out === 'object' && out.json) {
@@ -109,6 +125,8 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
   return {
     w, store, requests, requestHeaders, debuggerCalls, pageMessages,
     send: msg => new Promise(res => backgroundListener(msg, { tab: { id: 1 }, url: w.location.href }, res)),
+    // A keyboard shortcut, as Chrome delivers it to the background
+    command: name => commandListener?.(name),
     status: () => shadow()?.getElementById('statusText')?.textContent ?? '',
     isError: () => !!shadow()?.getElementById('statusText')?.classList.contains('err'),
     pressPlay: () => shadow().getElementById('go').dispatchEvent(new w.MouseEvent('click', { bubbles: true })),

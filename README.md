@@ -116,6 +116,13 @@ buttons — and drop it anywhere on screen. It stays where you put it, on that p
 and every page after, so if it ever covers a question or a button you need, just
 move it out of the way once.
 
+**Putting the bar away:** press the **–** at the right end of the bar to hide it. It stays hidden on every page and tab until you bring it back, either way:
+
+- press **Alt+Shift+H** (Option+Shift+H on a Mac) on any page — the same keys hide it again;
+- or click the **Page Agent button** in Chrome's toolbar (the puzzle-piece menu, if you haven't pinned it) and switch **Show the control bar** on.
+
+A run that's going keeps going while the bar is hidden. If Alt+Shift+H does nothing, another extension already uses it — the popup has a link to pick your own keys.
+
 The bar shows you what's happening as it goes:
 
 | What it says | Meaning |

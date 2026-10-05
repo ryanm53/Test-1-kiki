@@ -23,6 +23,8 @@ const SUITES = [
   ['test-drag.js',       'The control bar can be dragged and stays put'],
   ['test-load.js',       'The extension loads and the control bar appears'],
   ['test-parts.js',      'Connect: Required 1 and 2, 81-box tables, dropdowns'],
+  ['test-hide.js',       'Putting the bar away: the – button, the shortcut, the popup switch'],
+  ['test-fixes.js',      'Fixed: a greyed-out Next, stop while thinking, number boxes'],
   ['test-labels.js',     'Accounting worksheet: column and row labels'],
   ['test-aria.js',       'The same, on an ARIA grid instead of a table'],
   ['test-sheet.js',      'Spreadsheet cells are recognised'],
