@@ -1202,6 +1202,10 @@ function bgSend(msg, cb) {
   #checkResult .info        { color: rgba(235,235,245,0.45); }
   #statusText.err { color: #FF9F96; white-space: normal; font-size: 12px; line-height: 1.35; }
   #status.err { max-width: 250px; white-space: normal; }
+  /* A closing note ("Answered. Check it over, then submit it yourself.") is
+     read whole, like an error, not cut off */
+  #statusText.note { white-space: normal; font-size: 12px; line-height: 1.35; }
+  #status.note { max-width: 250px; white-space: normal; }
 
   .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
   .dot.idle { background: rgba(235, 235, 245, 0.32); }
@@ -1702,6 +1706,9 @@ function bgSend(msg, cb) {
     statusText.textContent = text;
     statusText.classList.toggle('err', !!errorMsg);
     statusWrap.classList.toggle('err', !!errorMsg);
+    const note = !errorMsg && !!infoMsg && !isRunning && !waiting;
+    statusText.classList.toggle('note', note);
+    statusWrap.classList.toggle('note', note);
   }
 
   // Some quizzes load a whole new page for every question — Canvas's one-at-a-

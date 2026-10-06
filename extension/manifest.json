@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Page Agent",
-  "version": "1.0.0",
-  "description": "Answers questions on McGraw Hill Connect, SIMnet and Canvas quizzes with Claude, using your own Anthropic API key.",
+  "version": "1.0.1",
+  "description": "Answers the questions on your coursework and quiz pages with Claude, using your own Anthropic API key.",
   "permissions": [
     "debugger",
     "scripting",

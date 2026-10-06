@@ -41,6 +41,9 @@ check('no tests, notes or dependencies are shipped',
 check('version is one the store accepts (1-4 dot-separated numbers)', /^\d+(\.\d+){0,3}$/.test(manifest.version), manifest.version);
 check('the name stays clear of Anthropic\'s brand', !/claude|anthropic/i.test(manifest.name), manifest.name);
 check('the name fits (75 characters at most)', manifest.name.length <= 75);
+// Unlisted, nobody searches for these names, and a site's owner reporting
+// its trademark is the likeliest way a listing gets taken down
+check('the summary names no coursework site', !/mcgraw|connect|simnet|canvas/i.test(manifest.description), manifest.description);
 check('the description fits (132 characters at most)', manifest.description.length <= 132, String(manifest.description.length));
 check('the 128px store icon is a PNG', listed.includes(manifest.icons?.['128'])
   && fs.readFileSync(path.join(__dirname, '..', 'extension', manifest.icons['128'])).slice(1, 4).toString() === 'PNG');

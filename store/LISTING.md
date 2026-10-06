@@ -5,8 +5,8 @@ Once it's on the store, your friends install it with one click and Chrome keeps 
 ## What you do, once (about 20 minutes, plus waiting for Google)
 
 1. **Make a developer account.** Go to <https://chrome.google.com/webstore/devconsole>, sign in with your Google account and pay the one-time $5 fee. Google may ask you to verify your email or identity first. When it asks whether you're a *trader*, answer **No**: you're not selling anything.
-2. **Upload the extension.** Click **New item** and upload **`page-agent-1.0.0.zip`**. Download it here:
-   <https://github.com/ryanm53/Test-1-kiki/raw/claude/page-agent-extension-0xpw4s/store/page-agent-1.0.0.zip>
+2. **Upload the extension.** Click **New item** and upload **`page-agent-1.0.1.zip`**. Download it here:
+   <https://github.com/ryanm53/Test-1-kiki/raw/claude/page-agent-extension-0xpw4s/store/page-agent-1.0.1.zip>
 
    ⚠️ Not GitHub's green **Code → Download ZIP** button: that's the whole project (tests, notes, these instructions), and the store turns it down with *"Files outside directory with manifest … are not allowed"*. Upload the zip from the link exactly as it downloads; don't unzip it first.
 3. **Fill in the four tabs** by copying from the sections below: **Store listing**, **Privacy**, **Distribution**, and **Test instructions** if it's shown.
@@ -32,17 +32,17 @@ I bump the version number in `manifest.json` (the store won't take the same numb
 **Name** (comes from the zip): Page Agent
 
 **Summary** (comes from the zip):
-Answers questions on McGraw Hill Connect, SIMnet and Canvas quizzes with Claude, using your own Anthropic API key.
+Answers the questions on your coursework and quiz pages with Claude, using your own Anthropic API key.
 
 **Description:**
 
 ```
 Page Agent puts a small control bar on your coursework pages. Press play and it reads the question on screen, asks Claude for the answer, and fills it in.
 
-WORKS ON
-• McGraw Hill Connect — multiple choice, select all that apply, fill in the blank, dropdowns, accounting worksheets (including ones split into Required 1 / Required 2 tabs) and drag-and-drop. It rates its confidence and moves on to the next question.
-• SIMnet — the simulated Excel tasks: ribbon menus, dialogs, cells, ranges, sheet tabs, right-click menus and typing. It reads SIMnet's Correct/Incorrect result, and never spends your last attempt.
-• Canvas quizzes — every question on the page at once, or one at a time. It never submits a quiz for you.
+WHAT IT HANDLES
+• Homework questions — multiple choice, select all that apply, fill in the blank, dropdowns, accounting worksheets (including ones split into Required 1 / Required 2 tabs) and drag-and-drop. It rates its confidence and moves on to the next question.
+• Simulated Excel tasks — ribbon menus, dialogs, cells, ranges, sheet tabs, right-click menus and typing. It reads the Correct/Incorrect result, and never spends your last attempt.
+• Quizzes — every question on the page at once, or one at a time. It never submits a quiz for you.
 
 THREE MODES
 • Autopilot — answers and keeps going through the whole assignment.
@@ -50,7 +50,7 @@ THREE MODES
 • Answer only — picks the answer and lets you click Next.
 
 YOUR OWN KEY, YOUR OWN COST
-Page Agent uses Claude through your own Anthropic API key (console.anthropic.com). On Auto, easy questions go to the cheapest model (about $0.05 per 100 questions) and hard ones (worksheets, calculations, SIMnet) to a stronger one (around a cent each).
+Page Agent uses Claude through your own Anthropic API key (console.anthropic.com). On Auto, easy questions go to the cheapest model (about $0.05 per 100 questions) and hard ones (worksheets, calculations, spreadsheets) to a stronger one (around a cent each).
 
 OUT OF THE WAY WHEN YOU WANT
 Drag the bar anywhere, or hide it with the – button and bring it back with Alt+Shift+H or the toolbar button.
@@ -84,9 +84,9 @@ Answers the quiz or homework question on the current page, when the user presses
 | Permission | Justification to paste |
 |---|---|
 | `storage` | Saves the user's settings and their Anthropic API key in their own browser, so they don't re-enter them on every page. |
-| `scripting` | Adds the control bar to tabs that were already open when the extension was installed or updated, and finds which frame on the page holds the question (McGraw Hill shows some questions inside embedded frames). |
-| `debugger` | Drag-and-drop questions and spreadsheet cells on McGraw Hill only respond to real key presses, which only the debugger can send. It's attached to the tab the user started, only while answering, and detached straight after. |
-| Host permission `<all_urls>` | Canvas runs on each school's own web address, and McGraw Hill uses several domains and embedded frames, so the extension can't list them in advance. It only reads a page when the user presses play. `api.anthropic.com` is where the question is sent to be answered. |
+| `scripting` | Adds the control bar to tabs that were already open when the extension was installed or updated, and finds which frame on the page holds the question (some coursework sites show questions inside embedded frames). |
+| `debugger` | Drag-and-drop questions and spreadsheet cells on some coursework sites only respond to real key presses, which only the debugger can send. It's attached to the tab the user started, only while answering, and detached straight after. |
+| Host permission `<all_urls>` | Course sites run on each school's own web address and use several domains and embedded frames, so the extension can't list them in advance. It only reads a page when the user presses play. `api.anthropic.com` is where the question is sent to be answered. |
 
 **Are you using remote code?** No, I am not using remote code.
 
