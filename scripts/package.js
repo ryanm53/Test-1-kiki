@@ -38,5 +38,11 @@ module.exports = { build };
 
 if (require.main === module) {
   const { out, files } = build();
-  console.log(`Built ${path.relative(ROOT, out)} (${files.length} files, ${Math.round(fs.statSync(out).size / 1024)} KB)`);
+  // A copy in store/, so the file to upload has a download link on GitHub
+  const kept = path.join(ROOT, 'store', path.basename(out));
+  for (const old of fs.readdirSync(path.join(ROOT, 'store')).filter(f => /^page-agent-.*\.zip$/.test(f))) {
+    fs.rmSync(path.join(ROOT, 'store', old));
+  }
+  fs.copyFileSync(out, kept);
+  console.log(`Built ${path.relative(ROOT, out)} (${files.length} files, ${Math.round(fs.statSync(out).size / 1024)} KB), copied to ${path.relative(ROOT, kept)}`);
 }

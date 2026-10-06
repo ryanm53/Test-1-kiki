@@ -45,6 +45,20 @@ check('the description fits (132 characters at most)', manifest.description.leng
 check('the 128px store icon is a PNG', listed.includes(manifest.icons?.['128'])
   && fs.readFileSync(path.join(__dirname, '..', 'extension', manifest.icons['128'])).slice(1, 4).toString() === 'PNG');
 
+// The copy kept in store/ for downloading must be the extension as it is now:
+// an upload of a stale one would ship old code
+const kept = path.join(__dirname, '..', 'store', `page-agent-${manifest.version}.zip`);
+check('store/ has the zip to upload, named for this version', fs.existsSync(kept), kept);
+if (fs.existsSync(kept)) {
+  const keptFiles = execFileSync('unzip', ['-Z1', kept], { encoding: 'utf8' }).trim().split('\n');
+  const stale = keptFiles.filter(f => {
+    const now = path.join(__dirname, '..', 'extension', f);
+    return !fs.existsSync(now) || !execFileSync('unzip', ['-p', kept, f]).equals(fs.readFileSync(now));
+  });
+  check('and it matches the extension exactly (run npm run package if not)',
+    stale.length === 0 && keptFiles.length === listed.length, stale.join(', ') || `${keptFiles.length} vs ${listed.length} files`);
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(failed ? `\n${failed} failed` : '\nAll package checks passed');
 process.exit(failed ? 1 : 0);
