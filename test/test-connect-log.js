@@ -20,7 +20,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 const PREFIX = '{"action":"';
 const as = (body, obj) => {
   const s = JSON.stringify(obj);
-  return body.model === 'claude-haiku-4-5' ? s.slice(PREFIX.length) : s;
+  return body.messages.at(-1)?.role === 'assistant' ? s.slice(PREFIX.length) : s;
 };
 const promptOf = body => body.messages[0].content;
 const indexOf = (body, label) =>
@@ -81,7 +81,7 @@ const oneQuestion = { lastPresetIndex: 0, autoContinue: false };
     check('page text is the question area, not an empty form', pageText.includes('Clayton Carpentry'), JSON.stringify(pageText.slice(0, 80)));
     check('the question is there in full, amounts and all', prompt.includes('estimated uncollectible accounts of $9,000'));
     check('stated once, not cut short beside every element', !prompt.includes('(question:'));
-    check('a question with sums in it goes to Opus 5.5 on Auto', p.requests[0]?.model === 'claude-opus-5-5', p.requests[0]?.model);
+    check('a question with sums in it goes to Sonnet 5.5 on Auto', p.requests[0]?.model === 'claude-sonnet-5-5', p.requests[0]?.model);
     check('picked the choice it was told to', p.w.document.getElementById('c3').checked);
   }
 
@@ -93,16 +93,16 @@ const oneQuestion = { lastPresetIndex: 0, autoContinue: false };
     });
     p.pressPlay();
     await settle(p);
-    check('a one-amount wording question stays on Haiku', p.requests[0]?.model === 'claude-haiku-4-5', p.requests[0]?.model);
+    check('a one-amount wording question stays on Haiku', p.requests[0]?.model === 'claude-haiku-5-5', p.requests[0]?.model);
     check('and is answered in one call', p.requests.length === 1 && p.w.document.getElementById('c0').checked,
       `${p.requests.length} calls`);
   }
 
-  // ── Haiku gives up: on Auto, Opus gets one look before it stops ─────────
+  // ── Haiku gives up: on Auto, Sonnet 5.5 gets one look before it stops ───
   {
     const p = boot(page(WORDS, WORD_CHOICES), {
       installLayout: flatLayout, storage: oneQuestion,
-      reply: body => body.model === 'claude-haiku-4-5'
+      reply: body => body.model === 'claude-haiku-5-5'
         ? as(body, { action: 'none' })
         : as(body, { action: 'click', index: indexOf(body, WORD_CHOICES[0]) })
     });
@@ -110,8 +110,8 @@ const oneQuestion = { lastPresetIndex: 0, autoContinue: false };
     p.w.document.querySelector('.next-button').addEventListener('click', () => { next = true; });
     p.pressPlay();
     const final = await settle(p);
-    check('"none" from Haiku is handed to Opus 5.5',
-      p.requests.length === 2 && p.requests[1].model === 'claude-opus-5-5', p.requests.map(r => r.model).join(', '));
+    check('"none" from Haiku is handed to Sonnet 5.5',
+      p.requests.length === 2 && p.requests[1].model === 'claude-sonnet-5-5', p.requests.map(r => r.model).join(', '));
     check('which answers it, and it moves on', p.w.document.getElementById('c0').checked && next, final);
   }
 
@@ -119,14 +119,14 @@ const oneQuestion = { lastPresetIndex: 0, autoContinue: false };
   {
     const p = boot(page(WORDS, WORD_CHOICES), {
       installLayout: flatLayout, storage: oneQuestion,
-      reply: body => body.model === 'claude-haiku-4-5'
+      reply: body => body.model === 'claude-haiku-5-5'
         ? as(body, { action: 'click', index: /\[(\d+)\] avalon-probe-renderer/.exec(promptOf(body))[1] * 1 })
         : as(body, { action: 'click', index: indexOf(body, WORD_CHOICES[0]) })
     });
     p.pressPlay();
     const final = await settle(p);
-    check('clicking no answer choice is handed to Opus 5.5 too',
-      p.requests.length === 2 && p.requests[1].model === 'claude-opus-5-5', p.requests.map(r => r.model).join(', '));
+    check('clicking no answer choice is handed to Sonnet 5.5 too',
+      p.requests.length === 2 && p.requests[1].model === 'claude-sonnet-5-5', p.requests.map(r => r.model).join(', '));
     check('and the question gets answered', p.w.document.getElementById('c0').checked && !p.isError(), final);
   }
 
@@ -139,7 +139,7 @@ const oneQuestion = { lastPresetIndex: 0, autoContinue: false };
     p.pressPlay();
     await settle(p);
     await wait(300);
-    check('with Auto off, Haiku stays Haiku, one call', p.requests.length === 1 && p.requests[0].model === 'claude-haiku-4-5',
+    check('with Auto off, Haiku stays Haiku, one call', p.requests.length === 1 && p.requests[0].model === 'claude-haiku-5-5',
       p.requests.map(r => r.model).join(', '));
   }
 

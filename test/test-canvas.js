@@ -37,7 +37,7 @@ const checked = (w, id) => w.document.getElementById(id).checked;
   // ── 2. A whole page answered in one go ─────────────────────────────────
   {
     // Cash, True, A = L + E, Notes payable + Unearned revenue
-    const page = boot(ALL_ON_ONE_PAGE, { installLayout, reply: 'clickMany","indexes":[1,4,6,10,12]}' });
+    const page = boot(ALL_ON_ONE_PAGE, { installLayout, reply: '{"action":"clickMany","indexes":[1,4,6,10,12]}' });
     let submitted = false;
     page.w.document.getElementById('submit_quiz_button')
       .addEventListener('click', e => { submitted = true; e.preventDefault(); });
@@ -68,7 +68,7 @@ const checked = (w, id) => w.document.getElementById(id).checked;
 
   // ── 3. One question at a time: answer, then Next ───────────────────────
   {
-    const page = boot(ONE_AT_A_TIME, { installLayout, reply: 'click","index":0}' });
+    const page = boot(ONE_AT_A_TIME, { installLayout, reply: '{"action":"click","index":0}' });
     let nextClicked = false, submitted = false;
     page.w.document.querySelector('.next-question').addEventListener('click', () => { nextClicked = true; });
     page.w.document.getElementById('submit_quiz_button')
@@ -91,7 +91,7 @@ const checked = (w, id) => w.document.getElementById(id).checked;
   {
     const fresh = JSON.stringify({ at: Date.now() - 2000, answered: 3 });
     const page = boot(ONE_AT_A_TIME, {
-      installLayout, reply: 'click","index":0}',
+      installLayout, reply: '{"action":"click","index":0}',
       beforeLoad: w => w.sessionStorage.setItem('__pageAgentResume', fresh)
     });
     await until(() => page.requests.length >= 1);
@@ -102,7 +102,7 @@ const checked = (w, id) => w.document.getElementById(id).checked;
   {
     const stale = JSON.stringify({ at: Date.now() - 10 * 60 * 1000, answered: 3 });
     const page = boot(ONE_AT_A_TIME, {
-      installLayout, reply: 'click","index":0}',
+      installLayout, reply: '{"action":"click","index":0}',
       beforeLoad: w => w.sessionStorage.setItem('__pageAgentResume', stale)
     });
     await wait(2000);
@@ -112,7 +112,7 @@ const checked = (w, id) => w.document.getElementById(id).checked;
   // ── 5. Back on a question that's already answered ─────────────────────
   {
     const page = boot(ONE_AT_A_TIME, {
-      installLayout, storage: { autoContinue: false }, reply: 'none"}'
+      installLayout, storage: { autoContinue: false }, reply: '{"action":"none"}'
     });
     page.w.document.getElementById('question_102_answer_1').checked = true;
     let nextClicked = false;

@@ -9,7 +9,7 @@ const test = fn => cases.push(fn);
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const as = (body, obj) => {
   const s = JSON.stringify(obj);
-  return body.model === 'claude-haiku-4-5' ? s.slice('{"action":"'.length) : s;
+  return body.messages.at(-1)?.role === 'assistant' ? s.slice('{"action":"'.length) : s;
 };
 const flat = w => {
   w.HTMLElement.prototype.getBoundingClientRect = () =>
@@ -63,7 +63,7 @@ test(async check => {
   check('on: records the site', e.host === 'learning.mheducation.com', e.host);
   check('on: records the exact prompt the model saw',
     e.steps?.[0]?.prompt?.includes('accrued expenses') && e.steps[0].prompt.includes('Elements (click by index)'));
-  check('on: records which model and what kind of page', e.steps?.[0]?.model === 'claude-haiku-4-5' && e.steps[0].kind === 'question',
+  check('on: records which model and what kind of page', e.steps?.[0]?.model === 'claude-haiku-5-5' && e.steps[0].kind === 'question',
     `${e.steps?.[0]?.model} / ${e.steps?.[0]?.kind}`);
   check('on: records the answer in words',
     e.steps?.[0]?.answer === 'selected "increase in liabilities", "decrease in expenses"', e.steps?.[0]?.answer);

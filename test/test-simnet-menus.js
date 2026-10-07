@@ -13,7 +13,7 @@ const flat = w => {
 };
 const as = (body, obj) => {
   const s = JSON.stringify(obj);
-  return body.model === 'claude-haiku-4-5' ? s.slice('{"action":"'.length) : s;
+  return body.messages.at(-1)?.role === 'assistant' ? s.slice('{"action":"'.length) : s;
 };
 // The fake model reads the list it was actually sent, like the real one
 const indexOf = (body, label) => {

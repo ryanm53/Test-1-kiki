@@ -19,7 +19,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 const PREFIX = '{"action":"';
 const as = (body, obj) => {
   const s = JSON.stringify(obj);
-  return body.model === 'claude-haiku-4-5' ? s.slice(PREFIX.length) : s;
+  return body.messages.at(-1)?.role === 'assistant' ? s.slice(PREFIX.length) : s;
 };
 const promptOf = body => body.messages[0].content;
 // Every element line, as [index, rest of line]
@@ -174,8 +174,8 @@ async function run(custom) {
       && labels.some(l => l.includes('"Assets — July 2, 2027 (line 1 of 2)"')),
       labels.filter(l => l.includes('September 17')).slice(0, 2).join(' | '));
     check('the "$" beside each box is never taken for a row name', !labels.some(l => /— \$"/.test(l)));
-    check('worksheets go to Opus 5.5, thinking harder, with room to',
-      first?.model === 'claude-opus-5-5' && first?.output_config?.effort === 'medium' && first?.max_tokens >= 16000,
+    check('worksheets go to Sonnet 5.5, thinking harder, with room to',
+      first?.model === 'claude-sonnet-5-5' && first?.output_config?.effort === 'medium' && first?.max_tokens >= 16000,
       `${first?.model} ${first?.output_config?.effort} ${first?.max_tokens}`);
 
     const d = p.w.document;

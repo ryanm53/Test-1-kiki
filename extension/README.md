@@ -93,37 +93,37 @@ stuck, surfaced inline in the control bar.
 ### Forcing valid JSON output
 
 Instructing an LLM to "respond with only JSON" is not reliable under load — it will
-occasionally open with prose and break the parse. Two mechanisms prevent that, chosen
-per model in the `MODELS` table:
-
-- **Prefill** (Haiku 4.5): the request ends with an assistant turn containing
-  `{"action":"`, so the reply is already mid-JSON and cannot begin with prose. The
-  prefix is stitched back on before parsing.
-- **Structured outputs** (Sonnet 5, Opus 5.5): prefill returns a 400 on these models, so
-  they get `output_config.format` with a JSON schema instead, which constrains the whole
-  response shape rather than just its opening.
+occasionally open with prose and break the parse. Every current model (Haiku 5.5,
+Sonnet 5.5, Opus 5.5) gets **structured outputs**: `output_config.format` with a JSON
+schema, which constrains the whole response shape. (Prefill, seeding the reply with
+`{"action":"`, returns a 400 on all three; the `prefill` option in `MODELS` remains for
+a model that takes one.)
 
 Either way a bracket-counting fallback extracts the first complete `{...}` block in case
 trailing text appears after the closing brace, and the parsed action is validated against
 its required fields before execution.
 
-Other per-model differences are handled in the same table: `temperature` is rejected
-on Sonnet 5 / Opus 5.5, and Opus 5.5 always thinks — it can't be turned off, and the
-thinking counts against `max_tokens` — so it gets 8000 and `effort: low` (its default is
-`medium`). Response parsing looks for the `text` block rather than `content[0]`, since
-thinking blocks (and, after a fallback, a `fallback` marker block) come first.
+Other per-model differences are handled in the same table. A non-default `temperature`
+is a 400 on all three. All three think by default (no `thinking` field is sent), and
+thinking counts against `max_tokens`, so Haiku 5.5 gets 2048 and Sonnet 5.5 / Opus 5.5
+8000, each at `effort: low` (the defaults are medium for Haiku 5.5 and Opus 5.5, high
+for Sonnet 5.5); worksheets and SIMnet retries go to `medium`. Response parsing looks
+for the `text` block rather than `content[0]`, since thinking blocks (and, after a
+fallback, a `fallback` marker block) come first.
 
-Opus 5.5's safety classifiers can decline a request: HTTP 200, `stop_reason: "refusal"`,
-no answer. It opts into server-side fallback (`fallbacks: "default"`, header
-`server-side-fallback-2026-07-01`), which re-runs a declined request on the model
-Anthropic recommends for that category. A refusal that survives the fallback is reported
-as such and not retried. A saved `claude-opus-5` (the model Opus 5.5 replaced in the
-menu) is read as `claude-opus-5-5`.
+The safety classifiers can decline a request: HTTP 200, `stop_reason: "refusal"`, no
+answer. Sonnet 5.5 and Opus 5.5 opt into server-side fallback (`fallbacks: "default"`,
+header `server-side-fallback-2026-07-01`), which re-runs a declined request on the
+model Anthropic recommends for that category. Haiku 5.5 has no server-side fallback,
+so on Auto a question it declines is re-asked once of Sonnet 5.5. A refusal that
+survives is reported as such and not retried. Saved choices of models the menu has
+replaced carry over: `claude-haiku-4-5` → `claude-haiku-5-5`, `claude-sonnet-5` →
+`claude-sonnet-5-5`, `claude-opus-5` → `claude-opus-5-5`.
 
 ### Auto model choice
 
-On **Auto** (the default: Haiku 4.5 with `autoUpgrade` on), `pickModel` sends a page to
-Opus 5.5 when it needs working out rather than recall: SIMnet, worksheets, drag
+On **Auto** (the default: Haiku 5.5 with `autoUpgrade` on), `pickModel` sends a page to
+Sonnet 5.5 — half Opus 5.5's price — when it needs working out rather than recall: SIMnet, worksheets, drag
 questions, and calculation questions — three or more distinct dollar amounts or
 percentages across the question and its choices (`isMath`; Canvas excepted, since a
 whole quiz on one page would add up every question's). A real accounting log had Haiku
@@ -131,8 +131,9 @@ wrong or giving up on every one of those. Everything else stays on Haiku.
 
 Haiku can still give up on a question it could see. On Auto, a first-step `none`, or a
 click that picks no radio/checkbox on a page that has them (the question's own box, a
-confidence button), is taken as that: the step is re-asked once of Opus 5.5 before the
-run stops. With a model picked by hand, nothing is re-routed.
+confidence button), is taken as that: the step is re-asked once of Sonnet 5.5 before
+the run stops; so is a question Haiku 5.5 declines. With a model picked by hand, nothing
+is re-routed.
 
 ### Drag-and-drop via trusted input
 

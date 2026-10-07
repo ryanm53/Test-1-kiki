@@ -24,7 +24,7 @@ const geo = w => {
 };
 const as = (body, obj) => {
   const s = JSON.stringify(obj);
-  return body.model === 'claude-haiku-4-5' ? s.slice('{"action":"'.length) : s;
+  return body.messages.at(-1)?.role === 'assistant' ? s.slice('{"action":"'.length) : s;
 };
 const list = b => b.messages[0].content.split('Elements (click by index):\n')[1] ?? '';
 const idx = (b, label) => {

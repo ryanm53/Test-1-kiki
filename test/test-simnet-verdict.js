@@ -13,7 +13,7 @@ const flat = w => {
 };
 const as = (body, obj) => {
   const s = JSON.stringify(obj);
-  return body.model === 'claude-haiku-4-5' ? s.slice('{"action":"'.length) : s;
+  return body.messages.at(-1)?.role === 'assistant' ? s.slice('{"action":"'.length) : s;
 };
 const indexOf = (body, label) => {
   const m = new RegExp(`\\[(\\d+)\\][^\\n]*"${label}"`).exec(body.messages[0].content);

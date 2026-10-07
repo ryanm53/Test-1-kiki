@@ -19,7 +19,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 const PREFIX = '{"action":"';
 const as = (body, obj) => {
   const s = JSON.stringify(obj);
-  return body.model === 'claude-haiku-4-5' ? s.slice(PREFIX.length) : s;
+  return body.messages.at(-1)?.role === 'assistant' ? s.slice(PREFIX.length) : s;
 };
 const flat = w => {
   w.HTMLElement.prototype.getBoundingClientRect = () =>

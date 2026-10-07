@@ -15,7 +15,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 const PREFIX = '{"action":"';
 const as = (body, obj) => {
   const s = JSON.stringify(obj);
-  return body.model === 'claude-haiku-4-5' ? s.slice(PREFIX.length) : s;
+  return body.messages.at(-1)?.role === 'assistant' ? s.slice(PREFIX.length) : s;
 };
 
 const flatLayout = w => {
@@ -53,7 +53,7 @@ const flatLayout = w => {
 
     check('SIMnet: carried out the step', clicks.includes('Formulas'), clicks.join(','));
     check('SIMnet: used the stronger model for it',
-      page.requests[0]?.model === 'claude-opus-5-5', page.requests[0]?.model);
+      page.requests[0]?.model === 'claude-sonnet-5-5', page.requests[0]?.model);
     check('SIMnet: finishes cleanly, no confidence-button error',
       /^Finished\. Check SIMnet agrees/.test(final) && !page.isError(), final);
     check('SIMnet: does not start the task over', page.requests.length === 2, `${page.requests.length} calls`);
@@ -92,7 +92,7 @@ const flatLayout = w => {
       order[0] === 'confidence' && order[1] === 'next', order.join(' → '));
     check('Connect: went on to the next question by itself', page.requests.length >= 2,
       `${page.requests.length} calls`);
-    check('Connect: stayed on the cheap model', page.requests[0]?.model === 'claude-haiku-4-5');
+    check('Connect: stayed on the cheap model', page.requests[0]?.model === 'claude-haiku-5-5');
     page.pressPlay();   // stop
   }
 

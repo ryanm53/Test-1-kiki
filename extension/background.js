@@ -1,34 +1,44 @@
-// Per-model request differences. Prefill (seeding the reply with `{"action":"`)
-// is rejected with a 400 on Sonnet 5 / Opus 5.5, as is `temperature`, so those
-// models get structured outputs instead — which constrains the response to the
-// schema at the API level and is a stronger guarantee than prefill anyway.
+// Per-model request differences. All three reject a prefill (seeding the reply
+// with `{"action":"`) and a non-default `temperature` with a 400, so every
+// request gets structured outputs instead — which constrains the response to
+// the schema at the API level, a stronger guarantee than prefill anyway.
+// (`prefill` and `temperature` stay as options for a model that wants them.)
 //
-// Opus 5.5 always thinks — it can't be switched off — and the thinking counts
-// against max_tokens, so it gets far more room than the reply itself needs;
-// only what's used is billed. Its default effort is medium, so low is set
-// explicitly. Its safety filters can decline a question outright (biology is
-// among them), so it opts into Anthropic's server-side fallback, which re-runs
-// a declined question on the model recommended for that kind of decline.
+// All three think by default — no thinking setting is sent — and the thinking
+// counts against max_tokens, so each gets more room than the reply itself
+// needs; only what's used is billed. Effort is set explicitly, low for one
+// answer: the defaults are medium (Haiku 5.5, Opus 5.5) and high (Sonnet 5.5).
+//
+// Safety filters can decline a question outright (biology is among them).
+// Sonnet 5.5 and Opus 5.5 opt into Anthropic's server-side fallback, which
+// re-runs a declined question on the model recommended for that kind of
+// decline. Haiku 5.5 has no such fallback, so on Auto a question it declines
+// goes to Sonnet 5.5 (see runGoal).
 const MODELS = {
-  'claude-haiku-4-5': { label: 'Haiku 4.5', maxTokens: 200,  prefill: true, temperature: true },
-  'claude-sonnet-5':  { label: 'Sonnet 5',  maxTokens: 2048, effort: 'low' },
-  'claude-opus-5-5':  { label: 'Opus 5.5',  maxTokens: 8000, effort: 'low', fallbacks: true }
+  'claude-haiku-5-5':  { label: 'Haiku 5.5',  maxTokens: 2048, effort: 'low' },
+  'claude-sonnet-5-5': { label: 'Sonnet 5.5', maxTokens: 8000, effort: 'low', fallbacks: true },
+  'claude-opus-5-5':   { label: 'Opus 5.5',   maxTokens: 8000, effort: 'low', fallbacks: true }
 };
-const DEFAULT_MODEL = 'claude-haiku-4-5';
+const DEFAULT_MODEL = 'claude-haiku-5-5';
 
-// Opus 5.5 replaced Opus 5 in the menu: newer, more capable, and cheaper per
-// token. A saved choice of Opus 5 carries over to it.
-const MODEL_ALIASES = { 'claude-opus-5': 'claude-opus-5-5' };
+// Newer models replaced older ones in the menu, each at the same price or
+// less (Haiku 5.5 at a tenth of Haiku 4.5's). A saved older choice carries over.
+const MODEL_ALIASES = {
+  'claude-haiku-4-5': 'claude-haiku-5-5',
+  'claude-sonnet-5':  'claude-sonnet-5-5',
+  'claude-opus-5':    'claude-opus-5-5'
+};
 const resolveModel = id => MODELS[id] ? id : MODELS[MODEL_ALIASES[id]] ? MODEL_ALIASES[id] : DEFAULT_MODEL;
 
 // Worksheets, drag questions and SIMnet need real reasoning — multi-step
 // arithmetic, spatial planning over several moves, a procedure — where the
-// cheap model tends to fumble. Those go to Opus 5.5; everything else keeps
-// costing what it costs.
+// cheap model tends to fumble. Those go to Sonnet 5.5, which thinks them
+// through at half Opus 5.5's price; everything else keeps costing what it
+// costs. Opus 5.5 is still there to pick by hand.
 const UPGRADE_TO = {
-  'claude-haiku-4-5': 'claude-opus-5-5',
-  'claude-sonnet-5':  'claude-opus-5-5',
-  'claude-opus-5-5':  'claude-opus-5-5'
+  'claude-haiku-5-5':  'claude-sonnet-5-5',
+  'claude-sonnet-5-5': 'claude-sonnet-5-5',
+  'claude-opus-5-5':   'claude-opus-5-5'
 };
 
 function pickModel(baseModel, pageData, autoUpgrade) {
@@ -426,6 +436,7 @@ ${elementList || '(none found)'}`;
       "Claude declined to answer this one. Do it yourself, or pick a different model under More → Model."
     );
     err.final = true;
+    err.refusal = true;   // Auto hands it to the stronger model (runGoal)
     throw err;
   }
 
@@ -1049,6 +1060,9 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         lastError = result?.error ?? 'Execution returned failure without an error message';
       } catch (e) {
         lastError = e.message;
+        // Haiku 5.5 has no server-side fallback: on Auto, a question it
+        // declines gets one try on Sonnet 5.5, which has
+        if (e.refusal && canEscalate()) { escalated = true; attempt--; continue; }
         if (e.message.startsWith('Rate limit') || e.final) {
           return { success: false, error: lastError };
         }
@@ -1263,7 +1277,9 @@ async function checkKey(apiKey) {
   try {
     // The smallest request there is: a one-token reply from the cheapest model
     const r = await postToApi(apiKey, {
-      model: 'claude-haiku-4-5', max_tokens: 1,
+      // Thinking off, so the one token isn't spent on it
+      model: 'claude-haiku-5-5', max_tokens: 1,
+      thinking: { type: 'disabled' }, output_config: { effort: 'low' },
       messages: [{ role: 'user', content: 'Hi' }]
     });
     if (r.ok) return { ok: true, text: 'API key works' };

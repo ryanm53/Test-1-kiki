@@ -9,7 +9,7 @@ const test = fn => cases.push(fn);
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const as = (body, obj) => {
   const s = JSON.stringify(obj);
-  return body.model === 'claude-haiku-4-5' ? s.slice('{"action":"'.length) : s;
+  return body.messages.at(-1)?.role === 'assistant' ? s.slice('{"action":"'.length) : s;
 };
 const flat = w => {
   w.HTMLElement.prototype.getBoundingClientRect = () =>
@@ -90,32 +90,32 @@ test(async check => {
   const { page, $ } = open(SHEET, { storage: { mode: 'answer' }, reply: fill4 });
   check('model: Auto out of the box', $('model').value === 'auto', $('model').value);
   check('model: menu has Auto and the three models',
-    [...$('model').options].map(o => o.textContent).join() === 'Auto,Haiku 4.5,Sonnet 5,Opus 5.5');
+    [...$('model').options].map(o => o.textContent).join() === 'Auto,Haiku 5.5,Sonnet 5.5,Opus 5.5');
   page.pressPlay(); await settle(page);
-  check('model: Auto upgrades a worksheet to Opus 5.5', page.requests[0]?.model === 'claude-opus-5-5', page.requests[0]?.model);
+  check('model: Auto upgrades a worksheet to Sonnet 5.5, not the dearer Opus', page.requests[0]?.model === 'claude-sonnet-5-5', page.requests[0]?.model);
 });
 
 test(async check => {
   const { page, $ } = open(SHEET, { storage: { mode: 'answer' }, reply: fill4 });
-  $('model').value = 'claude-haiku-4-5';
+  $('model').value = 'claude-haiku-5-5';
   $('model').dispatchEvent(new page.w.Event('change'));
   check('model: naming one turns the upgrade off',
-    page.store.model === 'claude-haiku-4-5' && page.store.autoUpgrade === false, JSON.stringify(page.store));
+    page.store.model === 'claude-haiku-5-5' && page.store.autoUpgrade === false, JSON.stringify(page.store));
   page.pressPlay(); await settle(page);
   check('model: a named model is used even on a worksheet',
-    page.requests[0]?.model === 'claude-haiku-4-5', page.requests[0]?.model);
+    page.requests[0]?.model === 'claude-haiku-5-5', page.requests[0]?.model);
 
   $('model').value = 'auto';
   $('model').dispatchEvent(new page.w.Event('change'));
   check('model: back to Auto turns the upgrade on',
-    page.store.model === 'claude-haiku-4-5' && page.store.autoUpgrade === true, JSON.stringify(page.store));
+    page.store.model === 'claude-haiku-5-5' && page.store.autoUpgrade === true, JSON.stringify(page.store));
 });
 
 test(async check => {
   const { page, $ } = open(MC, { storage: { model: 'claude-sonnet-5', autoUpgrade: true } });
-  check('old settings: Sonnet-with-upgrade shows as Sonnet 5, and is saved that way',
-    $('model').value === 'claude-sonnet-5' && page.store.autoUpgrade === false,
-    `${$('model').value} / ${page.store.autoUpgrade}`);
+  check('old settings: Sonnet 5-with-upgrade shows as Sonnet 5.5, and is saved that way',
+    $('model').value === 'claude-sonnet-5-5' && page.store.model === 'claude-sonnet-5-5' && page.store.autoUpgrade === false,
+    `${$('model').value} / ${page.store.model} / ${page.store.autoUpgrade}`);
 });
 
 // ── API key ──────────────────────────────────────────────────────────────

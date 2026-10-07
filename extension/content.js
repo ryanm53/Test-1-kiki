@@ -1642,18 +1642,18 @@ function bgSend(msg, cb) {
 
   // Keep in sync with MODELS in background.js
   const MODEL_LIST = [
-    { id: 'claude-haiku-4-5', label: 'Haiku 4.5', note: 'Fastest and cheapest — about $0.05 per 100 questions.' },
-    { id: 'claude-sonnet-5',  label: 'Sonnet 5',  note: 'Noticeably better at the subject matter. Roughly 2× the cost.' },
-    { id: 'claude-opus-5-5',  label: 'Opus 5.5',  note: 'Most capable, and slower. Roughly 4× the cost.' }
+    { id: 'claude-haiku-5-5',  label: 'Haiku 5.5',  note: 'Fastest and cheapest — a few cents per 100 questions.' },
+    { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', note: 'Better at hard subjects — around a cent a question.' },
+    { id: 'claude-opus-5-5',   label: 'Opus 5.5',   note: 'Most capable, and slower — around two cents a question.' }
   ];
-  const DEFAULT_MODEL = 'claude-haiku-4-5';
+  const DEFAULT_MODEL = 'claude-haiku-5-5';
 
   // Auto is the cheap model with an upgrade for hard questions — what the old
   // "Upgrade on hard questions" switch did, without a second control. Picking
   // a model by name means that model every time.
   const AUTO = {
     id: 'auto', label: 'Auto',
-    note: 'Recommended. The cheapest model for most questions, and a smarter one for SIMnet, worksheets, drag-and-drop and calculations.'
+    note: 'Recommended. The cheapest model for most questions, and Sonnet 5.5 for SIMnet, worksheets, drag-and-drop and calculations.'
   };
   [AUTO, ...MODEL_LIST].forEach(m => {
     const o = document.createElement('option');
@@ -1750,9 +1750,11 @@ function bgSend(msg, cb) {
       notes = s.notes ?? '';
       notesInput.value = notes;
 
-      // Opus 5.5 replaced Opus 5 in the menu; a saved Opus 5 carries over
-      if (s.model === 'claude-opus-5') {
-        s.model = 'claude-opus-5-5';
+      // Newer models replaced older ones in the menu, at the same price or
+      // less; a saved older choice carries over
+      const REPLACED = { 'claude-haiku-4-5': 'claude-haiku-5-5', 'claude-sonnet-5': 'claude-sonnet-5-5', 'claude-opus-5': 'claude-opus-5-5' };
+      if (REPLACED[s.model]) {
+        s.model = REPLACED[s.model];
         store.set({ model: s.model });
       }
 

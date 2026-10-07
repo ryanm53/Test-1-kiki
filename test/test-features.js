@@ -9,10 +9,11 @@ const cases = [];
 const test = fn => cases.push(fn);
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
-// Haiku continues a seeded '{"action":"'; Sonnet and Opus answer whole
+// A reply continues a seeded '{"action":"' only if the request seeded one;
+// no current model takes a seed, so every reply here comes back whole
 const as = (body, obj) => {
   const s = JSON.stringify(obj);
-  return body.model === 'claude-haiku-4-5' ? s.slice('{"action":"'.length) : s;
+  return body.messages.at(-1)?.role === 'assistant' ? s.slice('{"action":"'.length) : s;
 };
 const flat = w => {
   w.HTMLElement.prototype.getBoundingClientRect = () =>
@@ -69,7 +70,7 @@ const run = async (html, opts) => {
     const v = id => doc.getElementById(id).value;
     check('accounting worksheet: every cell filled',
       v('w1') === '-500' && v('w2') === '500' && v('w3') === '1500' && v('w4') === '500', final);
-    check('accounting worksheet: upgraded model', page.requests[0]?.model === 'claude-opus-5-5',
+    check('accounting worksheet: upgraded model', page.requests[0]?.model === 'claude-sonnet-5-5',
       page.requests[0]?.model);
     check('accounting worksheet: cells labelled by column and row',
       JSON.stringify(page.requests[0]?.messages).includes('Deferred Revenue — Adjustment'));
@@ -91,18 +92,15 @@ const run = async (html, opts) => {
   });
 
   // ── Every model gets a request it accepts ──────────────────────────────
-  for (const model of ['claude-haiku-4-5', 'claude-sonnet-5', 'claude-opus-5-5']) test(async check => {
+  for (const model of ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5']) test(async check => {
     const { page, final } = await run(MC, {
       storage: { ...ANSWER_ONLY, model, autoUpgrade: false },
       reply: b => as(b, { action: 'click', index: 0 }) });
     const req = page.requests[0] ?? {};
     const last = req.messages?.[req.messages.length - 1];
-    const ok = model === 'claude-haiku-4-5'
-      // Haiku: seeded reply, deterministic
-      ? last?.role === 'assistant' && req.temperature === 0 && !req.output_config
-      // Sonnet 5 / Opus 5 reject both of those with a 400; they get a schema
-      : last?.role === 'user' && req.temperature === undefined
-        && req.output_config?.format?.type === 'json_schema';
+    // A prefill or a temperature is a 400 on all three; they get a schema
+    const ok = last?.role === 'user' && req.temperature === undefined
+      && req.output_config?.format?.type === 'json_schema';
     check(`${model}: request in the shape it accepts`, ok && req.model === model,
       JSON.stringify({ model: req.model, last: last?.role, t: req.temperature, oc: !!req.output_config }));
     check(`${model}: answers`, page.w.document.getElementById('a').checked, final);
@@ -124,11 +122,58 @@ const run = async (html, opts) => {
       `${JSON.stringify(req.fallbacks)} / ${headers['anthropic-beta']}`);
     check('opus 5.5: answers', page.w.document.getElementById('a').checked, final);
   });
+  // ── Haiku 5.5 specifics: Auto's everyday model ────────────────────────
+  test(async check => {
+    const { page, final } = await run(MC, {
+      storage: { ...ANSWER_ONLY, model: 'claude-haiku-5-5', autoUpgrade: false },
+      reply: b => as(b, { action: 'click', index: 0 }) });
+    const req = page.requests[0] ?? {};
+    check('haiku 5.5: no thinking setting, effort set to low (its default is medium)',
+      req.thinking === undefined && req.output_config?.effort === 'low', JSON.stringify(req.output_config?.effort));
+    check('haiku 5.5: room for some thinking before the answer', req.max_tokens >= 2048, req.max_tokens);
+    check('haiku 5.5: answers', page.w.document.getElementById('a').checked, final);
+  });
+  test(async check => {
+    // Haiku 5.5 has no server-side fallback; on Auto, Sonnet 5.5 takes it
+    const { page, final } = await run(MC, {
+      storage: { ...ANSWER_ONLY },
+      reply: b => b.model === 'claude-haiku-5-5'
+        ? { json: { stop_reason: 'refusal', content: [], stop_details: { type: 'refusal', category: 'bio' } } }
+        : as(b, { action: 'click', index: 0 }) });
+    check('auto: a question Haiku 5.5 declines goes to Sonnet 5.5',
+      page.requests.map(r => r.model).join() === 'claude-haiku-5-5,claude-sonnet-5-5', page.requests.map(r => r.model).join());
+    check('auto: which answers it', page.w.document.getElementById('a').checked && !page.isError(), final);
+  });
   test(async check => {
     const { page } = await run(MC, {
-      storage: { ...ANSWER_ONLY, model: 'claude-sonnet-5', autoUpgrade: false },
+      storage: { ...ANSWER_ONLY, model: 'claude-haiku-4-5', autoUpgrade: true },
       reply: b => as(b, { action: 'click', index: 0 }) });
-    check('other models: no fallback field or beta header',
+    check('a saved Haiku 4.5 on Auto carries over to Haiku 5.5, still on Auto',
+      page.requests[0]?.model === 'claude-haiku-5-5' && page.store.model === 'claude-haiku-5-5' && page.store.autoUpgrade !== false,
+      `${page.requests[0]?.model} / ${page.store.model} / ${page.store.autoUpgrade}`);
+  });
+
+  // ── Sonnet 5.5 specifics: Auto's model for hard questions ─────────────
+  test(async check => {
+    const { page, final } = await run(MC, {
+      storage: { ...ANSWER_ONLY, model: 'claude-sonnet-5-5', autoUpgrade: false },
+      reply: b => as(b, { action: 'click', index: 0 }) });
+    const req = page.requests[0] ?? {}, headers = page.requestHeaders[0] ?? {};
+    check('sonnet 5.5: never sends a thinking setting (turning it off is a 400)',
+      req.thinking === undefined, JSON.stringify(req.thinking));
+    check('sonnet 5.5: effort set to low, not left on its high default',
+      req.output_config?.effort === 'low', JSON.stringify(req.output_config?.effort));
+    check('sonnet 5.5: room for its thinking as well as the answer', req.max_tokens >= 8000, req.max_tokens);
+    check('sonnet 5.5: opts into fallback if a safety filter declines',
+      req.fallbacks === 'default' && headers['anthropic-beta'] === 'server-side-fallback-2026-07-01',
+      `${JSON.stringify(req.fallbacks)} / ${headers['anthropic-beta']}`);
+    check('sonnet 5.5: answers', page.w.document.getElementById('a').checked, final);
+  });
+  test(async check => {
+    const { page } = await run(MC, {
+      storage: { ...ANSWER_ONLY, model: 'claude-haiku-5-5', autoUpgrade: false },
+      reply: b => as(b, { action: 'click', index: 0 }) });
+    check('haiku: no fallback field or beta header',
       page.requests[0]?.fallbacks === undefined && !page.requestHeaders[0]?.['anthropic-beta']);
   });
   test(async check => {
@@ -165,6 +210,14 @@ const run = async (html, opts) => {
       reply: b => as(b, { action: 'click', index: 0 }) });
     check('a saved Opus 5 carries over to Opus 5.5',
       page.requests[0]?.model === 'claude-opus-5-5' && page.store.model === 'claude-opus-5-5',
+      `${page.requests[0]?.model} / ${page.store.model}`);
+  });
+  test(async check => {
+    const { page } = await run(MC, {
+      storage: { ...ANSWER_ONLY, model: 'claude-sonnet-5', autoUpgrade: false },
+      reply: b => as(b, { action: 'click', index: 0 }) });
+    check('a saved Sonnet 5 carries over to Sonnet 5.5',
+      page.requests[0]?.model === 'claude-sonnet-5-5' && page.store.model === 'claude-sonnet-5-5',
       `${page.requests[0]?.model} / ${page.store.model}`);
   });
 

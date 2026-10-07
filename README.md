@@ -105,7 +105,7 @@ Press the **play button ▶**. What happens next depends on the site:
 
 | Site | What it does |
 |---|---|
-| **Connect** | Answers, clicks **High Confidence** and **Next Question**, and keeps going through the whole assignment on its own. A worksheet split into tabs (**Required 1**, **Required 2**…) has every tab answered before it moves on, dropdowns included. A big worksheet on Opus 5.5 can take a minute or two |
+| **Connect** | Answers, clicks **High Confidence** and **Next Question**, and keeps going through the whole assignment on its own. A worksheet split into tabs (**Required 1**, **Required 2**…) has every tab answered before it moves on, dropdowns included. A big worksheet can take a minute or two |
 | **Canvas** | Answers **every question on the page** in one go. If the quiz shows one question at a time, it clicks **Next** and keeps going. **It never presses Submit Quiz** — when it's done it says *"Answered. Check it over, then submit it yourself."* |
 | **SIMnet** | Does the task on screen — ribbon tabs and their menus and submenus, dialogs, selecting cells, ranges, whole columns and rows, sheet tabs (rename, group, color, hide, add), right-click menus, typing and pressing keys. SIMnet then grades it: when it's **correct**, Autopilot presses Continue and goes on to the next question by itself. When it's **incorrect**, it reads SIMnet's hint and tries **once** more following it. It never spends your **last attempt**: if another try would use it, or the second try is also wrong, it stops and shows you the hint to finish it yourself |
 
@@ -172,7 +172,7 @@ Tap **More** for the rest:
 
 | Setting | What it does |
 |---|---|
-| **Model** | Which AI does the thinking. **Auto** *(default, recommended)* uses the cheapest model for most questions and **Opus 5.5**, the most capable, for SIMnet, worksheets, drag-and-drop and questions with sums to work out — and it hands a question to Opus 5.5 when the cheap one gets stuck. The bar shows **↑ Opus 5.5** when it steps up. Or pick one to use every time: **Haiku 4.5** is fastest and cheapest, **Sonnet 5** is noticeably smarter for about 2× the cost, **Opus 5.5** is the most capable at about 4× |
+| **Model** | Which AI does the thinking. **Auto** *(default, recommended)* uses **Haiku 5.5**, the cheapest, for most questions and **Sonnet 5.5** for SIMnet, worksheets, drag-and-drop and questions with sums to work out — and it hands a question to Sonnet 5.5 when the cheap one gets stuck. The bar shows **↑ Sonnet 5.5** when it steps up. Or pick one to use every time: **Haiku 5.5** is fastest and cheapest, **Sonnet 5.5** is better at hard subjects (around a cent a question), **Opus 5.5** is the most capable (around two cents) |
 | **Notes** *(optional)* | Extra context to improve accuracy, e.g. *"This is financial accounting — use GAAP conventions."* Fine to leave blank |
 | **Answer log** | *Off unless you turn it on.* Saves each question it answers — what it was asked, what it picked, and how the page looked straight after, which is where Connect shows "Correct"/"Incorrect" and SIMnet its hint — in your browser only. When an answer was wrong, tap the **thumbs-down** that appears on the bar (most reliable in *One question* mode, since on Autopilot it may already have moved on). **Download** saves it as a file you can share to help tune Auto; **Clear** takes two taps. It adds under a second per question while it's on |
 | **Troubleshooting** | *Check this page* — see [Troubleshooting](#troubleshooting). *Copy last prompt* copies exactly what was sent to Claude last time |
@@ -181,15 +181,15 @@ Tap **More** for the rest:
 
 ## What it costs
 
-You're billed by Anthropic for what you use. With the default model:
+You're billed by Anthropic for what you use. With the default model, Haiku 5.5:
 
 | | Roughly |
 |---|---|
-| One question | about $0.0005 — **half a hundredth of a cent** |
-| 100 questions | **about 5 cents** |
-| $5 of credit | **around 10,000 questions** |
+| One question | about $0.0003 — **three hundredths of a cent** |
+| 100 questions | **about 3 cents** |
+| $5 of credit | **well over 10,000 questions** |
 
-On **Auto**, the harder questions (SIMnet, worksheets, drag-and-drop, calculations) go to Opus 5.5, which costs about four times as much — around a cent each. Picking Sonnet 5 for everything costs about twice the default, Opus 5.5 about four times. Even so, $5 lasts most people a very long time.
+On **Auto**, the harder questions (SIMnet, worksheets, drag-and-drop, calculations) go to Sonnet 5.5 — around a cent each, a few cents for a big worksheet. Picking Opus 5.5 by hand costs about twice that. These are estimates: the exact cost depends on how long the question is and how much the model thinks. Your real spending is on console.anthropic.com under **Usage**.
 
 ---
 

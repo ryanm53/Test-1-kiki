@@ -50,7 +50,7 @@ THREE MODES
 • Answer only — picks the answer and lets you click Next.
 
 YOUR OWN KEY, YOUR OWN COST
-Page Agent uses Claude through your own Anthropic API key (console.anthropic.com). On Auto, easy questions go to the cheapest model (about $0.05 per 100 questions) and hard ones (worksheets, calculations, spreadsheets) to a stronger one (around a cent each).
+Page Agent uses Claude through your own Anthropic API key (console.anthropic.com). On Auto, easy questions go to the cheapest model (a few cents per 100 questions) and hard ones (worksheets, calculations, spreadsheets) to a stronger one (around a cent each).
 
 OUT OF THE WAY WHEN YOU WANT
 Drag the bar anywhere, or hide it with the – button and bring it back with Alt+Shift+H or the toolbar button.
