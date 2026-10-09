@@ -6,6 +6,12 @@ Works on **McGraw Hill Connect**, **SIMnet** (McGraw Hill's practice Excel), and
 
 It works out which site it's on by itself — you can go from a SIMnet assignment to a Canvas quiz to Connect without changing any settings.
 
+## The easy way to install
+
+**[Add Page Agent from the Chrome Web Store](https://chromewebstore.google.com/detail/ijmdokcedmfkhdjciamdmclleognnlpm)** → click **Add to Chrome**. It updates itself from then on. Then skip to **Step 3 — Get an API key** below.
+
+Already have the old copy from this folder? Remove it first at `chrome://extensions`, or you'll get two control bars. Steps 1 and 2 are only for installing from the folder instead.
+
 ---
 
 ## Read this first
