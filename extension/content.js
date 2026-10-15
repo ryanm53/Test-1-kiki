@@ -25,6 +25,8 @@ const INTERACTIVE_SEL = [
   '[role="option"]',
   '[role="combobox"]',
   '[aria-haspopup="listbox"]',
+  'mat-select',
+  'ng-select',
   '[role="listitem"]',
   '[draggable="true"]',
   '[contenteditable="true"]',
@@ -102,8 +104,9 @@ function accessibleText(el, ownText = true) {
 // of options when clicked. Its options often aren't in the page until then.
 function isDropdown(el) {
   return !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)
-    && el.matches('[role="combobox"], [aria-haspopup="listbox"]');
+    && el.matches('[role="combobox"], [aria-haspopup="listbox"], mat-select, ng-select');
 }
+const DROPDOWN_SEL = '[role="combobox"], [aria-haspopup="listbox"], mat-select, ng-select';
 
 // What a dropdown offers, read off its list, and what it shows as chosen.
 // Lists a closed dropdown keeps out of the page are learnt by opening it
@@ -132,7 +135,7 @@ const chosenText = el => el.tagName === 'SELECT'
 function visibleOptions(el) {
   const list = listOf(el);
   const scope = list && isRendered(list) ? list : document;
-  return Array.from(scope.querySelectorAll('[role="option"], [role="listbox"] li'))
+  return Array.from(scope.querySelectorAll('[role="option"], [role="listbox"] li, mat-option, .ng-option'))
     .filter(o => isRendered(o) && optionText(o));
 }
 
@@ -179,18 +182,21 @@ async function chooseFromDropdown(el, value) {
 // Only those in the question area, and each only once: a menu button that
 // merely calls itself a listbox shouldn't be reopened on every look.
 function unreadDropdowns() {
-  return Array.from(pageRoot().querySelectorAll('[role="combobox"], [aria-haspopup="listbox"]'))
-    .filter(el => isDropdown(el) && !_dropTried.has(el) && isRendered(el) && !dropdownOptions(el))
-    .slice(0, 12);
+  return Array.from(pageRoot().querySelectorAll(DROPDOWN_SEL))
+    .filter(el => isDropdown(el) && !_dropTried.has(el) && isRendered(el) && !dropdownOptions(el));
 }
+// A financial statement has a dropdown on every line — twenty or more — so
+// there's no small cap, only a time budget: the page is asked about within 20s
 async function learnDropdowns() {
+  const end = Date.now() + 12000;
   for (const el of unreadDropdowns()) {
+    if (Date.now() > end) break;
     _dropTried.add(el);
     realClick(el);
     const options = await waitFor(() => { const o = visibleOptions(el); return o.length ? o : null; }, 600);
     if (options) _dropChoices.set(el, options.map(optionText));
     closeDropdown(el);
-    await new Promise(r => setTimeout(r, 60));
+    await new Promise(r => setTimeout(r, 40));
     if (el.getAttribute('aria-expanded') === 'true') realClick(el);
   }
 }
@@ -263,7 +269,7 @@ function tableGrid(table) {
   return { rows, grid, where };
 }
 
-const DROP_SEL = 'select, [role="combobox"], [aria-haspopup="listbox"]';
+const DROP_SEL = 'select, [role="combobox"], [aria-haspopup="listbox"], mat-select, ng-select';
 
 function tableLabel(el) {
   const cell = el.closest(CELL_SEL);
@@ -354,11 +360,26 @@ const cellAddress = el => {
   return m ? m[1] : null;
 };
 
+// A blank with no label of its own, outside any table (a statement drawn with
+// divs): the closest text just before it — in its row, or just above it
+function nearbyLabel(el) {
+  if (el.type === 'radio' || el.type === 'checkbox') return '';
+  let node = el;
+  for (let i = 0; i < 4 && node && node !== document.body; i++, node = node.parentElement) {
+    for (let sib = node.previousElementSibling, n = 0; sib && n < 3; sib = sib.previousElementSibling, n++) {
+      if (sib.querySelector('input, select, textarea, button')) continue;
+      const t = (sib.innerText ?? sib.textContent ?? '').trim().replace(/\s+/g, ' ');
+      if (t && t.length <= 80) return t;
+    }
+  }
+  return '';
+}
+
 function describeEl(el) {
   const question = nearestQuestionText(el);
   // Fall back to table headers when the field has no label of its own
   const drop = el.tagName === 'SELECT' || isDropdown(el);
-  const text = accessibleText(el, !drop) || tableLabel(el) || '';
+  const text = accessibleText(el, !drop) || tableLabel(el) || nearbyLabel(el) || '';
   return {
     tag: el.tagName.toLowerCase(),
     type: el.getAttribute('type') || null,
@@ -370,8 +391,8 @@ function describeEl(el) {
       : drop ? (chosenText(el).slice(0, 80) || undefined) : undefined,
     // A dropdown list's choices, so one can be picked by its text
     options: el.tagName === 'SELECT'
-      ? Array.from(el.options).slice(0, 30).map(o => o.textContent.trim()).filter(Boolean)
-      : isDropdown(el) ? (dropdownOptions(el)?.slice(0, 30) ?? undefined) : undefined,
+      ? Array.from(el.options).slice(0, 100).map(o => o.textContent.trim()).filter(Boolean)
+      : isDropdown(el) ? (dropdownOptions(el)?.slice(0, 100) ?? undefined) : undefined,
     name: el.getAttribute('name') || null,
     question: question || null,
     sheet: isSheetCell(el) || undefined,
@@ -387,6 +408,38 @@ function describeEl(el) {
       || (/^(radio|checkbox)$/.test(el.getAttribute('type') || '') && el.checked === true)
       || undefined
   };
+}
+
+// The tables in a question — an inventory schedule, a list of events — that
+// the answer area's text may not hold: a table sitting beside the question
+// rather than in it is outside whatever pageRoot picked. Cells joined by " | ",
+// one row a line, which reads as columns where innerText's tabs run together.
+// Tables holding blanks are the worksheet, and are labelled cell by cell.
+function dataTables() {
+  const out = [];
+  for (const t of document.querySelectorAll('table, [role="table"], [role="grid"]')) {
+    if (out.length >= 3) break;
+    if (t.closest('#__cap-host') || t.querySelector('table') || !isRendered(t)) continue;
+    if (t.querySelector('input:not([type="hidden"]), textarea, select, ' + DROPDOWN_SEL)) continue;
+    if (Array.from(t.querySelectorAll('td')).some(isSheetCell)) continue;
+    const rows = Array.from(t.querySelectorAll(ROW_SEL)).slice(0, 40)
+      .map(r => Array.from(r.children).map(c => cellText(c).replace(/\s+/g, ' ')).join(' | '))
+      .filter(l => l.replace(/[|\s]/g, ''));
+    if (rows.length >= 2) out.push(rows.join('\n'));
+  }
+  return out.join('\n\n').slice(0, 2500);
+}
+
+// The page's text without the contents of dropdowns: a <select>'s innerText is
+// all its options, and a statement with a dozen of them would put the same long
+// list into the prompt a dozen times — the real list is sent once, with the
+// dropdown itself. They're hidden for the instant of reading, never repainted.
+function textOf(root) {
+  const selects = Array.from(root.querySelectorAll('select'));
+  const was = selects.map(e => e.style.display);
+  selects.forEach(e => { e.style.display = 'none'; });
+  try { return root.innerText ?? ''; }
+  finally { selects.forEach((e, i) => { e.style.display = was[i]; }); }
 }
 
 function scrape() {
@@ -405,8 +458,15 @@ function scrape() {
   // Deliberately not viewport-filtered: a worksheet is usually taller than the
   // screen, so requiring cells to be on-screen would hide most of the question
   // and make it look like there was nothing to answer.
-  const fields = [...all.filter(isTableField), ...sheetCells];
+  // A financial statement can be a grid of divs rather than a <table>, so a
+  // dropdown counts as a blank wherever it is — and, once there are a couple
+  // of them, so does every text box (the amounts beside the account names)
+  const dropdowns = all.filter(el => el.tagName === 'SELECT' || isDropdown(el));
+  const looseBoxes = dropdowns.length >= 2 ? all.filter(el => isTextBox(el) && el.type !== 'password' && !el.isContentEditable) : [];
+  const fields = [...new Set([...all.filter(isTableField), ...sheetCells, ...dropdowns, ...looseBoxes])]
+    .sort((a, b) => (a.compareDocumentPosition(b) & 4 /* b follows a */) ? -1 : 1);
   const isWorksheet = fields.length >= 4;
+  const isField = new Set(fields);
 
   // Drag questions need spatial reasoning over several sequential moves
   const isDrag = !!document.querySelector(
@@ -523,7 +583,7 @@ function scrape() {
       if (repeated.has(d.text)) d.group = groupOf(_lastElements[i], d.text, repeated);
     });
     return {
-      text: (root.innerText ?? '').slice(0, 5000),
+      text: textOf(root).slice(0, 5000),
       elements: described,
       isSimnet: true,      // multi-step procedure, worth the stronger model
       isWorksheet: false,
@@ -582,7 +642,7 @@ function scrape() {
     // controls (submit, nav). The cap on cells is far above any real
     // worksheet: it was once 60 in all, and a 74-box accounting table had its
     // last two dates silently dropped.
-    const rest = all.filter(el => !isTableField(el) && inViewport(el));
+    const rest = all.filter(el => !isField.has(el) && inViewport(el));
     _lastElements = [...fields.slice(0, 250), ...rest.slice(0, 20)];
   } else {
     // Ordinary questions fit on screen, so staying in the viewport keeps
@@ -592,7 +652,8 @@ function scrape() {
 
   const parts = partTabs();
   return {
-    text: (root.innerText ?? '').slice(0, 5000),
+    text: textOf(root).slice(0, 5000),
+    tables: dataTables() || undefined,
     elements: _lastElements.map(describeEl),
     isWorksheet,
     isDrag,
@@ -1643,8 +1704,7 @@ function bgSend(msg, cb) {
   // Keep in sync with MODELS in background.js
   const MODEL_LIST = [
     { id: 'claude-haiku-5-5',  label: 'Haiku 5.5',  note: 'Fastest and cheapest — a few cents per 100 questions.' },
-    { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', note: 'Better at hard subjects — around a cent a question.' },
-    { id: 'claude-opus-5-5',   label: 'Opus 5.5',   note: 'Most capable, and slower — around two cents a question.' }
+    { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', note: 'Better at hard subjects — around a cent a question.' }
   ];
   const DEFAULT_MODEL = 'claude-haiku-5-5';
 
@@ -1752,7 +1812,8 @@ function bgSend(msg, cb) {
 
       // Newer models replaced older ones in the menu, at the same price or
       // less; a saved older choice carries over
-      const REPLACED = { 'claude-haiku-4-5': 'claude-haiku-5-5', 'claude-sonnet-5': 'claude-sonnet-5-5', 'claude-opus-5': 'claude-opus-5-5' };
+      const REPLACED = { 'claude-haiku-4-5': 'claude-haiku-5-5', 'claude-sonnet-5': 'claude-sonnet-5-5',
+                         'claude-opus-5': 'claude-sonnet-5-5', 'claude-opus-5-5': 'claude-sonnet-5-5' };
       if (REPLACED[s.model]) {
         s.model = REPLACED[s.model];
         store.set({ model: s.model });
@@ -2144,7 +2205,7 @@ function bgSend(msg, cb) {
 
   // If the background worker is torn down mid-run its reply never arrives,
   // leaving this on "Answering…" with nothing to reset it. A run can legitimately
-  // take minutes, though — a six-step spreadsheet task on Opus does — so the
+  // take minutes, though — a six-step spreadsheet task does — so the
   // clock measures silence, not total length: every step the background starts
   // pushes it back. Only a genuinely stalled run runs it out.
   function armWatchdog(token) {

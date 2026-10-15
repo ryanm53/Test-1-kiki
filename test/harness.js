@@ -20,7 +20,17 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
   if (installLayout) installLayout(w);
   // jsdom has no layout engine and so no innerText; textContent is close enough
   Object.defineProperty(w.HTMLElement.prototype, 'innerText', {
-    get() { return this.textContent.replace(/\s+/g, ' ').trim(); },
+    get() {
+      // Like a browser's: what isn't displayed isn't read (selects hidden by
+      // the extension, for one)
+      const out = [];
+      const walk = n => {
+        if (n.nodeType === 3) out.push(n.nodeValue);
+        else if (n.nodeType === 1 && n.style?.display !== 'none') n.childNodes.forEach(walk);
+      };
+      walk(this);
+      return out.join(' ').replace(/\s+/g, ' ').trim();
+    },
     configurable: true
   });
 
@@ -140,7 +150,8 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
 // Generous, because CI machines are slower and run every suite at once; it
 // returns as soon as the bar settles, so the ceiling costs nothing normally.
 function settle(page, ms = 90000) {
-  const end = Date.now() + ms;
+  // A ceiling for the slowest machine, whatever a test asks for
+  const end = Date.now() + Math.max(ms, 90000);
   return new Promise(resolve => (function poll() {
     const s = page.status();
     if (!/Answering|Next question/.test(s) || Date.now() > end) return resolve(s);
@@ -153,7 +164,9 @@ function settle(page, ms = 90000) {
 // takes, up to a ceiling. (Checks that something did NOT happen still need a
 // fixed wait — long enough for it to have happened if it was going to.)
 function until(cond, ms = 15000) {
-  const end = Date.now() + ms;
+  // However little a test asks for, a loaded machine (every suite on one core)
+  // gets a minute: it costs nothing when the thing happens promptly
+  const end = Date.now() + Math.max(ms, 60000);
   return new Promise(resolve => (function poll() {
     if (cond() || Date.now() > end) return resolve();
     setTimeout(poll, 25);

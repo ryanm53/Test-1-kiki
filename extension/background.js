@@ -7,38 +7,39 @@
 // All three think by default — no thinking setting is sent — and the thinking
 // counts against max_tokens, so each gets more room than the reply itself
 // needs; only what's used is billed. Effort is set explicitly, low for one
-// answer: the defaults are medium (Haiku 5.5, Opus 5.5) and high (Sonnet 5.5).
+// answer: the defaults are medium (Haiku 5.5) and high (Sonnet 5.5).
 //
 // Safety filters can decline a question outright (biology is among them).
-// Sonnet 5.5 and Opus 5.5 opt into Anthropic's server-side fallback, which
-// re-runs a declined question on the model recommended for that kind of
-// decline. Haiku 5.5 has no such fallback, so on Auto a question it declines
-// goes to Sonnet 5.5 (see runGoal).
+// Sonnet 5.5 opts into Anthropic's server-side fallback, which re-runs a
+// declined question on the model recommended for that kind of decline. Haiku
+// 5.5 has no such fallback, so on Auto a question it declines goes to
+// Sonnet 5.5 (see runGoal). Opus was dropped: for coursework it cost twice
+// as much as Sonnet 5.5 and added nothing worth it.
 const MODELS = {
   'claude-haiku-5-5':  { label: 'Haiku 5.5',  maxTokens: 2048, effort: 'low' },
-  'claude-sonnet-5-5': { label: 'Sonnet 5.5', maxTokens: 8000, effort: 'low', fallbacks: true },
-  'claude-opus-5-5':   { label: 'Opus 5.5',   maxTokens: 8000, effort: 'low', fallbacks: true }
+  'claude-sonnet-5-5': { label: 'Sonnet 5.5', maxTokens: 8000, effort: 'low', fallbacks: true }
 };
 const DEFAULT_MODEL = 'claude-haiku-5-5';
 
 // Newer models replaced older ones in the menu, each at the same price or
-// less (Haiku 5.5 at a tenth of Haiku 4.5's). A saved older choice carries over.
+// less (Haiku 5.5 at a tenth of Haiku 4.5's). A saved choice of a model that's
+// no longer offered carries over to the nearest one that is.
 const MODEL_ALIASES = {
   'claude-haiku-4-5': 'claude-haiku-5-5',
   'claude-sonnet-5':  'claude-sonnet-5-5',
-  'claude-opus-5':    'claude-opus-5-5'
+  // Opus was dropped as too dear: its users go to the strongest model left
+  'claude-opus-5':    'claude-sonnet-5-5',
+  'claude-opus-5-5':  'claude-sonnet-5-5'
 };
 const resolveModel = id => MODELS[id] ? id : MODELS[MODEL_ALIASES[id]] ? MODEL_ALIASES[id] : DEFAULT_MODEL;
 
 // Worksheets, drag questions and SIMnet need real reasoning — multi-step
 // arithmetic, spatial planning over several moves, a procedure — where the
 // cheap model tends to fumble. Those go to Sonnet 5.5, which thinks them
-// through at half Opus 5.5's price; everything else keeps costing what it
-// costs. Opus 5.5 is still there to pick by hand.
+// through; everything else keeps costing what it costs.
 const UPGRADE_TO = {
   'claude-haiku-5-5':  'claude-sonnet-5-5',
-  'claude-sonnet-5-5': 'claude-sonnet-5-5',
-  'claude-opus-5-5':   'claude-opus-5-5'
+  'claude-sonnet-5-5': 'claude-sonnet-5-5'
 };
 
 function pickModel(baseModel, pageData, autoUpgrade) {
@@ -136,7 +137,23 @@ entries — for instance, the two sides of a collection or a write-off.
 Dropdowns are filled with the exact text of one of their options; a row named by a
 dropdown needs its dropdown filled as well as its amounts.
 If the question is split into parts (tabs such as Required 1, Required 2), answer
-only the part on screen — the others get their own turn.`;
+only the part on screen — the others get their own turn.
+
+A financial statement (income statement, balance sheet, statement of cash flows) has
+a dropdown on each line for the account's name and a box for its amount. Work it out
+in full before answering:
+- The page text gives the figures — an adjusted trial balance, or a list of events.
+  Compute every amount from it, in the order a statement is laid out: for an income
+  statement revenues, then expenses, then net income; for a balance sheet assets,
+  then liabilities, then equity. Totals must add up.
+- Pick each line's account from its dropdown (a list shown "(same as [N])" is [N]'s
+  list). Use each account once, only accounts that have a balance, and no distractor
+  from the list — an account with no amount isn't on the statement.
+- Fill the dropdown AND the amount on each line, in page order: a dropdown and the
+  box after it are one line, even where the boxes carry no label.
+- Amounts as plain numbers: contra accounts and deductions as the page directs,
+  usually shown positive in a deduction line. Where a total box is given, enter the
+  total of the lines above it.`;
 
 // SIMnet simulates Excel, so a task is a procedure rather than an answer, and
 // the procedure itself is graded.
@@ -330,6 +347,7 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
     ? `Question${questions.length > 1 ? 's' : ''}:\n${questions.slice(0, 3).map(q => q.slice(0, 1500)).join('\n\n')}\n\n`
     : '';
 
+  const seenOptions = new Map();
   const elementList = elements
     .map((el, i) => {
       const parts = [`[${i}]`, el.tag];
@@ -337,7 +355,13 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
       if (el.text) parts.push(`"${el.text.slice(0, 80)}"`);
       if (el.placeholder) parts.push(`placeholder="${el.placeholder}"`);
       if (el.value) parts.push(`value="${el.value}"`);
-      if (el.options) parts.push(`options=[${el.options.join(' | ')}]`);
+      if (el.options) {
+        // A statement has a dropdown on every line, all with one list: it's
+        // written out once and the rest point to it
+        const key = el.options.join('\u0001');
+        if (seenOptions.has(key)) parts.push(`options=(same as [${seenOptions.get(key)}])`);
+        else { seenOptions.set(key, i); parts.push(`options=[${el.options.join(' | ')}]`); }
+      }
       if (el.group) parts.push(`(in: ${el.group})`);
       if (el.state) parts.push(`(${el.state})`);
       if (el.fresh) parts.push('(just appeared)');
@@ -363,7 +387,7 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
     : '';
 
   const userContent = `${notesSection}${retrySection}${historySection}${questionSection}Page text:
-${pageText.slice(0, isWorksheet || isCanvas ? 3000 : isSimnet ? 1500 : 2000)}
+${pageText.slice(0, isWorksheet || isCanvas ? 4000 : isSimnet ? 1500 : 3500)}
 
 Elements (click by index):
 ${elementList || '(none found)'}`;
@@ -659,7 +683,9 @@ const MSG_TIMEOUT_MS = 20000;
 // worksheet, or a dozen dropdowns opened one by one, outlasts a flat 20s.
 function timeoutFor(msg) {
   const fills = msg.type === 'EXECUTE' && Array.isArray(msg.action?.fills) ? msg.action.fills.length : 0;
-  return MSG_TIMEOUT_MS + fills * 2000;
+  // A scrape that opens every dropdown to read it (a statement has dozens) is
+  // as slow as a fill of that many
+  return MSG_TIMEOUT_MS + fills * 2000 + (msg.type === 'SCRAPE' && !msg.peek ? 15000 : 0);
 }
 
 function rawSend(tabId, msg, frameId) {
@@ -918,11 +944,15 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         // would be missing entirely.
         // A peek, so the outer page's element list (and its dropdowns) are
         // left alone — every action goes to the question's frame.
-        let pageText = pageData.text;
+        // Tables go first, in columns, so the page text's cut-off can't lose them
+        let pageText = pageData.tables
+          ? `Tables on the page (cells separated by |):\n${pageData.tables}\n\n${pageData.text}`
+          : pageData.text;
         let outerParts = null;
         if (frameId !== 0) {
           try {
             const outer = await sendToTab(tabId, { type: 'SCRAPE', peek: true }, 0);
+            if (outer?.tables && !pageData.tables) pageText = `Tables on the page (cells separated by |):\n${outer.tables}\n\n${pageText}`;
             if (outer?.text) pageText = `${outer.text}\n\n${pageText}`;
             outerParts = outer?.parts ?? null;
           } catch (_) { /* outer frame unreachable — use what we have */ }
@@ -931,7 +961,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         // The Required tabs can be in the outer page when the table is in a frame
         if (!isSimnet && !isCanvas) parts = pageData.parts ?? outerParts;
         usedModel = escalated ? (UPGRADE_TO[baseModel] ?? baseModel) : pickModel(baseModel, pageData, autoUpgrade);
-        // A worksheet on Opus can think for longer than the bar's silence
+        // A worksheet can think for longer than the bar's silence
         // timer, which would call the run dead mid-answer
         const stopBeat = heartbeat(tabId, step + 1, budget);
         const { action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint)

@@ -178,7 +178,7 @@ Tap **More** for the rest:
 
 | Setting | What it does |
 |---|---|
-| **Model** | Which AI does the thinking. **Auto** *(default, recommended)* uses **Haiku 5.5**, the cheapest, for most questions and **Sonnet 5.5** for SIMnet, worksheets, drag-and-drop and questions with sums to work out — and it hands a question to Sonnet 5.5 when the cheap one gets stuck. The bar shows **↑ Sonnet 5.5** when it steps up. Or pick one to use every time: **Haiku 5.5** is fastest and cheapest, **Sonnet 5.5** is better at hard subjects (around a cent a question), **Opus 5.5** is the most capable (around two cents) |
+| **Model** | Which AI does the thinking. **Auto** *(default, recommended)* uses **Haiku 5.5**, the cheapest, for most questions and **Sonnet 5.5** for SIMnet, worksheets, drag-and-drop and questions with sums to work out — and it hands a question to Sonnet 5.5 when the cheap one gets stuck. The bar shows **↑ Sonnet 5.5** when it steps up. Or pick one to use every time: **Haiku 5.5** is fastest and cheapest, **Sonnet 5.5** is better at hard subjects (around a cent a question) |
 | **Notes** *(optional)* | Extra context to improve accuracy, e.g. *"This is financial accounting — use GAAP conventions."* Fine to leave blank |
 | **Answer log** | *Off unless you turn it on.* Saves each question it answers — what it was asked, what it picked, and how the page looked straight after, which is where Connect shows "Correct"/"Incorrect" and SIMnet its hint — in your browser only. When an answer was wrong, tap the **thumbs-down** that appears on the bar (most reliable in *One question* mode, since on Autopilot it may already have moved on). **Download** saves it as a file you can share to help tune Auto; **Clear** takes two taps. It adds under a second per question while it's on |
 | **Troubleshooting** | *Check this page* — see [Troubleshooting](#troubleshooting). *Copy last prompt* copies exactly what was sent to Claude last time |
@@ -195,7 +195,7 @@ You're billed by Anthropic for what you use. With the default model, Haiku 5.5:
 | 100 questions | **about 3 cents** |
 | $5 of credit | **well over 10,000 questions** |
 
-On **Auto**, the harder questions (SIMnet, worksheets, drag-and-drop, calculations) go to Sonnet 5.5 — around a cent each, a few cents for a big worksheet. Picking Opus 5.5 by hand costs about twice that. These are estimates: the exact cost depends on how long the question is and how much the model thinks. Your real spending is on console.anthropic.com under **Usage**.
+On **Auto**, the harder questions (SIMnet, worksheets, drag-and-drop, calculations) go to Sonnet 5.5 — around a cent each, a few cents for a big worksheet. These are estimates: the exact cost depends on how long the question is and how much the model thinks. Your real spending is on console.anthropic.com under **Usage**.
 
 ---
 
@@ -234,7 +234,7 @@ Canvas has two quiz systems. This works with **Classic Quizzes** — the address
 Claude's safety filters occasionally turn down a question — mostly ones that look like advanced biology or computer-security research. It automatically tries a different model first; this message means that one declined too. Answer that question yourself and press play to carry on, or pick a different model under **More → Model**.
 
 **It picked a wrong answer**
-It isn't perfect, especially on harder material. Under **More**, try setting **Model** to Opus 5.5, or add course context in **Notes**.
+It isn't perfect, especially on harder material. Under **More**, try setting **Model** to Sonnet 5.5, or add course context in **Notes**.
 
 ---
 

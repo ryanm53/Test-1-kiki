@@ -93,37 +93,36 @@ stuck, surfaced inline in the control bar.
 ### Forcing valid JSON output
 
 Instructing an LLM to "respond with only JSON" is not reliable under load — it will
-occasionally open with prose and break the parse. Every current model (Haiku 5.5,
-Sonnet 5.5, Opus 5.5) gets **structured outputs**: `output_config.format` with a JSON
-schema, which constrains the whole response shape. (Prefill, seeding the reply with
-`{"action":"`, returns a 400 on all three; the `prefill` option in `MODELS` remains for
-a model that takes one.)
+occasionally open with prose and break the parse. Both models (Haiku 5.5 and
+Sonnet 5.5) get **structured outputs**: `output_config.format` with a JSON schema,
+which constrains the whole response shape. (Prefill, seeding the reply with
+`{"action":"`, returns a 400 on both; the `prefill` option in `MODELS` remains for
+a model that takes one.) Opus 5.5 was dropped: it cost twice what Sonnet 5.5 does.
 
 Either way a bracket-counting fallback extracts the first complete `{...}` block in case
 trailing text appears after the closing brace, and the parsed action is validated against
 its required fields before execution.
 
 Other per-model differences are handled in the same table. A non-default `temperature`
-is a 400 on all three. All three think by default (no `thinking` field is sent), and
-thinking counts against `max_tokens`, so Haiku 5.5 gets 2048 and Sonnet 5.5 / Opus 5.5
-8000, each at `effort: low` (the defaults are medium for Haiku 5.5 and Opus 5.5, high
-for Sonnet 5.5); worksheets and SIMnet retries go to `medium`. Response parsing looks
+is a 400 on both. Both think by default (no `thinking` field is sent), and thinking
+counts against `max_tokens`, so Haiku 5.5 gets 2048 and Sonnet 5.5 8000, each at
+`effort: low` (the defaults are medium for Haiku 5.5, high for Sonnet 5.5); worksheets and SIMnet retries go to `medium`. Response parsing looks
 for the `text` block rather than `content[0]`, since thinking blocks (and, after a
 fallback, a `fallback` marker block) come first.
 
 The safety classifiers can decline a request: HTTP 200, `stop_reason: "refusal"`, no
-answer. Sonnet 5.5 and Opus 5.5 opt into server-side fallback (`fallbacks: "default"`,
+answer. Sonnet 5.5 opts into server-side fallback (`fallbacks: "default"`,
 header `server-side-fallback-2026-07-01`), which re-runs a declined request on the
 model Anthropic recommends for that category. Haiku 5.5 has no server-side fallback,
 so on Auto a question it declines is re-asked once of Sonnet 5.5. A refusal that
 survives is reported as such and not retried. Saved choices of models the menu has
 replaced carry over: `claude-haiku-4-5` → `claude-haiku-5-5`, `claude-sonnet-5` →
-`claude-sonnet-5-5`, `claude-opus-5` → `claude-opus-5-5`.
+`claude-sonnet-5-5`, and a saved `claude-opus-5` / `claude-opus-5-5` → `claude-sonnet-5-5`.
 
 ### Auto model choice
 
 On **Auto** (the default: Haiku 5.5 with `autoUpgrade` on), `pickModel` sends a page to
-Sonnet 5.5 — half Opus 5.5's price — when it needs working out rather than recall: SIMnet, worksheets, drag
+Sonnet 5.5 when it needs working out rather than recall: SIMnet, worksheets, drag
 questions, and calculation questions — three or more distinct dollar amounts or
 percentages across the question and its choices (`isMath`; Canvas excepted, since a
 whole quiz on one page would add up every question's). A real accounting log had Haiku
@@ -161,7 +160,7 @@ change between sites.
   drawn (`tableGrid`), so rowspans (a date over two entry lines, labelled
   "(line 2 of 2)") and colspans (two rows of headers) don't shift columns, and a
   "$" cell is never a row name. A row named by a dropdown is labelled by its row
-  number. Worksheets on Opus think at `effort: medium` with twice the room, and
+  number. Worksheets think at `effort: medium` with twice the room, and
   a heartbeat keeps the bar's 90s silence timer from firing mid-think.
 - **Parts** — tabs named Required 1 / Required 2 / Req A / Part 1 (`partTabs`).
   After a part is answered the background opens the next unanswered one
@@ -181,6 +180,19 @@ change between sites.
 - **Number boxes** — `type="number"` blanks anything but a plain number, so
   "$41,000", "7,200" and "(7,200)" are cleaned to 41000, 7200 and -7200, and a
   box left empty by a value it refused counts as a miss.
+- **Data tables in a question** — tables with no blanks (an inventory schedule, a
+  list of events) are sent first, one row a line with cells divided by " | "
+  (`dataTables`), so a table sitting beside the question rather than in it is
+  never lost, and columns read as columns. Page text is read with `<select>`s
+  hidden for the instant (`textOf`): a select's innerText is every option.
+- **Financial statements** — a dropdown counts as a worksheet blank wherever it
+  is, table or divs, and with two or more present so does every text box beside
+  them; unlabelled ones take the text just before them (`nearbyLabel`). Every
+  custom dropdown is opened once to read its list (12s budget, not a small cap),
+  and a list shared by many dropdowns is sent once, the rest "(same as [N])".
+  Angular Material (`mat-select`, `mat-option`) and `ng-select` are recognised
+  as well as ARIA comboboxes. The worksheet prompt has statement guidance:
+  compute from the trial balance, pick each account once, fill dropdown and amount.
 - **Dropdowns** — a `<select>` is set by option text, matched loosely (same
   words, then starts-with, then contains), or by value; never to a value it
   doesn't have. A custom dropdown (`role="combobox"`, `aria-haspopup="listbox"`)
@@ -315,7 +327,7 @@ async message handler answers even when it throws, and `RUN_GOAL` always sends a
 response — including from its `catch` and around `detachDebugger`.
 
 **The control bar's timer measures silence, not length.** A six-step spreadsheet
-task on Opus legitimately runs for minutes, so the background sends a `PROGRESS`
+task legitimately runs for minutes, so the background sends a `PROGRESS`
 heartbeat as each step begins (and between cells of a long fill). The timer is
 pushed back on each one and only fires after 90s of genuine silence.
 

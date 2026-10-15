@@ -92,13 +92,13 @@ const run = async (html, opts) => {
   });
 
   // ── Every model gets a request it accepts ──────────────────────────────
-  for (const model of ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5']) test(async check => {
+  for (const model of ['claude-haiku-5-5', 'claude-sonnet-5-5']) test(async check => {
     const { page, final } = await run(MC, {
       storage: { ...ANSWER_ONLY, model, autoUpgrade: false },
       reply: b => as(b, { action: 'click', index: 0 }) });
     const req = page.requests[0] ?? {};
     const last = req.messages?.[req.messages.length - 1];
-    // A prefill or a temperature is a 400 on all three; they get a schema
+    // A prefill or a temperature is a 400 on both; they get a schema
     const ok = last?.role === 'user' && req.temperature === undefined
       && req.output_config?.format?.type === 'json_schema';
     check(`${model}: request in the shape it accepts`, ok && req.model === model,
@@ -106,22 +106,6 @@ const run = async (html, opts) => {
     check(`${model}: answers`, page.w.document.getElementById('a').checked, final);
   });
 
-  // ── Opus 5.5 specifics ─────────────────────────────────────────────────
-  test(async check => {
-    const { page, final } = await run(MC, {
-      storage: { ...ANSWER_ONLY, model: 'claude-opus-5-5', autoUpgrade: false },
-      reply: b => as(b, { action: 'click', index: 0 }) });
-    const req = page.requests[0] ?? {}, headers = page.requestHeaders[0] ?? {};
-    check('opus 5.5: never sends a thinking setting (it can\'t be turned off; sending one is a 400)',
-      req.thinking === undefined, JSON.stringify(req.thinking));
-    check('opus 5.5: effort set to low, not left on its medium default',
-      req.output_config?.effort === 'low', JSON.stringify(req.output_config?.effort));
-    check('opus 5.5: room for its thinking as well as the answer', req.max_tokens >= 8000, req.max_tokens);
-    check('opus 5.5: opts into fallback if a safety filter declines',
-      req.fallbacks === 'default' && headers['anthropic-beta'] === 'server-side-fallback-2026-07-01',
-      `${JSON.stringify(req.fallbacks)} / ${headers['anthropic-beta']}`);
-    check('opus 5.5: answers', page.w.document.getElementById('a').checked, final);
-  });
   // ── Haiku 5.5 specifics: Auto's everyday model ────────────────────────
   test(async check => {
     const { page, final } = await run(MC, {
@@ -179,9 +163,9 @@ const run = async (html, opts) => {
   test(async check => {
     // What a fallback-served reply looks like: marker, thinking, then the answer
     const { page, final } = await run(MC, {
-      storage: { ...ANSWER_ONLY, model: 'claude-opus-5-5', autoUpgrade: false },
+      storage: { ...ANSWER_ONLY, model: 'claude-sonnet-5-5', autoUpgrade: false },
       reply: () => ({ json: { stop_reason: 'end_turn', content: [
-        { type: 'fallback', from: { model: 'claude-opus-5-5' }, to: { model: 'claude-opus-5' } },
+        { type: 'fallback', from: { model: 'claude-sonnet-5-5' }, to: { model: 'claude-opus-5' } },
         { type: 'thinking', thinking: '' },
         { type: 'text', text: '{"action":"click","index":0}' }
       ] } }) });
@@ -190,7 +174,7 @@ const run = async (html, opts) => {
   });
   test(async check => {
     const { page, final } = await run(MC, {
-      storage: { ...ANSWER_ONLY, model: 'claude-opus-5-5', autoUpgrade: false },
+      storage: { ...ANSWER_ONLY, model: 'claude-sonnet-5-5', autoUpgrade: false },
       reply: () => ({ json: { stop_reason: 'refusal', content: [],
                               stop_details: { type: 'refusal', category: 'bio' } } }) });
     check('a declined question says so, not "invalid JSON"',
@@ -200,7 +184,7 @@ const run = async (html, opts) => {
   });
   test(async check => {
     const { final } = await run(MC, {
-      storage: { ...ANSWER_ONLY, model: 'claude-opus-5-5', autoUpgrade: false },
+      storage: { ...ANSWER_ONLY, model: 'claude-sonnet-5-5', autoUpgrade: false },
       reply: () => ({ json: { stop_reason: 'max_tokens', content: [{ type: 'thinking', thinking: '' }] } }) });
     check('running out of room says so, not "invalid JSON"', /ran out of room/.test(final), final);
   });
@@ -208,8 +192,16 @@ const run = async (html, opts) => {
     const { page } = await run(MC, {
       storage: { ...ANSWER_ONLY, model: 'claude-opus-5', autoUpgrade: false },
       reply: b => as(b, { action: 'click', index: 0 }) });
-    check('a saved Opus 5 carries over to Opus 5.5',
-      page.requests[0]?.model === 'claude-opus-5-5' && page.store.model === 'claude-opus-5-5',
+    check('a saved Opus 5 carries over to Sonnet 5.5, Opus being gone',
+      page.requests[0]?.model === 'claude-sonnet-5-5' && page.store.model === 'claude-sonnet-5-5',
+      `${page.requests[0]?.model} / ${page.store.model}`);
+  });
+  test(async check => {
+    const { page } = await run(MC, {
+      storage: { ...ANSWER_ONLY, model: 'claude-opus-5-5', autoUpgrade: false },
+      reply: b => as(b, { action: 'click', index: 0 }) });
+    check('and so does a saved Opus 5.5',
+      page.requests[0]?.model === 'claude-sonnet-5-5' && page.store.model === 'claude-sonnet-5-5',
       `${page.requests[0]?.model} / ${page.store.model}`);
   });
   test(async check => {
