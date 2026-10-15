@@ -17,7 +17,8 @@ When you press play (or **Check this page** under Troubleshooting), the extensio
 
 - the text of the question on the current page,
 - the page's buttons, choices and blanks: their labels and what's already filled in (never the contents of password fields),
-- your notes, if you've written any.
+- your notes, if you've written any,
+- and, only when a question can't be read from its text — it contains a picture, a chart or a table drawn as an image, or has almost no text, or the text alone gave no answer — **a screenshot of the visible part of the tab** you're on. Never for SIMnet, never of another tab, and the screenshot is not kept: it isn't saved in the answer log or anywhere else.
 
 Anthropic handles that request under its own terms and privacy policy for the API: <https://www.anthropic.com/legal/privacy>.
 
@@ -25,7 +26,7 @@ Nothing is sent anywhere else. There is no server of ours, no analytics, no trac
 
 ## What it does on the page
 
-- It reads the page only to find the question and the controls to answer it with, and only when you ask it to: when you press play, or briefly when a page loads, to show what kind of page it is in the control bar.
+- It reads the page only to find the question and the controls to answer it with (and, in the case above, to take a screenshot of it), and only when you ask it to: when you press play, or briefly when a page loads, to show what kind of page it is in the control bar.
 - On drag-and-drop questions and spreadsheet tasks it uses Chrome's debugger permission to press keys for real, on the tab you started it on, only while it's answering. It lets go as soon as it's done.
 - It never submits a quiz or test for you.
 

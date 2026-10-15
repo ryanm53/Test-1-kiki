@@ -22,7 +22,10 @@ const as = (body, obj) => {
   const s = JSON.stringify(obj);
   return body.messages.at(-1)?.role === 'assistant' ? s.slice(PREFIX.length) : s;
 };
-const promptOf = body => body.messages[0].content;
+const promptOf = body => {
+  const m = body.messages[0].content;
+  return Array.isArray(m) ? m.find(b => b.type === 'text').text : m;   // a screenshot may come first
+};
 const indexOf = (body, label) =>
   Number(new RegExp(`\\[(\\d+)\\][^\\n]*"${label.replace(/[$]/g, '\\$')}"`).exec(promptOf(body))?.[1]);
 
@@ -98,7 +101,7 @@ const oneQuestion = { lastPresetIndex: 0, autoContinue: false };
       `${p.requests.length} calls`);
   }
 
-  // ── Haiku gives up: on Auto, Sonnet 5.5 gets one look before it stops ───
+  // ── Haiku gives up: a look at the page, then Sonnet 5.5, before it stops ─
   {
     const p = boot(page(WORDS, WORD_CHOICES), {
       installLayout: flatLayout, storage: oneQuestion,
@@ -110,8 +113,9 @@ const oneQuestion = { lastPresetIndex: 0, autoContinue: false };
     p.w.document.querySelector('.next-button').addEventListener('click', () => { next = true; });
     p.pressPlay();
     const final = await settle(p);
-    check('"none" from Haiku is handed to Sonnet 5.5',
-      p.requests.length === 2 && p.requests[1].model === 'claude-sonnet-5-5', p.requests.map(r => r.model).join(', '));
+    const seen = p.requests.map(r => `${r.model}${Array.isArray(r.messages[0].content) ? '+shot' : ''}`).join(', ');
+    check('"none" from Haiku: Haiku again with a screenshot, then Sonnet 5.5 without one',
+      seen === 'claude-haiku-5-5, claude-haiku-5-5+shot, claude-sonnet-5-5', seen);
     check('which answers it, and it moves on', p.w.document.getElementById('c0').checked && next, final);
   }
 
@@ -125,8 +129,9 @@ const oneQuestion = { lastPresetIndex: 0, autoContinue: false };
     });
     p.pressPlay();
     const final = await settle(p);
-    check('clicking no answer choice is handed to Sonnet 5.5 too',
-      p.requests.length === 2 && p.requests[1].model === 'claude-sonnet-5-5', p.requests.map(r => r.model).join(', '));
+    const seen2 = p.requests.map(r => `${r.model}${Array.isArray(r.messages[0].content) ? '+shot' : ''}`).join(', ');
+    check('clicking no answer choice goes the same way',
+      seen2 === 'claude-haiku-5-5, claude-haiku-5-5+shot, claude-sonnet-5-5', seen2);
     check('and the question gets answered', p.w.document.getElementById('c0').checked && !p.isError(), final);
   }
 
@@ -139,7 +144,8 @@ const oneQuestion = { lastPresetIndex: 0, autoContinue: false };
     p.pressPlay();
     await settle(p);
     await wait(300);
-    check('with Auto off, Haiku stays Haiku, one call', p.requests.length === 1 && p.requests[0].model === 'claude-haiku-5-5',
+    check('with Auto off, Haiku stays Haiku: the text, then the text with a screenshot, no more',
+      p.requests.length === 2 && p.requests.every(r => r.model === 'claude-haiku-5-5') && Array.isArray(p.requests[1].messages[0].content),
       p.requests.map(r => r.model).join(', '));
   }
 

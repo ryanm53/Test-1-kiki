@@ -21,7 +21,10 @@ const as = (body, obj) => {
   const s = JSON.stringify(obj);
   return body.messages.at(-1)?.role === 'assistant' ? s.slice(PREFIX.length) : s;
 };
-const promptOf = body => body.messages[0].content;
+const promptOf = body => {
+  const m = body.messages[0].content;
+  return Array.isArray(m) ? m.find(b => b.type === 'text').text : m;   // a screenshot may come first
+};
 // Every element line, as [index, rest of line]
 const linesOf = body => promptOf(body).split('\n')
   .map(l => /^\[(\d+)\] (.*)$/.exec(l)).filter(Boolean).map(m => [Number(m[1]), m[2]]);

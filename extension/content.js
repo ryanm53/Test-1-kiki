@@ -442,6 +442,23 @@ function textOf(root) {
   finally { selects.forEach((e, i) => { e.style.display = was[i]; }); }
 }
 
+// Whether the text alone is likely not enough to read the question: a picture
+// on screen (a chart, an exhibit or a table drawn as an image) or hardly any
+// text at all. The background then attaches a screenshot. Only what's in view
+// counts, since a screenshot only holds that — and never the page's own chrome
+// (logos, icons, nav).
+function pictureNeeded(root, text) {
+  const big = el => {
+    if (el.closest('#__cap-host, header, nav, footer, button, [role="button"]')) return false;
+    const r = el.getBoundingClientRect();
+    return r.width >= 120 && r.height >= 60 && isRendered(el) && inViewport(el);
+  };
+  const pictures = Array.from(root.querySelectorAll('img, canvas, svg, [role="img"]')).filter(big);
+  if (pictures.length) return 'picture';
+  // Next to no text, though there are answers to give: the question is drawn
+  return (text ?? '').replace(/\s+/g, ' ').trim().length < 50 ? 'sparse' : undefined;
+}
+
 function scrape() {
   // Prefer the main content area to skip nav/header/footer noise
   const root = pageRoot();
@@ -630,6 +647,7 @@ function scrape() {
       text: canvasQs.map(questionOf).join('\n\n').slice(0, 5000),
       elements: described,
       isCanvas: true,
+      needsPicture: pictureNeeded(document.querySelector('#questions') ?? document.body, canvasQs.map(questionOf).join('')) === 'picture' ? 'picture' : undefined,
       // Typed answers go in a second step after the choices are clicked
       hasBlanks: _lastElements.some(el => el.tagName === 'SELECT' || /^(text|number)$/.test(el.type)),
       isWorksheet: false,
@@ -651,8 +669,10 @@ function scrape() {
   }
 
   const parts = partTabs();
+  const text = textOf(root).slice(0, 5000);
   return {
-    text: textOf(root).slice(0, 5000),
+    text,
+    needsPicture: _lastElements.length ? pictureNeeded(root, text) : undefined,
     tables: dataTables() || undefined,
     elements: _lastElements.map(describeEl),
     isWorksheet,

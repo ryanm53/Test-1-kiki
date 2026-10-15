@@ -180,6 +180,17 @@ change between sites.
 - **Number boxes** — `type="number"` blanks anything but a plain number, so
   "$41,000", "7,200" and "(7,200)" are cleaned to 41000, 7200 and -7200, and a
   box left empty by a value it refused counts as a miss.
+- **Screenshots** — `scrape()` sets `needsPicture` when a page has an image,
+  canvas or svg ≥ 120×60 in view (outside header/nav/footer/buttons), or hardly any
+  text. The background then adds `captureTab` — `tabs.captureVisibleTab` of the
+  window, only if the tab is the active one, shrunk to 1568px on a side in the
+  service worker (`OffscreenCanvas`) — as an image block ahead of the text. It's
+  also tried once when the text alone gives "none" or a click that picks no choice,
+  before a stronger model is. Only ever sent to Haiku 5.5 (an image costs 20× more
+  on Sonnet), so once Auto steps up no picture goes with it. The model still
+  answers with listed items by number — the image is to read, not to point at.
+  Never for SIMnet; a failed capture just means text
+  only; the log records that there was one, not the image. Needs `<all_urls>`.
 - **Data tables in a question** — tables with no blanks (an inventory schedule, a
   list of events) are sent first, one row a line with cells divided by " | "
   (`dataTables`), so a table sitting beside the question rather than in it is

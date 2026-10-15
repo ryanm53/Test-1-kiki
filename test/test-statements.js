@@ -22,7 +22,10 @@ const as = (body, obj) => {
   const s = JSON.stringify(obj);
   return body.messages.at(-1)?.role === 'assistant' ? s.slice(PREFIX.length) : s;
 };
-const promptOf = body => body.messages[0].content;
+const promptOf = body => {
+  const m = body.messages[0].content;
+  return Array.isArray(m) ? m.find(b => b.type === 'text').text : m;   // a screenshot may come first
+};
 const flat = w => {
   w.HTMLElement.prototype.getBoundingClientRect = function () {
     return { width: 80, height: 20, top: 10, bottom: 30, left: 10, right: 90 };

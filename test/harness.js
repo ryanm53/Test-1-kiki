@@ -10,7 +10,8 @@ const vm = require('vm');
 // EXT_DIR lets a suite be pointed at an older copy, to prove it catches a bug
 const EXT = process.env.EXT_DIR || path.join(__dirname, '..', 'extension');
 
-function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}) {
+function boot(html, options = {}) {
+  const { reply, storage = {}, installLayout, beforeLoad, url } = options;
   const dom = new JSDOM(html, {
     url: url ?? 'https://school.instructure.com/courses/1/quizzes/2/take',
     pretendToBeVisual: true,
@@ -38,6 +39,7 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
   const requests = [];
   const requestHeaders = [];  // headers sent with each of those, same order
   const debuggerCalls = [];   // trusted input sent through chrome.debugger
+  const screenshots = [];     // every captureVisibleTab call
   const pageMessages = [];    // everything the background asked the page
   let contentListener = null, backgroundListener = null, commandListener = null;
   // chrome.storage.onChanged: a write from either side reaches the page
@@ -74,6 +76,13 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
       onMessage: { addListener: f => { backgroundListener = f; } }
     },
     tabs: {
+      get: async id => ({ id, windowId: 1, active: !options.tabHidden }),
+      // A picture of the screen, as a data URL; or a failure
+      captureVisibleTab: async (windowId, opts) => {
+        screenshots.push({ windowId, ...opts });
+        if (options.captureFails) throw new Error('Cannot capture');
+        return 'data:image/jpeg;base64,/9j/AAAA';
+      },
       sendMessage: (tabId, msg, opts, cb) => {
         pageMessages.push(msg);
         // Chrome answers asynchronously; so does this
@@ -133,7 +142,7 @@ function boot(html, { reply, storage = {}, installLayout, beforeLoad, url } = {}
 
   const shadow = () => w.document.getElementById('__cap-host')?.shadowRoot;
   return {
-    w, store, requests, requestHeaders, debuggerCalls, pageMessages,
+    w, store, requests, requestHeaders, debuggerCalls, pageMessages, screenshots,
     send: msg => new Promise(res => backgroundListener(msg, { tab: { id: 1 }, url: w.location.href }, res)),
     // A keyboard shortcut, as Chrome delivers it to the background
     command: name => commandListener?.(name),

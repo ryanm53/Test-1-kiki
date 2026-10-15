@@ -332,7 +332,7 @@ async function postToApi(apiKey, requestBody, betas = []) {
   throw err;
 }
 
-async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = [], isCanvas = false, retryHint = '') {
+async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = [], isCanvas = false, retryHint = '', picture = null) {
   const model = resolveModel(modelId);
   const cfg = MODELS[model];
 
@@ -386,7 +386,10 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
     ? `SIMnet marked your previous attempt at this task INCORRECT and gave this hint:\n"${retryHint}"\nThe task has been reset. Follow the hint's steps exactly, one per reply.\n\n`
     : '';
 
-  const userContent = `${notesSection}${retrySection}${historySection}${questionSection}Page text:
+  const pictureNote = picture
+    ? 'A screenshot of the page is attached. Use it to read anything the text below leaves out — a picture, a chart, a table drawn as an image. You still answer with the items listed below, by their numbers: the screenshot shows you the page, it does not replace the list.\n\n'
+    : '';
+  const userContent = `${pictureNote}${notesSection}${retrySection}${historySection}${questionSection}Page text:
 ${pageText.slice(0, isWorksheet || isCanvas ? 4000 : isSimnet ? 1500 : 3500)}
 
 Elements (click by index):
@@ -408,7 +411,11 @@ ${elementList || '(none found)'}`;
               : isCanvas    ? Math.max(cfg.maxTokens, 600)
               : cfg.maxTokens,
     system: SYSTEM_PROMPT + (isSimnet ? SIMNET_HINT : isWorksheet ? WORKSHEET_HINT : isCanvas ? CANVAS_HINT : ''),
-    messages: [{ role: 'user', content: userContent }]
+    // A screenshot, when the page's text wasn't enough, goes ahead of the words
+    messages: [{ role: 'user', content: picture
+      ? [{ type: 'image', source: { type: 'base64', media_type: picture.type, data: picture.data } },
+         { type: 'text', text: userContent }]
+      : userContent }]
   };
 
   if (cfg.temperature) requestBody.temperature = 0;
@@ -559,7 +566,9 @@ ${elementList || '(none found)'}`;
   // exactly the prompt a model saw — enough to replay it against another model.
   return {
     action: parsed,
-    request: { model, kind: isSimnet ? 'simnet' : isWorksheet ? 'worksheet' : isCanvas ? 'canvas' : 'question', prompt: userContent }
+    request: { model, kind: isSimnet ? 'simnet' : isWorksheet ? 'worksheet' : isCanvas ? 'canvas' : 'question',
+               // The image itself isn't kept in the log, only that there was one
+               prompt: picture ? `[a screenshot of the page was attached]\n${userContent}` : userContent }
   };
 }
 
@@ -845,6 +854,44 @@ function heartbeat(tabId, step, budget) {
   return () => clearTimeout(timer);
 }
 
+// ── Screenshots ────────────────────────────────────────────────────────────
+// When a question is partly a picture, or the text of the page isn't enough to
+// read it, the visible part of the tab goes to Claude as an image alongside the
+// text. Only of the tab the user is looking at (the capture is of whatever tab
+// is showing), only when needed, and never for SIMnet. A failure to capture
+// just means the question goes by its text, as before.
+const SHOT_MAX_SIDE = 1568;   // larger is shrunk by the API anyway; smaller is quicker to send
+
+async function captureTab(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab?.active) return null;
+    const url = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 70 });
+    return await shrinkShot(url);
+  } catch (_) { return null; }
+}
+
+// The capture is the screen's full size, which on a high-density display is
+// several times what is useful. Scaled down where the browser can; otherwise
+// sent as it is.
+async function shrinkShot(dataUrl) {
+  const raw = { type: 'image/jpeg', data: String(dataUrl).split(',')[1] ?? '' };
+  if (!raw.data) return null;
+  try {
+    if (typeof OffscreenCanvas === 'undefined' || typeof createImageBitmap === 'undefined') return raw;
+    const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+    const scale = Math.min(1, SHOT_MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1) return raw;
+    const canvas = new OffscreenCanvas(Math.round(bitmap.width * scale), Math.round(bitmap.height * scale));
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.7 });
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return { type: 'image/jpeg', data: btoa(bin) };
+  } catch (_) { return raw; }
+}
+
 // A question in an embedded frame — Connect serves its worksheets that way —
 // often has its Next button and Required tabs in the page around it. Try the
 // question's frame first, then the top one.
@@ -891,6 +938,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   let parts = null;        // a question split into tabs (Required 1, Required 2)
   const doneParts = [];    // ...and the ones answered this run
   let escalated = false;   // Auto gave the question to the stronger model after the cheap one gave up
+  let shotTried = false;   // a screenshot was added after the text alone failed
   const canEscalate = () => autoUpgrade && !escalated
     && !!UPGRADE_TO[baseModel] && UPGRADE_TO[baseModel] !== usedModel;
 
@@ -960,11 +1008,18 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
 
         // The Required tabs can be in the outer page when the table is in a frame
         if (!isSimnet && !isCanvas) parts = pageData.parts ?? outerParts;
-        usedModel = escalated ? (UPGRADE_TO[baseModel] ?? baseModel) : pickModel(baseModel, pageData, autoUpgrade);
+        // A screenshot where the page says it needs one (a picture, almost no
+        // text), or where the text alone has just failed to give an answer.
+        // Only ever to the cheap model — an image on the stronger one costs
+        // twenty times as much — so once Auto has stepped up, no picture.
+        const picture = !pageData.isSimnet && !escalated && (pageData.needsPicture || shotTried) ? await captureTab(tabId) : null;
+        usedModel = escalated ? (UPGRADE_TO[baseModel] ?? baseModel)
+                  : picture && autoUpgrade ? baseModel
+                  : pickModel(baseModel, pageData, autoUpgrade);
         // A worksheet can think for longer than the bar's silence
         // timer, which would call the run dead mid-answer
         const stopBeat = heartbeat(tabId, step + 1, budget);
-        const { action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint)
+        const { action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint, picture)
           .finally(stopBeat);
 
         // Stop pressed while Claude was thinking: its answer is not acted on
@@ -986,10 +1041,10 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
 
         // Clicking the question's own box, or a confidence button, answers
         // nothing — the real log has both. Same treatment as giving up.
-        if (!isSimnet && !isCanvas && completed === 0 && missedTheChoices(action, pageData.elements) && canEscalate()) {
-          escalated = true;
-          attempt--;
-          continue;
+        if (!isSimnet && !isCanvas && completed === 0 && missedTheChoices(action, pageData.elements)) {
+          // First a look at the page itself, then the stronger model
+          if (!shotTried && !pageData.isSimnet) { shotTried = true; attempt--; continue; }
+          if (canEscalate()) { escalated = true; attempt--; continue; }
         }
 
         if (action.action === 'none') {
@@ -1020,6 +1075,9 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
             // On Auto, the cheap model saying "none" on a question it could
             // see is usually it giving up, not the page having no question.
             // One more look, from the stronger model, before stopping.
+            // The text alone gave nothing: look at the page itself before
+            // changing model, which costs far more
+            if (!shotTried && !pageData.isSimnet && !picture) { shotTried = true; attempt--; continue; }
             if (canEscalate()) { escalated = true; attempt--; continue; }
             return { success: true, action, noAnswer: true, usedModel };
           }
