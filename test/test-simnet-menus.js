@@ -2,7 +2,7 @@
 // page adds at the very end, after a ribbon that fills the list on its own.
 // Reported: it kept opening Format and "going out" — the menu's items had
 // fallen past the cutoff, so the model never saw them.
-const { boot, settle, until } = require('./harness');
+const { boot, settle, until, bodyText } = require('./harness');
 
 const cases = [];
 const test = fn => cases.push(fn);
@@ -17,7 +17,7 @@ const as = (body, obj) => {
 };
 // The fake model reads the list it was actually sent, like the real one
 const indexOf = (body, label) => {
-  const m = new RegExp(`\\[(\\d+)\\][^\\n]*"${label}"`).exec(body.messages[0].content);
+  const m = new RegExp(`\\[(\\d+)\\][^\\n]*"${label}"`).exec(bodyText(body));
   return m ? Number(m[1]) : null;
 };
 
@@ -53,7 +53,7 @@ test(async check => {
   const seen = [];
   let page;
   page = boot(PAGE, { installLayout: flat, url: 'https://simnet.mheducation.com/exam', reply: (b, n) => {
-    seen.push(b.messages[0].content);
+    seen.push(bodyText(b));
     // Done once the colour is on, as the real model would see from the tab
     if (page.w.document.getElementById('tab').dataset.color === 'dark-red') return as(b, { action: 'none' });
     if (n === 1) return as(b, { action: 'click', index: indexOf(b, 'Format') });

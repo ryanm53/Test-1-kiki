@@ -18,7 +18,7 @@ When you press play (or **Check this page** under Troubleshooting), the extensio
 - the text of the question on the current page,
 - the page's buttons, choices and blanks: their labels and what's already filled in (never the contents of password fields),
 - your notes, if you've written any,
-- and, only when a question can't be read from its text — it contains a picture, a chart or a table drawn as an image, or has almost no text, or the text alone gave no answer — **a screenshot of the visible part of the tab** you're on. Never for SIMnet, never of another tab, and the screenshot is not kept: it isn't saved in the answer log or anywhere else.
+- and, only when a question can't be read from its text — it contains a picture, a chart or a table drawn as an image, or has almost no text, or the text alone gave no answer — **a screenshot of the visible part of the tab** you're on. On SIMnet only when a task is going wrong (a step failed, or it said it was done and nothing was graded), never of another tab, and the screenshot is not kept: it isn't saved in the answer log or anywhere else.
 
 Anthropic handles that request under its own terms and privacy policy for the API: <https://www.anthropic.com/legal/privacy>.
 

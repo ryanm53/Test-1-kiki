@@ -86,24 +86,31 @@ const WORDS = '<p class="prompt">Which of the following best describes how the a
     check('and the answer from the picture is used', p.w.document.getElementById('b').checked && !p.isError(), final);
   }
 
-  // Pictures go to the cheap model, even on a page Auto would give the stronger one
+  // A table or a worksheet with a picture: the stronger model reads it
   {
     const html = `<body><div role="main"><p>Capetown sold 580 units. Ending inventory is: $784, $1,215, $864 or $1,102?</p><img src="exhibit.png" alt="">${CHOICES}</div></body>`;
     const p = boot(html, { installLayout: flat, storage: oneQuestion, reply: b => as(b, { action: 'click', index: 0 }) });
     p.pressPlay();
     await settle(p);
-    check('a question with sums AND a picture: Haiku reads it, not the dearer Sonnet',
+    check('a question with sums AND a picture: Sonnet reads it, picture and all',
+      hasImage(p.requests[0]) && p.requests[0].model === 'claude-sonnet-5-5', `${p.requests[0]?.model}`);
+  }
+  {
+    const html = `<body><div role="main">${WORDS}<img src="exhibit.png" alt="">${CHOICES}</div></body>`;
+    const p = boot(html, { installLayout: flat, storage: oneQuestion, reply: b => as(b, { action: 'click', index: 0 }) });
+    p.pressPlay();
+    await settle(p);
+    check('an ordinary question with a picture stays on Haiku, picture and all',
       hasImage(p.requests[0]) && p.requests[0].model === 'claude-haiku-5-5', `${p.requests[0]?.model}`);
   }
   {
     const html = `<body><div role="main"><p>Capetown sold 580 units. Ending inventory is: $784, $1,215, $864 or $1,102?</p>${CHOICES}</div></body>`;
-    const p = boot(html, { installLayout: flat, storage: oneQuestion,
-      reply: b => as(b, { action: 'none' }) });
+    const p = boot(html, { installLayout: flat, storage: oneQuestion, reply: b => as(b, { action: 'none' }) });
     p.pressPlay();
     await settle(p);
     const seen = p.requests.map(r => `${r.model}${hasImage(r) ? '+shot' : ''}`).join(', ');
-    check('once Auto steps up to Sonnet, no picture goes with it',
-      /claude-sonnet-5-5$/.test(seen) && !seen.includes('sonnet-5-5+shot'), seen);
+    check('when it gives up, Auto steps up to Sonnet, and the picture goes with it',
+      /claude-sonnet-5-5\+shot$/.test(seen), seen);
   }
 
   // The tab isn't the one showing: a capture would be of another page
@@ -126,14 +133,28 @@ const WORDS = '<p class="prompt">Which of the following best describes how the a
       !hasImage(p.requests[0]) && p.w.document.getElementById('a').checked && !p.isError(), final);
   }
 
-  // SIMnet is never captured
+  // SIMnet: not on every step, only when a task is going wrong
+  {
+    const cells = Array.from({ length: 60 }, (_, i) => `<td class="grdbdy-cell has-value" id="cell-A${i + 1}" tabindex="0">${i}</td>`).join('');
+    const page = `<body><div role="main"><p>Rename the sheet.</p><span>1 of 3 Attempts</span><img src="x.png" alt=""><button class="shell-btn">Home</button>
+      <table><tr>${cells}</tr></table></div></body>`;
+    // Clicks Home, then claims to be done — which nothing graded, twice
+    const p = boot(page, { installLayout: flat, storage: { mode: 'one' },
+      reply: (b, n) => as(b, n === 1 ? { action: 'click', index: 0 } : { action: 'none' }) });
+    p.pressPlay();
+    await settle(p);
+    const shots = p.requests.map(r => hasImage(r));
+    check('SIMnet: the first looks are text only', shots[0] === false && shots[1] === false, shots.join());
+    check('SIMnet: once a "done" goes ungraded, the next step comes with a screenshot',
+      shots.length >= 3 && shots[2] === true && p.requests[2].model === 'claude-sonnet-5-5', `${shots.join()} ${p.requests[2]?.model}`);
+  }
   {
     const cells = Array.from({ length: 60 }, (_, i) => `<td class="grdbdy-cell has-value" id="cell-A${i + 1}" tabindex="0">${i}</td>`).join('');
     const p = boot(`<body><div role="main"><p>Rename the sheet.</p><img src="x.png" alt=""><button class="shell-btn">Home</button>
-      <table><tr>${cells}</tr></table></div></body>`, { installLayout: flat, storage: { mode: 'one' }, reply: b => as(b, { action: 'none' }) });
+      <table><tr>${cells}</tr></table></div></body>`, { installLayout: flat, storage: { mode: 'one' }, reply: b => as(b, { action: 'click', index: 0 }) });
     p.pressPlay();
     await settle(p);
-    check('SIMnet: no screenshot, ever', p.screenshots.length === 0 && p.requests.every(r => !hasImage(r)), `${p.screenshots.length}`);
+    check('SIMnet: a run going well takes no screenshots', p.screenshots.length === 0, `${p.screenshots.length}`);
   }
 
   // The answer log says there was a picture, without keeping it

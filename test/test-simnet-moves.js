@@ -1,7 +1,7 @@
 // SIMnet's Excel moves: double-click, right-click, type, key — and the task
 // that exposed their absence, "Rename Sheet1: Dec 16". Also that running out
 // of steps is reported as unfinished, never as done.
-const { boot, settle, until } = require('./harness');
+const { boot, settle, until, bodyText } = require('./harness');
 
 const cases = [];
 const test = fn => cases.push(fn);
@@ -187,10 +187,10 @@ test(async check => {
 test(async check => {
   const page = boot(PLAIN('Set the category to Currency.'), { installLayout: flat, url: 'https://simnet.mheducation.com/exam',
     reply: (b, n) => n === 1
-      ? as(b, { action: 'fill', fills: [{ index: Number(/\[(\d+)\][^\n]*"Category"/.exec(b.messages[0].content)[1]), value: 'Currency' }] })
+      ? as(b, { action: 'fill', fills: [{ index: Number(/\[(\d+)\][^\n]*"Category"/.exec(bodyText(b))[1]), value: 'Currency' }] })
       : as(b, { action: 'none' }) });
   page.pressPlay(); await settle(page);
-  const list = page.requests[0]?.messages[0].content ?? '';
+  const list = bodyText(page.requests[0]) ?? '';
   check('a dropdown shows its choices and what is chosen',
     /"Category"[^\n]*value="General"[^\n]*options=\[General \| Number \| Currency\]/.test(list),
     list.split('\n').find(l => /Category/.test(l)));

@@ -114,8 +114,8 @@ const oneQuestion = { lastPresetIndex: 0, autoContinue: false };
     p.pressPlay();
     const final = await settle(p);
     const seen = p.requests.map(r => `${r.model}${Array.isArray(r.messages[0].content) ? '+shot' : ''}`).join(', ');
-    check('"none" from Haiku: Haiku again with a screenshot, then Sonnet 5.5 without one',
-      seen === 'claude-haiku-5-5, claude-haiku-5-5+shot, claude-sonnet-5-5', seen);
+    check('"none" from Haiku: Haiku again with a screenshot, then Sonnet 5.5 with it too',
+      seen === 'claude-haiku-5-5, claude-haiku-5-5+shot, claude-sonnet-5-5+shot', seen);
     check('which answers it, and it moves on', p.w.document.getElementById('c0').checked && next, final);
   }
 
@@ -131,7 +131,7 @@ const oneQuestion = { lastPresetIndex: 0, autoContinue: false };
     const final = await settle(p);
     const seen2 = p.requests.map(r => `${r.model}${Array.isArray(r.messages[0].content) ? '+shot' : ''}`).join(', ');
     check('clicking no answer choice goes the same way',
-      seen2 === 'claude-haiku-5-5, claude-haiku-5-5+shot, claude-sonnet-5-5', seen2);
+      seen2 === 'claude-haiku-5-5, claude-haiku-5-5+shot, claude-sonnet-5-5+shot', seen2);
     check('and the question gets answered', p.w.document.getElementById('c0').checked && !p.isError(), final);
   }
 

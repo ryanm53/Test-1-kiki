@@ -186,10 +186,12 @@ change between sites.
   window, only if the tab is the active one, shrunk to 1568px on a side in the
   service worker (`OffscreenCanvas`) — as an image block ahead of the text. It's
   also tried once when the text alone gives "none" or a click that picks no choice,
-  before a stronger model is. Only ever sent to Haiku 5.5 (an image costs 20× more
-  on Sonnet), so once Auto steps up no picture goes with it. The model still
-  answers with listed items by number — the image is to read, not to point at.
-  Never for SIMnet; a failed capture just means text
+  before a stronger model is. It goes to whichever model the page calls for: Haiku 5.5
+  for an ordinary question, Sonnet 5.5 for a worksheet, a sum or a table, and for
+  a question that Auto steps up on (about 0.4¢ more on Sonnet, 0.02¢ on Haiku).
+  The model still answers with listed items by number — the image is to read, not
+  to point at. On SIMnet only once a task is going wrong (`ungradedDone`, or a retry
+  after a failed step), not on every step; a failed capture just means text
   only; the log records that there was one, not the image. Needs `<all_urls>`.
 - **Data tables in a question** — tables with no blanks (an inventory schedule, a
   list of events) are sent first, one row a line with cells divided by " | "

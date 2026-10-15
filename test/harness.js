@@ -182,4 +182,10 @@ function until(cond, ms = 15000) {
   })());
 }
 
-module.exports = { boot, settle, until };
+// The words of a request's first message, whether or not a screenshot came first
+const bodyText = b => {
+  const m = b?.messages?.[0]?.content;
+  return Array.isArray(m) ? (m.find(x => x.type === 'text')?.text ?? '') : (m ?? '');
+};
+
+module.exports = { boot, settle, until, bodyText };

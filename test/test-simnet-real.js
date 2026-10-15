@@ -8,7 +8,7 @@
 //  - "Unhide the Dec 2 worksheet": said done, SIMnet graded nothing.
 // The page is laid out by position (data-rect), since finding headers and
 // the tab strip depends on where things sit, as on the real page.
-const { boot, settle, until } = require('./harness');
+const { boot, settle, until, bodyText } = require('./harness');
 
 const cases = [];
 const test = fn => cases.push(fn);
@@ -26,7 +26,7 @@ const as = (body, obj) => {
   const s = JSON.stringify(obj);
   return body.messages.at(-1)?.role === 'assistant' ? s.slice('{"action":"'.length) : s;
 };
-const list = b => b.messages[0].content.split('Elements (click by index):\n')[1] ?? '';
+const list = b => bodyText(b).split('Elements (click by index):\n')[1] ?? '';
 const idx = (b, label) => {
   const m = new RegExp(`^\\[(\\d+)\\][^\\n]*"${label.replace(/[+&]/g, '\\$&')}"`, 'm').exec(list(b));
   return m ? Number(m[1]) : null;
@@ -164,8 +164,8 @@ test(async check => {
   // Said done at once, nothing graded: told so, then does the task
   const seen = [];
   const { p, state } = start({}, b => {
-    seen.push(b.messages[0].content);
-    const tried = /SIMnet graded nothing/.test(b.messages[0].content);
+    seen.push(bodyText(b));
+    const tried = /SIMnet graded nothing/.test(bodyText(b));
     if (!tried) return as(b, { action: 'none' });
     const hs = idx(b, 'Hide Sheet'), hu = idx(b, 'Hide & Unhide');
     if (hs !== null) return as(b, { action: 'click', index: hs });
@@ -221,7 +221,7 @@ test(async check => {
 // pressing Print — nothing graded
 test(async check => {
   const { p, state } = start({ task: 'Print the entire workbook.' }, b => {
-    const text = b.messages[0].content;
+    const text = bodyText(b);
     if (/Print Entire Workbook[^\n]*\(selected\)/.test(list(b)) && !/SIMnet graded nothing/.test(text)) return as(b, { action: 'none' });
     if (/SIMnet graded nothing/.test(text)) return as(b, { action: 'click', index: idx(b, 'Print') });
     return as(b, { action: 'click', index: idx(b, 'Print Entire Workbook') });

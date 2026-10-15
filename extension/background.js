@@ -1009,13 +1009,15 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         // The Required tabs can be in the outer page when the table is in a frame
         if (!isSimnet && !isCanvas) parts = pageData.parts ?? outerParts;
         // A screenshot where the page says it needs one (a picture, almost no
-        // text), or where the text alone has just failed to give an answer.
-        // Only ever to the cheap model — an image on the stronger one costs
-        // twenty times as much — so once Auto has stepped up, no picture.
-        const picture = !pageData.isSimnet && !escalated && (pageData.needsPicture || shotTried) ? await captureTab(tabId) : null;
-        usedModel = escalated ? (UPGRADE_TO[baseModel] ?? baseModel)
-                  : picture && autoUpgrade ? baseModel
-                  : pickModel(baseModel, pageData, autoUpgrade);
+        // text), or where the text alone has just failed to give an answer —
+        // and on SIMnet only once a task is going wrong (a step that failed, or
+        // a "done" nothing graded), not on every step of every task. It goes to
+        // whichever model the page calls for: the cheap one for an ordinary
+        // question, the stronger one for a table or a worksheet, which is where
+        // reading the picture matters and the extra cost is worth it.
+        const simStuck = pageData.isSimnet && (ungradedDone > 0 || attempt > 0);
+        const picture = (pageData.isSimnet ? simStuck : (pageData.needsPicture || shotTried)) ? await captureTab(tabId) : null;
+        usedModel = escalated ? (UPGRADE_TO[baseModel] ?? baseModel) : pickModel(baseModel, pageData, autoUpgrade);
         // A worksheet can think for longer than the bar's silence
         // timer, which would call the run dead mid-answer
         const stopBeat = heartbeat(tabId, step + 1, budget);

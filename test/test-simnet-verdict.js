@@ -1,7 +1,7 @@
 // SIMnet's result popup, as reported: "Incorrect", a HINT with the exact
 // steps, and one Continue button — back to the question after a wrong try, on
 // to the next after a right one — with "1 of 3 Attempts" in the header.
-const { boot, settle, until } = require('./harness');
+const { boot, settle, until, bodyText } = require('./harness');
 
 const cases = [];
 const test = fn => cases.push(fn);
@@ -16,7 +16,7 @@ const as = (body, obj) => {
   return body.messages.at(-1)?.role === 'assistant' ? s.slice('{"action":"'.length) : s;
 };
 const indexOf = (body, label) => {
-  const m = new RegExp(`\\[(\\d+)\\][^\\n]*"${label}"`).exec(body.messages[0].content);
+  const m = new RegExp(`\\[(\\d+)\\][^\\n]*"${label}"`).exec(bodyText(body));
   return m ? Number(m[1]) : null;
 };
 
@@ -64,7 +64,7 @@ const start = (opts, reply, storage = {}) => {
 };
 // The fake model: follows SIMnet's hint when it has one, otherwise does as told
 const model = firstTry => b => {
-  const prompt = b.messages[0].content;
+  const prompt = bodyText(b);
   if (/marked your previous attempt at this task INCORRECT/.test(prompt)) {
     return as(b, { action: 'click', index: indexOf(b, 'Right way') });
   }
@@ -77,7 +77,7 @@ test(async check => {
   await until(() => state.advanced && p.requests.length >= 2, 90000);
   check('correct: presses Continue once', state.continues === 1, state.continues);
   check('correct: Autopilot goes straight on to the next question',
-    (p.requests[1]?.messages[0].content ?? '').includes('Question 2: Rename the Summary sheet'));
+    (bodyText(p.requests[1]) ?? '').includes('Question 2: Rename the Summary sheet'));
   check('correct: without asking Claude again about the graded task', p.requests.length >= 2);
   p.pressPlay();
 });
@@ -85,9 +85,9 @@ test(async check => {
 test(async check => {
   const { p, state } = start({}, model('Wrong way'));
   p.pressPlay(); const final = await settle(p, 40000);
-  const retry = p.requests.find(r => /INCORRECT/.test(r.messages[0].content));
+  const retry = p.requests.find(r => /INCORRECT/.test(bodyText(r)));
   check('wrong then right: retried once, with the hint word for word',
-    !!retry && retry.messages[0].content.includes('Click the Create a copy check box'));
+    !!retry && bodyText(retry).includes('Click the Create a copy check box'));
   check('wrong then right: the retry thinks harder', retry?.output_config?.effort === 'medium', retry?.output_config?.effort);
   check('wrong then right: Continue pressed for the retry and after', state.continues === 2, state.continues);
   check('wrong then right: ends well', !p.isError(), final);
