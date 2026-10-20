@@ -80,11 +80,15 @@ function boot(html, options = {}) {
       // A picture of the screen, as a data URL; or a failure
       captureVisibleTab: async (windowId, opts) => {
         screenshots.push({ windowId, ...opts });
+        // What the page looks like at the instant of the capture
+        options.onCapture?.(w);
         if (options.captureFails) throw new Error('Cannot capture');
         return 'data:image/jpeg;base64,/9j/AAAA';
       },
       sendMessage: (tabId, msg, opts, cb) => {
         pageMessages.push(msg);
+        // A page that never answers a kind of message (an old copy of the script)
+        if (options.ignore?.includes(msg.type)) return;
         // Chrome answers asynchronously; so does this
         setTimeout(() => {
           const keepOpen = contentListener(msg, {}, res => cb && cb(res));
@@ -133,16 +137,18 @@ function boot(html, options = {}) {
     };
   };
 
-  vm.runInNewContext(fs.readFileSync(path.join(EXT, 'background.js'), 'utf8'), {
+  // The background's own globals, kept so a test can replace one of its functions
+  const bg = {
     chrome: bgChrome, fetch: fakeFetch, console: { log() {}, warn() {}, error() {} },
     setTimeout, clearTimeout, Promise, JSON, Math, Date, Set, Map, Number, String, Array, Object, Error, URL
-  });
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(EXT, 'background.js'), 'utf8'), bg);
   if (beforeLoad) beforeLoad(w);
   new w.Function(fs.readFileSync(path.join(EXT, 'content.js'), 'utf8')).call(w);
 
   const shadow = () => w.document.getElementById('__cap-host')?.shadowRoot;
   return {
-    w, store, requests, requestHeaders, debuggerCalls, pageMessages, screenshots,
+    bg, w, store, requests, requestHeaders, debuggerCalls, pageMessages, screenshots,
     send: msg => new Promise(res => backgroundListener(msg, { tab: { id: 1 }, url: w.location.href }, res)),
     // A keyboard shortcut, as Chrome delivers it to the background
     command: name => commandListener?.(name),

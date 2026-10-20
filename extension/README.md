@@ -193,11 +193,25 @@ change between sites.
   to point at. On SIMnet only once a task is going wrong (`ungradedDone`, or a retry
   after a failed step), not on every step; a failed capture just means text
   only; the log records that there was one, not the image. Needs `<all_urls>`.
+- **Numbered tags (set-of-marks)** — like Vimium's hints. For the instant of a
+  capture, `MARK` (content.js, `mark()`) draws a yellow tag with the item's number
+  from the list, and a red outline, on every listed item that is on screen (up to
+  150; a tag sits beside a small item and is moved off any other tag, kept inside
+  the window), on a layer of its own: a closed shadow root, `pointer-events: none`,
+  `aria-hidden`, in the browser's top layer (a popover) so it shows above a modal
+  `<dialog>`. `captureTab` sends MARK to the question's frame, captures, and always
+  sends `UNMARK` after (awaited, 2.5s cap each); the layer also removes itself after
+  6s. Chrome sometimes returns the screen from a frame earlier, so the capture is
+  checked for the tags' yellow (`tagPixels`, ≥25 px per tag) and retaken up to 3
+  times; if they never show the model is told there are none. The prompt says the
+  tags match the list's numbers and an untagged item is off screen. The model still
+  answers with list numbers, so nothing downstream changed.
 - **Data tables in a question** — tables with no blanks (an inventory schedule, a
   list of events) are sent first, one row a line with cells divided by " | "
   (`dataTables`), so a table sitting beside the question rather than in it is
-  never lost, and columns read as columns. Page text is read with `<select>`s
-  hidden for the instant (`textOf`): a select's innerText is every option.
+  never lost, and columns read as columns. Page text has each `<select>`'s own text
+  cut out of it (`textOf`): a select's innerText is every option, and sits in the
+  page's as one piece. The page itself is never touched.
 - **Financial statements** — a dropdown counts as a worksheet blank wherever it
   is, table or divs, and with two or more present so does every text box beside
   them; unlabelled ones take the text just before them (`nearbyLabel`). Every
@@ -382,6 +396,19 @@ Prints one line per area and a verdict:
 ...
 ✓ Everything works. 11 areas, 100+ checks, 20s.
 ```
+
+**In real Chrome.** `npm test` runs against copies of pages in jsdom. What only a
+real browser can show — the package loading, the bar drawing and dragging, the
+popup and shortcut, a real screenshot, the numbered tags actually being in it (it
+counts their yellow pixels), tags above a modal `<dialog>`, a whole run through real
+clicks — is `scripts/real-chrome.js` (43 checks):
+
+```
+npm install --no-save playwright-core
+node scripts/real-chrome.js            # CHROMIUM=/path/to/chrome if it isn't found
+```
+
+It isn't part of `npm test` because that has to run anywhere (CI included).
 
 A broken area lists the exact checks that failed and the command to rerun it
 alone. GitHub runs the same thing on every push (`.github/workflows/test.yml`),

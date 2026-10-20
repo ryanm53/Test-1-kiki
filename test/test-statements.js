@@ -112,6 +112,15 @@ const oneQuestion = { lastPresetIndex: 0, autoContinue: false };
     return as(body, { action: 'fill', fills });
   };
 
+  // Reading the page changes nothing in it (a page script watching for edits would notice)
+  {
+    const p = boot(statement(false), { installLayout: flat, storage: oneQuestion, reply: model, beforeLoad: wire });
+    const before = p.w.document.documentElement.outerHTML;
+    await p.scrape(); await p.scrape();
+    check('reading a statement of dropdowns leaves the page exactly as it was (no style flicker, no attribute)',
+      p.w.document.documentElement.outerHTML.replace(/<div id="__cap-host".*$/s, '') === before.replace(/<div id="__cap-host".*$/s, ''));
+  }
+
   for (const custom of [false, true]) {
     const kind = custom ? 'custom dropdowns' : 'native selects';
     const p = boot(statement(custom), { installLayout: flat, storage: oneQuestion, reply: model, beforeLoad: wire });

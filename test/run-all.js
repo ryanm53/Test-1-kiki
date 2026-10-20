@@ -28,6 +28,7 @@ const SUITES = [
   ['test-package.js',    'The Chrome Web Store upload: complete, and a listing the store accepts'],
   ['test-statements.js', 'Accounting: a data table in the question; statements of dropdowns and amounts'],
   ['test-screenshot.js', 'A screenshot when the text can\'t carry the question'],
+  ['test-marks.js',      'Numbered tags on the screenshot: right numbers, up for the capture, always taken down'],
   ['test-labels.js',     'Accounting worksheet: column and row labels'],
   ['test-aria.js',       'The same, on an ARIA grid instead of a table'],
   ['test-sheet.js',      'Spreadsheet cells are recognised'],

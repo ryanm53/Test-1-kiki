@@ -433,13 +433,17 @@ function dataTables() {
 // The page's text without the contents of dropdowns: a <select>'s innerText is
 // all its options, and a statement with a dozen of them would put the same long
 // list into the prompt a dozen times — the real list is sent once, with the
-// dropdown itself. They're hidden for the instant of reading, never repainted.
+// dropdown itself. Each select's own text is cut out of the page's, where it
+// stands in it as one piece; the page itself is never touched (hiding them for
+// the moment instead would be seen by any script watching the page).
 function textOf(root) {
-  const selects = Array.from(root.querySelectorAll('select'));
-  const was = selects.map(e => e.style.display);
-  selects.forEach(e => { e.style.display = 'none'; });
-  try { return root.innerText ?? ''; }
-  finally { selects.forEach((e, i) => { e.style.display = was[i]; }); }
+  let text = root.innerText ?? '';
+  for (const sel of root.querySelectorAll('select')) {
+    const own = sel.innerText ?? '';
+    const at = own ? text.indexOf(own) : -1;
+    if (at >= 0) text = text.slice(0, at) + text.slice(at + own.length);
+  }
+  return text;
 }
 
 // Whether the text alone is likely not enough to read the question: a picture
@@ -458,6 +462,7 @@ function pictureNeeded(root, text) {
   // Next to no text, though there are answers to give: the question is drawn
   return (text ?? '').replace(/\s+/g, ' ').trim().length < 50 ? 'sparse' : undefined;
 }
+
 
 function scrape() {
   // Prefer the main content area to skip nav/header/footer noise
@@ -1144,6 +1149,118 @@ async function execute(action) {
     return { success: false, error: e.message };
   }
 }
+
+// ── Numbers on the screenshot ───────────────────────────────────────────────
+// For the instant of a screenshot, every item the model has been listed that is
+// on screen gets a small tag with its number — the number in the list — and a
+// thin outline, like Vimium's hints. The model can then tell similar items
+// apart and point at one it can't name ("click 14"). Drawn on a layer of its
+// own that takes no clicks, in a shadow root so the page's CSS can't reach it,
+// and taken down straight after the capture, and by a timer if that message
+// never comes. It reads the page and changes nothing in it.
+const MARK_LIMIT = 150;
+const MARK_LIFE_MS = 6000;
+let _markHost = null, _markTimer = null;
+
+function unmark() {
+  clearTimeout(_markTimer);
+  _markTimer = null;
+  _markHost?.remove();
+  _markHost = null;
+  // Any stray one (a script running twice) goes too
+  document.querySelectorAll('#__cap-marks').forEach(e => e.remove());
+}
+
+function mark() {
+  unmark();
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const host = document.createElement('div');
+  host.id = '__cap-marks';
+  host.setAttribute('aria-hidden', 'true');
+  host.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:2147483646;pointer-events:none;margin:0;padding:0;border:0;background:none;';
+  const root = host.attachShadow({ mode: 'closed' });
+  const style = document.createElement('style');
+  style.textContent = `
+    * { box-sizing: border-box; pointer-events: none; }
+    .box { position: fixed; border: 1px solid rgba(255, 59, 48, 0.9); }
+    .tag { position: fixed; background: #FFD60A; color: #000; border: 1px solid #000; border-radius: 3px;
+           font: 700 11px/12px -apple-system, Helvetica, Arial, sans-serif; padding: 0 3px; white-space: nowrap; }`;
+  root.appendChild(style);
+
+  const placed = [];       // tags already down, to keep them from landing on each other
+  const boxes = [];        // what was drawn, for the caller (and the tests)
+  let outlined = 0;
+  const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+  for (let i = 0; i < _lastElements.length && boxes.length < MARK_LIMIT; i++) {
+    const el = _lastElements[i];
+    if (!el || !document.contains(el) || el.closest('#__cap-host') || !isRendered(el) || !inViewport(el)) continue;
+    const r = el.getBoundingClientRect();
+    // The part of it that's actually on screen
+    const left = Math.max(r.left, 0), top = Math.max(r.top, 0);
+    const w = Math.min(r.right, vw) - left, h = Math.min(r.bottom, vh) - top;
+    if (w < 2 || h < 2) continue;
+
+    // An outline, except round something that fills much of the screen (the
+    // question's own container, say), where it would only be a frame
+    if (w * h < vw * vh * 0.4) {
+      const box = document.createElement('div');
+      box.className = 'box';
+      box.style.cssText = `left:${left}px;top:${top}px;width:${w}px;height:${h}px;`;
+      root.appendChild(box);
+      outlined++;
+    }
+
+    const label = String(i);
+    const tw = 8 + label.length * 7, th = 14;
+    // Beside a small item (a radio button, a checkbox) so it doesn't hide it;
+    // on the corner of a larger one
+    const x0 = (w < 40 && left > tw + 4) ? left - tw - 2 : left;
+    const y0 = top;
+    const clamp = t => ({ ...t, x: Math.min(Math.max(t.x, 0), Math.max(vw - tw, 0)), y: Math.min(Math.max(t.y, 0), Math.max(vh - th, 0)) });
+    // Down, then across, until it has a clear place; failing that, where it began
+    let tag = clamp({ x: x0, y: y0, w: tw, h: th });
+    search: for (let dx = 0; dx < 4; dx++) {
+      for (let dy = 0; dy < 6; dy++) {
+        const t = clamp({ x: x0 + dx * (tw + 2), y: y0 + dy * (th + 1), w: tw, h: th });
+        if (!placed.some(o => overlaps(t, o))) { tag = t; break search; }
+      }
+    }
+    placed.push(tag);
+    const tagEl = document.createElement('div');
+    tagEl.className = 'tag';
+    tagEl.textContent = label;
+    tagEl.style.cssText = `left:${tag.x}px;top:${tag.y}px;`;
+    root.appendChild(tagEl);
+    boxes.push({ i, x: Math.round(tag.x), y: Math.round(tag.y), w: tw, h: th });
+  }
+
+  (document.documentElement || document.body).appendChild(host);
+  // A modal dialog (<dialog>.showModal()) is drawn in the browser's top layer,
+  // above everything however high its z-index — including these tags, which
+  // would then be hidden behind the very dialog they point into. A popover goes
+  // into the top layer too, after the dialog, so on top of it.
+  try {
+    host.setAttribute('popover', 'manual');
+    host.style.overflow = 'visible';
+    host.showPopover?.();
+  } catch (_) { /* an older browser: the z-index has to do */ }
+  _markHost = host;
+  _markTimer = setTimeout(unmark, MARK_LIFE_MS);   // never left up if the capture never comes
+  return { marked: boxes.length, outlined, boxes };
+}
+
+// Time for the tags to reach the screen before the capture is made: two frames
+// have been drawn, and then a moment more for the browser to hand the last one
+// to the compositor. (Without that, the first capture on a page can be taken a
+// frame early, with no tags in it — seen in real Chrome, not in a test.)
+const painted = () => new Promise(resolve => {
+  let done = false;
+  const finish = () => { if (!done) { done = true; resolve(); } };
+  const settle = () => setTimeout(finish, 90);
+  try { requestAnimationFrame(() => requestAnimationFrame(settle)); } catch (_) { /* no frames */ }
+  setTimeout(finish, 400);   // a background tab never draws frames: don't wait on them
+});
 
 // After the extension is reloaded or updated, an already-open page keeps
 // running this old copy, but its link back to the extension is dead: every
@@ -2500,6 +2617,21 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       sendResponse({ success: true });
     })().catch(e => sendResponse({ success: false, error: e?.message ?? String(e) }));
     return true;
+  }
+
+  if (msg.type === 'MARK') {
+    // Tags on the listed items, then a paint, then the answer — the caller
+    // captures the screen once it has it
+    let result;
+    try { result = mark(); } catch (e) { unmark(); sendResponse({ marked: 0, error: e.message }); return false; }
+    painted().then(() => sendResponse(result), () => sendResponse(result));
+    return true;
+  }
+
+  if (msg.type === 'UNMARK') {
+    unmark();
+    sendResponse({ ok: true });
+    return false;
   }
 
   if (msg.type === 'OPEN_PART') {

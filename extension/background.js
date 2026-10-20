@@ -386,9 +386,10 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
     ? `SIMnet marked your previous attempt at this task INCORRECT and gave this hint:\n"${retryHint}"\nThe task has been reset. Follow the hint's steps exactly, one per reply.\n\n`
     : '';
 
-  const pictureNote = picture
-    ? 'A screenshot of the page is attached. Use it to read anything the text below leaves out — a picture, a chart, a table drawn as an image. You still answer with the items listed below, by their numbers: the screenshot shows you the page, it does not replace the list.\n\n'
-    : '';
+  const pictureNote = !picture ? ''
+    : picture.marked > 0
+      ? 'A screenshot of the page is attached. Every item in the list below that is on screen is tagged in it with a small yellow number — the same number as in the list ([7] below is the tag 7 in the picture), outlined in red; an item with no tag is off screen. Use it to read anything the text leaves out — a picture, a chart, a table drawn as an image — and to tell apart items the list describes alike. You still answer with the numbers in the list.\n\n'
+      : 'A screenshot of the page is attached. Use it to read anything the text below leaves out — a picture, a chart, a table drawn as an image. You still answer with the items listed below, by their numbers: the screenshot shows you the page, it does not replace the list.\n\n';
   const userContent = `${pictureNote}${notesSection}${retrySection}${historySection}${questionSection}Page text:
 ${pageText.slice(0, isWorksheet || isCanvas ? 4000 : isSimnet ? 1500 : 3500)}
 
@@ -862,12 +863,59 @@ function heartbeat(tabId, step, budget) {
 // just means the question goes by its text, as before.
 const SHOT_MAX_SIDE = 1568;   // larger is shrunk by the API anyway; smaller is quicker to send
 
-async function captureTab(tabId) {
+// A message to the page that gives up after a couple of seconds: the tags are an
+// extra, and a page that won't answer must not hold up the question
+const quickly = (promise, ms = 2500) => Promise.race([promise, new Promise(r => setTimeout(() => r(null), ms))]);
+
+// A tag is about 15×14 pixels of the one yellow; fewer than this many such pixels
+// per tag in a capture means the tags aren't in it
+const TAG_PIXELS = 25;
+
+// How many pixels of the tags' yellow a capture holds — or null where it can't
+// be counted (no canvas here), in which case the tags are taken to be there
+async function tagPixels(dataUrl) {
+  try {
+    if (typeof OffscreenCanvas === 'undefined' || typeof createImageBitmap === 'undefined') return null;
+    const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const g = canvas.getContext('2d', { willReadFrequently: true });
+    g.drawImage(bitmap, 0, 0);
+    const px = g.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    let n = 0;
+    for (let i = 0; i < px.length; i += 4) if (px[i] > 230 && px[i + 1] > 190 && px[i + 1] < 235 && px[i + 2] < 90) n++;
+    return n;
+  } catch (_) { return null; }
+}
+
+async function captureTab(tabId, frameId = 0) {
   try {
     const tab = await chrome.tabs.get(tabId);
     if (!tab?.active) return null;
-    const url = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 70 });
-    return await shrinkShot(url);
+    // Numbers on the things the list names, for the instant of the capture:
+    // the same numbers the model is given, so it can point at one it can't name
+    const marks = await quickly(sendToTab(tabId, { type: 'MARK' }, frameId).catch(() => null));
+    const marked = marks?.marked ?? 0;
+    let url = null, seen = null;
+    try {
+      // Chrome sometimes hands back the screen as it was a frame ago, before the
+      // tags were drawn (seen in real Chrome, not in a test). So the picture is
+      // checked for them, and taken again if they're missing
+      for (let tries = 0; tries < 3; tries++) {
+        url = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 70 });
+        if (!marked) break;
+        seen = await Promise.resolve(tagPixels(url)).catch(() => null);
+        if (seen === null || seen >= marked * TAG_PIXELS) break;
+        await new Promise(r => setTimeout(r, 150 * (tries + 1)));
+      }
+    } finally {
+      // Always taken down again, whatever happened — and awaited, so nothing
+      // that follows meets them
+      await quickly(sendToTab(tabId, { type: 'UNMARK' }, frameId).catch(() => null));
+    }
+    const shot = await shrinkShot(url);
+    // Tags the picture doesn't show are not claimed: the model is told there are none
+    const shown = marked && (seen === null || seen >= marked * TAG_PIXELS) ? marked : 0;
+    return shot && { ...shot, marked: shown };
   } catch (_) { return null; }
 }
 
@@ -1016,7 +1064,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         // question, the stronger one for a table or a worksheet, which is where
         // reading the picture matters and the extra cost is worth it.
         const simStuck = pageData.isSimnet && (ungradedDone > 0 || attempt > 0);
-        const picture = (pageData.isSimnet ? simStuck : (pageData.needsPicture || shotTried)) ? await captureTab(tabId) : null;
+        const picture = (pageData.isSimnet ? simStuck : (pageData.needsPicture || shotTried)) ? await captureTab(tabId, frameId) : null;
         usedModel = escalated ? (UPGRADE_TO[baseModel] ?? baseModel) : pickModel(baseModel, pageData, autoUpgrade);
         // A worksheet can think for longer than the bar's silence
         // timer, which would call the run dead mid-answer
