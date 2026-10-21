@@ -162,6 +162,44 @@ change between sites.
   "$" cell is never a row name. A row named by a dropdown is labelled by its row
   number. Worksheets think at `effort: medium` with twice the room, and
   a heartbeat keeps the bar's 90s silence timer from firing mid-think.
+- **Financial statement effects** — a Balance Sheet (Assets, Liabilities,
+  Stockholders' Equity: Common Stock, Retained Earnings) over an Income Statement
+  (Revenues, Expenses, Net Income), a dropdown and a box on every line of the
+  first four. `tableLabel` treats a row with dropdowns in several columns as
+  *paired*: a dropdown names only the box right beside it (the leftmost one used
+  to name every box after it, so a Liabilities box was "named by" the Assets
+  dropdown), a dropdown is "Assets — row 2's name", and only lines with something
+  to fill are counted as rows, not the heading rows that start with a word.
+  `WORKSHEET_HINT` has a paragraph for these (effects not balances, minus signs,
+  it must balance, costs to get an asset ready are its cost).
+- **Connect after the answer** — the graded page can hold the way on behind a
+  gate. `advanceToNext` (background) is what the preset's Next click runs:
+  `connectState` (content) says what is on screen — `graded`, `needsResource`
+  ("Select a concept resource to continue."), and which of resource / back / Next
+  can be pressed — found by what they *say* (`buttonScore`: *Read About the
+  Concept*, then *Clarify with AI Reader*; *To Questions* / *Back to Questions*;
+  Next, never anything with back/skip/submit/finish/exit/end). Each hop: back if
+  that's all there is, the resource if the page is gated, else Next; then
+  `movedOn` looks again, because a click on a Next greyed out by class alone
+  "succeeds" and does nothing. Up to 6 hops a round. On a Connect host, if
+  that gets nowhere, `askWhatToPress` gives the model the page with a screenshot,
+  tags and a prompt that forbids Submit/Finish/Exit (checked again on the label it
+  names, `NEVER_PRESS`), at most twice, the second on the stronger model. The
+  failure message lists what was pressed and the buttons seen.
+- **Answer memory** — Connect shows the right answer after a wrong one.
+  `connectResult` (content) reads "Your Answer … incorrect" and the lines under
+  "Correct Answer", keeping the page's own choices whose text is there (exactly,
+  else by containment, the longer when one is part of another). Before the last
+  post-click, `learn` stores them in `chrome.storage.local.answerBook`, keyed by
+  a fingerprint of the question's words and the *sorted* set of choice labels
+  (so shuffled choices still match). On the next run, step 0 looks the key up and
+  clicks the remembered choices without calling the model (`recallAction`; log
+  model `memory`, the bar says "remembered"). Only questions of ticked choices on
+  a `*.mheducation.com` page; a page of several questions, or two choices with
+  the same label, isn't remembered. A remembered answer the page marks wrong is
+  replaced by the right one shown, or dropped when the page doesn't say. 800
+  entries at most, the oldest out first; `rememberAnswers` (default on) and
+  `BOOK_COUNT` / `BOOK_CLEAR` are the setting and the bar's count and Clear.
 - **Parts** — tabs named Required 1 / Required 2 / Req A / Part 1 (`partTabs`).
   After a part is answered the background opens the next unanswered one
   (`OPEN_PART`) and answers it in the same run; Next is pressed once, after
@@ -407,6 +445,10 @@ clicks — is `scripts/real-chrome.js` (43 checks):
 npm install --no-save playwright-core
 node scripts/real-chrome.js            # CHROMIUM=/path/to/chrome if it isn't found
 ```
+
+`scripts/real-chrome-connect.js` does the same for the Connect flow — a wrong
+answer, the concept resource, back, Next, and the right answer given from memory
+the second time — on a page served as `learning.mheducation.com`.
 
 It isn't part of `npm test` because that has to run anywhere (CI included).
 

@@ -9,6 +9,7 @@ These are kept in Chrome's storage for the extension, in your browser only:
 - **Your Anthropic API key**, which you paste in yourself.
 - **Your settings**: mode, model, notes, where you've put the control bar, and whether it's hidden.
 - **The last request sent to Claude**, so you can copy it under Troubleshooting.
+- **Right answers from Connect**, unless you switch it off under More → Right answers. When Connect marks an answer wrong and shows the right one, Page Agent keeps a fingerprint of the question, the first few words of it, and the text of the right choices, so it can answer the same question again without asking Claude. It stays in your browser and is never sent anywhere; Clear deletes it.
 - **The answer log**, only if you switch it on. It records the questions answered and how the page looked afterwards. It never leaves your browser unless you press Download and share the file yourself, and Clear deletes it.
 
 ## What is sent, and where
@@ -36,7 +37,7 @@ Your data is not sold, not shared with anyone besides Anthropic as described abo
 
 ## Removing your data
 
-Remove the extension from Chrome, and everything it stored is deleted with it. Or, without removing it: **Clear** in the answer log deletes the log, and **Change** under API key replaces your key.
+Remove the extension from Chrome, and everything it stored is deleted with it. Or, without removing it: **Clear** in the answer log deletes the log, **Clear** under Right answers deletes what it remembered, and **Change** under API key replaces your key.
 
 ## Contact
 

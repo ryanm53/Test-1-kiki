@@ -5,8 +5,8 @@ Once it's on the store, your friends install it with one click and Chrome keeps 
 ## What you do, once (about 20 minutes, plus waiting for Google)
 
 1. **Make a developer account.** Go to <https://chrome.google.com/webstore/devconsole>, sign in with your Google account and pay the one-time $5 fee. Google may ask you to verify your email or identity first. When it asks whether you're a *trader*, answer **No**: you're not selling anything.
-2. **Upload the extension.** Click **New item** and upload **`page-agent-1.0.5.zip`**. Download it here:
-   <https://github.com/ryanm53/Test-1-kiki/raw/claude/page-agent-extension-0xpw4s/store/page-agent-1.0.5.zip>
+2. **Upload the extension.** Click **New item** and upload **`page-agent-1.0.6.zip`**. Download it here:
+   <https://github.com/ryanm53/Test-1-kiki/raw/claude/page-agent-extension-0xpw4s/store/page-agent-1.0.6.zip>
 
    ⚠️ Not GitHub's green **Code → Download ZIP** button: that's the whole project (tests, notes, these instructions), and the store turns it down with *"Files outside directory with manifest … are not allowed"*. Upload the zip from the link exactly as it downloads; don't unzip it first.
 3. **Fill in the four tabs** by copying from the sections below: **Store listing**, **Privacy**, **Distribution**, and **Test instructions** if it's shown.
@@ -40,7 +40,8 @@ Answers the questions on your coursework and quiz pages with Claude, using your 
 Page Agent puts a small control bar on your coursework pages. Press play and it reads the question on screen, asks Claude for the answer, and fills it in.
 
 WHAT IT HANDLES
-• Homework questions — multiple choice, select all that apply, fill in the blank, dropdowns, accounting worksheets (including ones split into Required 1 / Required 2 tabs) and drag-and-drop. It rates its confidence and moves on to the next question.
+• Homework questions — multiple choice, select all that apply, fill in the blank, dropdowns, accounting worksheets (including ones split into Required 1 / Required 2 tabs and financial statement effects tables) and drag-and-drop. It rates its confidence and moves on to the next question, opening a concept resource and coming back to the questions when the page asks for one first.
+• Remembers right answers — when the page shows the right answer after a wrong one, it keeps it in your browser and uses it the next time that question comes up.
 • Simulated Excel tasks — ribbon menus, dialogs, cells, ranges, sheet tabs, right-click menus and typing. It reads the Correct/Incorrect result, and never spends your last attempt.
 • Quizzes — every question on the page at once, or one at a time. It never submits a quiz for you.
 
@@ -59,7 +60,7 @@ OUT OF THE WAY WHEN YOU WANT
 Drag the bar anywhere, or hide it with the – button and bring it back with Alt+Shift+H or the toolbar button.
 
 PRIVATE
-Your key and settings stay in your browser. The question is sent only to Anthropic's API, only when you press play. No accounts, no tracking, no analytics.
+Your key, your settings and the right answers it remembers stay in your browser. The question is sent only to Anthropic's API, only when you press play. No accounts, no tracking, no analytics.
 ```
 
 **Category:** Education
@@ -95,7 +96,7 @@ Answers the quiz or homework question on the current page, when the user presses
 
 **Data usage:** tick these:
 - **Authentication information**: the user's own API key, stored in their browser and sent only to Anthropic.
-- **Website content**: the question on the page — its text, and a screenshot of the visible tab when the question is a picture — sent to Anthropic's API when the user presses play.
+- **Website content**: the question on the page — its text, and a screenshot of the visible tab when the question is a picture or the run is stuck — sent to Anthropic's API when the user presses play. (The right answers it remembers are kept in the user's browser only and never sent anywhere.)
 
 Then tick all three statements: not sold to third parties; not used or transferred for purposes unrelated to the single purpose; not used to determine creditworthiness or for lending.
 

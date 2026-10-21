@@ -111,7 +111,7 @@ Press the **play button ▶**. What happens next depends on the site:
 
 | Site | What it does |
 |---|---|
-| **Connect** | Answers, clicks **High Confidence** and **Next Question**, and keeps going through the whole assignment on its own. A worksheet split into tabs (**Required 1**, **Required 2**…) has every tab answered before it moves on, dropdowns included. A big worksheet can take a minute or two. If a question is a picture — a chart, or a table drawn as an image — it sends a screenshot of what's on screen along with the text, with a small numbered tag on each button and choice for a moment (like the hints in Vimium) so it can point at the right one. That costs a fraction of a cent more |
+| **Connect** | Answers, clicks **High Confidence** and **Next Question**, and keeps going through the whole assignment on its own. A worksheet split into tabs (**Required 1**, **Required 2**…) has every tab answered before it moves on, dropdowns included. A big worksheet can take a minute or two. If a question is a picture — a chart, or a table drawn as an image — it sends a screenshot of what's on screen along with the text, with a small numbered tag on each button and choice for a moment (like the hints in Vimium) so it can point at the right one. That costs a fraction of a cent more. **When an answer is wrong**, Connect greys out *Next Question* until you open a concept resource: Page Agent opens one (*Read About the Concept*), presses **To Questions** / **Back to Questions** to come back, and then **Next Question**, so it doesn't get stuck. It also keeps the right answer Connect shows, in your browser, and uses it the next time that question comes up (even with the choices shuffled) with no call to Claude. It never presses Submit, Finish or Exit. **Financial statement effects** tables (a balance sheet and an income statement side by side, an account dropdown and an amount on each line) are filled in like any other worksheet |
 | **Canvas** | Answers **every question on the page** in one go. If the quiz shows one question at a time, it clicks **Next** and keeps going. **It never presses Submit Quiz** — when it's done it says *"Answered. Check it over, then submit it yourself."* |
 | **SIMnet** | Does the task on screen — ribbon tabs and their menus and submenus, dialogs, selecting cells, ranges, whole columns and rows, sheet tabs (rename, group, color, hide, add), right-click menus, typing and pressing keys. SIMnet then grades it: when it's **correct**, Autopilot presses Continue and goes on to the next question by itself. When it's **incorrect**, it reads SIMnet's hint and tries **once** more following it. It never spends your **last attempt**: if another try would use it, or the second try is also wrong, it stops and shows you the hint to finish it yourself |
 
@@ -137,6 +137,7 @@ The bar shows you what's happening as it goes:
 | **Ready · Canvas quiz** | Idle, and it has recognised the page: *Connect*, *SIMnet*, *Canvas quiz*, *Worksheet* or *Drag and drop*. On other sites it just says **Ready** |
 | **Answering… · 7** | Working on a question. It's done 7 so far |
 | **Next question… · 7** | Waiting for the next question to load |
+| **Answering… · 7 · remembered** | The last answer came from the right answers it had kept, not from Claude |
 | **Click Next when ready** | *Answer only* mode: it's answered, and waits for you to move on |
 | **Answering… · step 2/6** | Working through a task that takes several steps (SIMnet) |
 | **Paused · 7** | Stopped, 7 answered |
@@ -181,6 +182,7 @@ Tap **More** for the rest:
 | **Model** | Which AI does the thinking. **Auto** *(default, recommended)* uses **Haiku 5.5**, the cheapest, for most questions and **Sonnet 5.5** for SIMnet, worksheets, drag-and-drop and questions with sums to work out — and it hands a question to Sonnet 5.5 when the cheap one gets stuck. The bar shows **↑ Sonnet 5.5** when it steps up. Or pick one to use every time: **Haiku 5.5** is fastest and cheapest, **Sonnet 5.5** is better at hard subjects (around a cent a question) |
 | **Notes** *(optional)* | Extra context to improve accuracy, e.g. *"This is financial accounting — use GAAP conventions."* Fine to leave blank |
 | **Answer log** | *Off unless you turn it on.* Saves each question it answers — what it was asked, what it picked, and how the page looked straight after, which is where Connect shows "Correct"/"Incorrect" and SIMnet its hint — in your browser only. When an answer was wrong, tap the **thumbs-down** that appears on the bar (most reliable in *One question* mode, since on Autopilot it may already have moved on). **Download** saves it as a file you can share to help tune Auto; **Clear** takes two taps. It adds under a second per question while it's on |
+| **Right answers** | *On by default.* On Connect, when an answer is marked wrong the page shows the right one. Page Agent keeps it, in your browser only, and gives it the next time that question comes up, with no call to Claude. The switch turns it off; **Clear** (two taps) forgets everything it has kept |
 | **Troubleshooting** | *Check this page* — see [Troubleshooting](#troubleshooting). *Copy last prompt* copies exactly what was sent to Claude last time |
 
 ---
@@ -233,6 +235,9 @@ Canvas has two quiz systems. This works with **Classic Quizzes** — the address
 **"Claude declined to answer this one"**
 Claude's safety filters occasionally turn down a question — mostly ones that look like advanced biology or computer-security research. It automatically tries a different model first; this message means that one declined too. Answer that question yourself and press play to carry on, or pick a different model under **More → Model**.
 
+**"Could not get to the next question"**
+It answered, but couldn't find a way on from the answer page. The message lists what it pressed and the buttons it could see. Click Next (or the concept resource and *To Questions*) yourself and press play to carry on. If it keeps happening, turn on the **Answer log** under More, press play on the stuck question once more, and send the log, plus a screenshot of the bottom of the page.
+
 **It picked a wrong answer**
 It isn't perfect, especially on harder material. Under **More**, try setting **Model** to Sonnet 5.5, or add course context in **Notes**.
 
@@ -241,5 +246,7 @@ It isn't perfect, especially on harder material. Under **More**, try setting **M
 ## Privacy
 
 Your API key is stored in your own browser only. The text of the page you're on is sent to Anthropic to answer the question — that's how it works at all. When a question is a picture the text can't carry (a chart, or a table drawn as an image), a screenshot of the tab you're looking at goes with it; it isn't saved anywhere. Nothing is sent anywhere else, and there's no server in the middle collecting anything.
+
+On Connect it also keeps the **right answers** the page shows after a wrong one, in your browser only (a few words of the question and the right choices), so it can answer the same question again without asking Claude. Turn that off, or press **Clear**, under **More → Right answers**.
 
 If you turn on the **Answer log**, the questions and answers are also kept in your browser, and they stay there unless you press Download. Turning it off stops new entries; **Clear** deletes what's there.

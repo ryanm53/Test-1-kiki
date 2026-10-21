@@ -153,7 +153,26 @@ in full before answering:
   box after it are one line, even where the boxes carry no label.
 - Amounts as plain numbers: contra accounts and deductions as the page directs,
   usually shown positive in a deduction line. Where a total box is given, enter the
-  total of the lines above it.`;
+  total of the lines above it.
+
+A table asking for the EFFECTS of a transaction on the financial statements has a
+Balance Sheet (Assets, Liabilities, and Stockholders' Equity with Common Stock and
+Retained Earnings) above an Income Statement (Revenues, Expenses, Net Income). It
+is not a statement of balances; every box is a change:
+- Under Assets, Liabilities, Revenues and Expenses each line is one account: its
+  name from the dropdown, its amount in the box beside it. One line per account
+  affected; leave the other lines empty. Common Stock, Retained Earnings and Net
+  Income have no dropdown: an amount only (leave one empty if nothing changes).
+- An increase is a plain number and a decrease takes a minus sign, as the page's
+  note says: cash paid is a decrease in Cash. An expense is a deduction, so it is
+  entered with a minus sign, and Net Income is revenues and expenses as entered
+  added up. Net Income also flows to Retained Earnings, by the same amount, unless
+  a dividend is stated.
+- It must balance: the change in assets equals the change in liabilities plus the
+  change in stockholders' equity. Check before answering.
+- A question that first asks for a cost ("the initial cost of the equipment") has
+  its figures in the prose above: costs to buy the asset and get it ready for use
+  are its cost; costs of owning it afterward (insurance, upkeep) are expenses.`;
 
 // SIMnet simulates Excel, so a task is a procedure rather than an answer, and
 // the procedure itself is graded.
@@ -332,7 +351,7 @@ async function postToApi(apiKey, requestBody, betas = []) {
   throw err;
 }
 
-async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = [], isCanvas = false, retryHint = '', picture = null) {
+async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = [], isCanvas = false, retryHint = '', picture = null, instruction = '') {
   const model = resolveModel(modelId);
   const cfg = MODELS[model];
 
@@ -390,7 +409,8 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
     : picture.marked > 0
       ? 'A screenshot of the page is attached. Every item in the list below that is on screen is tagged in it with a small yellow number — the same number as in the list ([7] below is the tag 7 in the picture), outlined in red; an item with no tag is off screen. Use it to read anything the text leaves out — a picture, a chart, a table drawn as an image — and to tell apart items the list describes alike. You still answer with the numbers in the list.\n\n'
       : 'A screenshot of the page is attached. Use it to read anything the text below leaves out — a picture, a chart, a table drawn as an image. You still answer with the items listed below, by their numbers: the screenshot shows you the page, it does not replace the list.\n\n';
-  const userContent = `${pictureNote}${notesSection}${retrySection}${historySection}${questionSection}Page text:
+  const instructionSection = instruction ? `${instruction}\n\n` : '';
+  const userContent = `${instructionSection}${pictureNote}${notesSection}${retrySection}${historySection}${questionSection}Page text:
 ${pageText.slice(0, isWorksheet || isCanvas ? 4000 : isSimnet ? 1500 : 3500)}
 
 Elements (click by index):
@@ -950,8 +970,207 @@ async function inQuestionOrTop(tabId, frameId, msg) {
   return top?.success ? top : here;
 }
 
-async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true, log = null) {
+// ── Connect: from a graded question to the next one ─────────────────────────
+// Pressing Next isn't always enough. After a wrong answer Connect greys it out
+// until a concept resource has been opened ("Select a concept resource to
+// continue."), and the resource has its own way back — a To Questions / Back
+// to Questions button. The page side finds those by what they say (see
+// connectState in content.js); here is the order to press them in, and what to
+// do when none of them is there.
+
+const pause = ms => new Promise(r => setTimeout(r, ms));
+// Whatever else is on the page, these end or hand in the assignment
+const NEVER_PRESS = /submit|finish|\bexit\b|\bend\b|\bdone\b|hand in|turn in|quit|sign out|log ?out|delete|reset|start over|retake/i;
+
+// The question's frame and the page around it can each hold these buttons
+async function connectStateOf(tabId, frameId) {
+  const got = [];
+  for (const id of frameId === 0 ? [0] : [frameId, 0]) {
+    const s = await sendToTab(tabId, { type: 'CONNECT_STATE' }, id).catch(() => null);
+    if (s && !s.error) got.push(s);
+  }
+  const any = k => got.some(s => s[k]);
+  return {
+    graded: any('graded'), needsResource: any('needsResource'), resource: any('resource'),
+    back: any('back'), next: any('next'), nextWaiting: any('nextWaiting'),
+    buttons: [...new Set(got.flatMap(s => s.buttons ?? []))].slice(0, 14)
+  };
+}
+
+// Connect's verdict on the answer just given, from whichever frame shows it
+async function connectResultOf(tabId, frameId) {
+  for (const id of frameId === 0 ? [0] : [frameId, 0]) {
+    const r = await sendToTab(tabId, { type: 'CONNECT_RESULT' }, id).catch(() => null);
+    if (r?.verdict) return r;
+  }
+  return null;
+}
+
+// A click on a greyed-out Next does nothing and still "succeeds", so after one
+// the page is looked at: it has moved on when the graded view is gone and the
+// concept-resource notice isn't there
+async function movedOn(tabId, frameId, wasGraded) {
+  // Long enough for a slow page: calling a late arrival "stuck" would cost a call to the model
+  for (let i = 0; i < 8; i++) {
+    await pause(i ? 400 : 500);
+    const s = await connectStateOf(tabId, frameId);
+    if (s.needsResource) return false;
+    if (!wasGraded || !s.graded) return true;
+  }
+  return false;
+}
+
+// Gets from a graded question to the next one: Next if it's usable; the
+// concept resource first when the page asks for one; the way back from it
+// when that's what is on screen. When none of that works and `askModel` is
+// given, the model looks at the page and names the button to press. `tried`
+// is what has been pressed so far, for the model and for the error.
+async function advanceToNext(tabId, frameId, click, askModel) {
+  const press = (candidates, timeoutMs) => inQuestionOrTop(tabId, frameId, { type: 'CLICK_TEXT', candidates, timeoutMs });
+  const stopped = () => cancelledRuns.has(tabId);
+  const wasGraded = (await connectStateOf(tabId, frameId)).graded;
+  const tried = [];
+  let pressed = { resource: 0, back: 0 }, asked = 0, last = null;
+
+  for (let round = 0; round < 3; round++) {
+    for (let hop = 0; hop < 6; hop++) {
+      if (stopped()) return { stopped: true };
+      reportProgress(tabId, 1, 1);   // still working, as far as the bar's silence timer goes
+      const s = last = await connectStateOf(tabId, frameId);
+      const gated = s.needsResource || (s.nextWaiting && !s.next);
+
+      if (s.back && !s.next && pressed.back < 3) {
+        if ((await press([{ smart: 'back' }], 1500))?.success) { pressed.back++; tried.push('To Questions'); await pause(900); continue; }
+      } else if (gated && s.resource && pressed.resource < 2) {
+        if ((await press([{ smart: 'resource' }], 1500))?.success) { pressed.resource++; tried.push('Read About the Concept'); await pause(1000); continue; }
+      }
+
+      const r = await press(click.candidates, hop ? 1500 : gated ? 1200 : 2500);
+      if (r?.success && await movedOn(tabId, frameId, wasGraded)) return { success: true, tried };
+      // Pressed and still here, or nothing to press: what is on screen now
+      // decides the next hop; with nothing new to try, the hops are over
+      const after = await connectStateOf(tabId, frameId);
+      const more = (after.back && pressed.back < 3) || ((after.needsResource || after.nextWaiting) && after.resource && pressed.resource < 2);
+      if (!more) break;
+    }
+    if (!askModel || asked >= 2) break;
+    asked++;
+    const named = await askModel(tried).catch(() => null);
+    if (!named) break;
+    tried.push(named);
+    await pause(1000);
+  }
+  return { success: false, tried, buttons: last?.buttons ?? [], waiting: !!last?.nextWaiting || !!last?.needsResource };
+}
+
+// ── Answer memory ───────────────────────────────────────────────────────────
+// What Connect shows as the right answer is kept, and given the next time the
+// same question comes up — with no call to the model. A question is the same
+// when its words and its set of choices are, in whatever order the choices come
+// (Connect shuffles them). Only questions answered by ticking choices are kept.
+const BOOK_MAX = 800;
+let bookQueue = Promise.resolve();
+
+function changeBook(fn) {
+  const done = bookQueue.then(async () => {
+    const { answerBook } = await chrome.storage.local.get('answerBook').catch(() => ({}));
+    const next = fn(answerBook && typeof answerBook === 'object' ? answerBook : {});
+    if (!next) return;
+    // The oldest go first when it is full
+    const keys = Object.keys(next);
+    if (keys.length > BOOK_MAX) {
+      keys.sort((a, b) => (next[a].t ?? 0) - (next[b].t ?? 0)).slice(0, keys.length - BOOK_MAX).forEach(k => delete next[k]);
+    }
+    await chrome.storage.local.set({ answerBook: next });
+  });
+  bookQueue = done.catch(() => {});
+  return done;
+}
+
+const choiceKey = t => String(t ?? '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 100);
+const hasLabel = e => (e.type === 'radio' || e.type === 'checkbox') && !!e.text;
+
+// A short fixed-length fingerprint, so no long keys are kept
+function fingerprint(s) {
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+// Who this question is, from the page as first read — or null when it is not
+// one to remember: no ticking choices, or more than one question on the page
+function questionId(elements) {
+  const choices = elements.filter(hasLabel);
+  if (choices.length < 2) return null;
+  const all = [...new Set(choices.map(e => e.question).filter(Boolean))];
+  const qs = all.filter((q, _, a) => !a.some(o => o !== q && o.includes(q)));
+  if (qs.length !== 1) return null;
+  const labels = choices.map(e => choiceKey(e.text));
+  if (new Set(labels).size !== labels.length) return null;
+  return { key: fingerprint(choiceKey(qs[0]).slice(0, 600) + '\u0001' + [...labels].sort().join('\u0001')), labels, question: qs[0] };
+}
+
+// The click that gives the remembered answer, or null if it doesn't fit the page
+function recallAction(entry, elements) {
+  const picks = [];
+  for (const label of entry?.a ?? []) {
+    const i = elements.findIndex((e, j) => hasLabel(e) && !picks.includes(j) && choiceKey(e.text) === label);
+    if (i < 0) return null;
+    picks.push(i);
+  }
+  if (!picks.length) return null;
+  // A ticked box is left ticked: clicking it again would clear it
+  const todo = picks.filter(i => !elements[i].selected);
+  if (!todo.length) return null;
+  return picks.length === 1 ? { action: 'click', index: todo[0] } : { action: 'clickMany', indexes: todo };
+}
+
+// Nothing the page says to press worked: the model looks at the page — with a
+// screenshot, and tags on the buttons — and names the one that moves on.
+// Returns what it pressed, or null.
+const GET_UNSTUCK = `The question on this page has already been answered and graded. Do NOT answer it again. The run is stuck: it can't get to the next question. Choose the ONE button to press next:
+- "Next Question" (or Next / Continue) if it can be pressed;
+- if the page says a concept resource has to be opened first ("Select a concept resource to continue"), "Read About the Concept" or another concept resource;
+- if a reading or resource is open, the button that goes back to the questions ("To Questions", "Back to Questions").
+Never choose Submit, Finish, Exit, End, Done, or anything that hands in or leaves the assignment. Reply {"action":"click","index":N}, or {"action":"none"} if no such button is on the page.`;
+
+async function askWhatToPress({ apiKey, notes, tabId, frameId, model, log }, tried) {
+  let page = null, where = frameId;
+  const frames = frameId === 0 ? [0] : [frameId, 0];
+  for (const id of frames) {
+    const p = await sendToTab(tabId, { type: 'SCRAPE' }, id).catch(() => null);
+    if (!p?.elements?.length) continue;
+    if (!page) { page = p; where = id; }
+    if (p.elements.some(e => e.tag === 'button' || e.tag === 'a')) { page = p; where = id; break; }
+  }
+  if (!page) return null;
+
+  const picture = await captureTab(tabId, where);
+  const stopBeat = heartbeat(tabId, 1, 1);
+  const { action, request } = await callClaude(apiKey, notes, page.text ?? '', page.elements, model, false, false,
+    tried.map(t => `pressed "${t}"`), false, '', picture, GET_UNSTUCK).finally(stopBeat);
+  log?.steps.push({ round: 1, step: 0, attempt: 1, model: request.model, kind: 'getting past the answer',
+    prompt: request.prompt, action, answer: actionSummary(action, page.elements) });
+
+  if (action.action !== 'click' || badIndexes(action, page.elements.length).length) return null;
+  const label = page.elements[action.index]?.text ?? '';
+  if (!label || NEVER_PRESS.test(label)) return null;
+  const done = await sendToTab(tabId, { type: 'EXECUTE', action }, where).catch(() => null);
+  return done?.success ? label : null;
+}
+
+async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true, log = null, host = '', remember = false) {
   let usedModel = baseModel;   // reported back so the UI can show an upgrade
+  const isConnect = /(^|\.)mheducation\.com$/.test(host);
+  const useBook = remember && isConnect;   // the answer memory: Connect shows the right answer, so only there
+  let qid = null;          // this question as first read, to find it in the memory and to put it there
+  let recalled = false;    // the answer came from the memory, not the model
 
   // Resolve once per run: every scrape, click and fill must hit the same frame
   const frameId = await findQuestionFrame(tabId);
@@ -1063,14 +1282,25 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         // whichever model the page calls for: the cheap one for an ordinary
         // question, the stronger one for a table or a worksheet, which is where
         // reading the picture matters and the extra cost is worth it.
-        const simStuck = pageData.isSimnet && (ungradedDone > 0 || attempt > 0);
-        const picture = (pageData.isSimnet ? simStuck : (pageData.needsPicture || shotTried)) ? await captureTab(tabId, frameId) : null;
-        usedModel = escalated ? (UPGRADE_TO[baseModel] ?? baseModel) : pickModel(baseModel, pageData, autoUpgrade);
-        // A worksheet can think for longer than the bar's silence
-        // timer, which would call the run dead mid-answer
-        const stopBeat = heartbeat(tabId, step + 1, budget);
-        const { action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint, picture)
-          .finally(stopBeat);
+        // A question seen before, with its right answer kept: no need to ask
+        let action, request, picture = null;
+        if (useBook && !qid && completed === 0) qid = questionId(pageData.elements);
+        const recall = qid && !recalled && completed === 0 && !isSimnet && !isCanvas
+          ? recallAction(await bookEntry(qid.key), pageData.elements) : null;
+        if (recall) {
+          recalled = true;
+          action = recall;
+          request = { model: 'memory', kind: 'memory', prompt: 'The right answer to this question, as Connect showed it the last time it came up.' };
+        } else {
+          const simStuck = pageData.isSimnet && (ungradedDone > 0 || attempt > 0);
+          picture = (pageData.isSimnet ? simStuck : (pageData.needsPicture || shotTried)) ? await captureTab(tabId, frameId) : null;
+          usedModel = escalated ? (UPGRADE_TO[baseModel] ?? baseModel) : pickModel(baseModel, pageData, autoUpgrade);
+          // A worksheet can think for longer than the bar's silence
+          // timer, which would call the run dead mid-answer
+          const stopBeat = heartbeat(tabId, step + 1, budget);
+          ({ action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint, picture)
+            .finally(stopBeat));
+        }
 
         // Stop pressed while Claude was thinking: its answer is not acted on
         if (cancelledRuns.has(tabId)) {
@@ -1326,11 +1556,44 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   // snapshot goes just before the last one (Next), after the confidence
   // rating, when Connect is showing its verdict and before it moves on.
   if (!postClicks.length) await snapshot();
+
+  // The graded page says what the right answer was. Kept, so the same question
+  // is answered right next time — and if what was remembered turned out wrong,
+  // it is put right (or dropped, when the page doesn't say what was).
+  const learn = async () => {
+    if (!useBook || !qid) return;
+    const r = await connectResultOf(tabId, frameId);
+    if (!r?.verdict) return;
+    const said = r.verdict === 'correct' ? r.yours : r.correct;
+    const right = said.map(choiceKey).filter(k => qid.labels.includes(k));
+    const whole = right.length > 0 && right.length === said.length;
+    log?.verdicts.push({ round: 1, verdict: r.verdict, ...(r.verdict === 'incorrect' ? { right: r.correct } : {}) });
+    if (whole && (r.verdict === 'incorrect' || !recalled)) await rememberAnswer(qid, right).catch(() => {});
+    else if (!whole && r.verdict === 'incorrect' && recalled) await forgetAnswer(qid.key).catch(() => {});
+  };
+  // Nothing worked: the model looks at the page, and the stronger one the second time
+  let asks = 0;
+  const askModel = async tried => {
+    const model = asks++ && autoUpgrade && UPGRADE_TO[baseModel] ? UPGRADE_TO[baseModel] : pickModel(baseModel, {}, autoUpgrade);
+    if (model !== baseModel) usedModel = model;
+    return askWhatToPress({ apiKey, notes, tabId, frameId, model, log }, tried);
+  };
+
   for (const [i, click] of postClicks.entries()) {
     if (i === postClicks.length - 1) await snapshot();
     if (cancelledRuns.has(tabId)) {
       cancelledRuns.delete(tabId);
       return { success: false, error: 'Stopped.', usedModel };
+    }
+    if (click.advance) {
+      await learn().catch(() => {});
+      const moved = await advanceToNext(tabId, frameId, click, isConnect ? askModel : null);
+      if (moved.stopped) {
+        cancelledRuns.delete(tabId);
+        return { success: false, error: 'Stopped.', usedModel };
+      }
+      if (!moved.success) return { success: false, usedModel, error: stuckMessage(moved) };
+      continue;
     }
     const result = await inQuestionOrTop(tabId, frameId, {
       type: 'CLICK_TEXT',
@@ -1345,7 +1608,26 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
     await new Promise(r => setTimeout(r, 400));
   }
 
-  return { success: true, message: 'Done', usedModel };
+  return { success: true, message: 'Done', usedModel, ...(recalled ? { fromMemory: true } : {}) };
+}
+
+// ── Answer memory: reading and writing ─────────────────────────────────────
+async function bookEntry(key) {
+  await bookQueue;
+  const { answerBook } = await chrome.storage.local.get('answerBook').catch(() => ({}));
+  return answerBook?.[key] ?? null;
+}
+const rememberAnswer = (qid, labels) => changeBook(book => {
+  book[qid.key] = { a: labels, q: qid.question.slice(0, 80), t: Date.now() };
+  return book;
+});
+const forgetAnswer = key => changeBook(book => (key in book) ? (delete book[key], book) : null);
+
+// What the bar says when Next can't be reached: what was tried, and what was there
+function stuckMessage({ tried = [], buttons = [], waiting = false }) {
+  const did = tried.length ? ` It pressed ${tried.map(t => `"${t}"`).join(', then ')}.` : '';
+  const seen = buttons.length ? ` On the page: ${buttons.map(b => `"${b.slice(0, 30)}"`).join(', ')}.` : '';
+  return `Could not get to the next question${waiting ? ' (Next is greyed out; a concept resource may need opening)' : ''}.${did}${seen} Click Next yourself, then press play.`;
 }
 
 // ── Answer log ─────────────────────────────────────────────────────────────
@@ -1545,11 +1827,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'BOOK_COUNT') {
+    bookQueue.then(() => chrome.storage.local.get('answerBook')).then(
+      ({ answerBook }) => sendResponse({ count: Object.keys(answerBook ?? {}).length }),
+      () => sendResponse({ count: 0 }));
+    return true;
+  }
+
+  if (msg.type === 'BOOK_CLEAR') {
+    changeBook(() => ({})).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+    return true;
+  }
+
   if (msg.type !== 'RUN_GOAL') return;
 
   (async () => {
-    const { apiKey: rawKey, model: savedModel, autoUpgrade, keepLog } =
-      await chrome.storage.local.get(['apiKey', 'model', 'autoUpgrade', 'keepLog']).catch(() => ({}));
+    const { apiKey: rawKey, model: savedModel, autoUpgrade, keepLog, rememberAnswers } =
+      await chrome.storage.local.get(['apiKey', 'model', 'autoUpgrade', 'keepLog', 'rememberAnswers']).catch(() => ({}));
     const baseModel = resolveModel(savedModel);
     const apiKey = cleanKey(rawKey);
     if (!apiKey) {
@@ -1569,7 +1863,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     let result;
     try {
-      result = await runGoal(apiKey, msg.notes ?? '', tabId, msg.postClicks ?? [], baseModel, autoUpgrade !== false, log);
+      result = await runGoal(apiKey, msg.notes ?? '', tabId, msg.postClicks ?? [], baseModel, autoUpgrade !== false, log,
+        hostOf(sender.url ?? sender.tab?.url), rememberAnswers !== false);
     } catch (e) {
       // Anything unexpected still has to come back as an answer. Without this
       // the reply never arrives and the widget sits on "Answering…" forever.

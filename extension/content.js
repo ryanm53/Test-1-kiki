@@ -284,12 +284,25 @@ function tableLabel(el) {
     Array.from(rows[i].children).some(isSheetCell);
   // A data row holds something answerable or names itself in the first column
   const isData = i => hasTargets(i) || !!cellText(grid[i][0]);
-  const rowNo = () => rows.slice(0, at.r + 1).filter((_, i) => isData(i)).length;
+
+  // Dropdowns in several columns of one row — a balance sheet and an income
+  // statement side by side, each line an account's name and its amount. A
+  // dropdown there names only the box right beside it: taking the leftmost
+  // would call the Liabilities amount "named by" the Assets dropdown. And the
+  // heading rows that start with a word ("Assets") aren't lines to count.
+  const paired = Array.from(new Set(grid[at.r])).filter(x => x?.querySelector?.(DROP_SEL)).length >= 2;
+  const rowNo = () => rows.slice(0, at.r + 1).filter((_, i) => paired ? hasTargets(i) : isData(i)).length;
 
   // Row header: the first real text left of this cell. A "$" beside a box
   // names nothing; a row named by a dropdown ("Less: Allowance…", picked by
   // the student) says so, and which row it is.
   let rowLabel = '';
+  if (paired) {
+    const left = at.c > 0 ? grid[at.r][at.c - 1] : null;
+    const drop = left && left !== cell ? left.querySelector(DROP_SEL) : null;
+    rowLabel = drop ? `row ${rowNo()}, named by its dropdown (${chosenText(drop) ? `"${chosenText(drop)}"` : 'not chosen yet'})`
+      : el.matches(DROP_SEL) ? `row ${rowNo()}'s name` : `row ${rowNo()}`;
+  }
   for (let c = 0; c < at.c && !rowLabel; c++) {
     const left = grid[at.r][c];
     if (!left || left === cell) continue;
@@ -1262,6 +1275,131 @@ const painted = () => new Promise(resolve => {
   setTimeout(finish, 400);   // a background tab never draws frames: don't wait on them
 });
 
+// ── Connect: getting from a graded question to the next one ─────────────────
+// A question answered wrongly isn't the end of it. Connect greys out Next
+// Question and says "Select a concept resource to continue."; picking one
+// ("Read About the Concept") opens the reading, and a To Questions / Back to
+// Questions button at the top right closes it again — after which Next works.
+// None of those buttons is worded or marked the same on every page, so they're
+// found by what they say, not by a selector.
+const BUTTON_SEL = 'button, [role="button"], a[href], [role="link"], input[type="button"], input[type="submit"]';
+const labelOf = el => (el.getAttribute('aria-label') || el.innerText || el.value || el.getAttribute('title') || '')
+  .replace(/\s+/g, ' ').trim();
+const isDisabled = el => !!el.disabled || el.getAttribute('aria-disabled') === 'true'
+  || /(^|[\s_-])disabled($|[\s_-])/i.test(el.className || '');
+
+// How well a button is the one meant by `kind` (0: not it)
+function buttonScore(el, kind) {
+  const t = labelOf(el);
+  if (!t || t.length > 60) return 0;
+  const id = el.getAttribute('data-automation-id') || '';
+  if (kind === 'next') {
+    // Never the way back, and never the one that hands the assignment in
+    if (/previous|prior|\bback\b|skip|submit|finish|\bexit\b|\bend\b/i.test(t)) return 0;
+    if (/^next( question)?[\s>›»→]*$/i.test(t)) return 4;
+    if (/^(next|continue)\b/i.test(t)) return 3;
+    if (/\bnext\b/i.test(t) && t.length < 30) return 2;
+    if (/next/i.test(id) || /(^|[\s_-])next[-_ ]?(button|question)?($|[\s_-])/i.test(el.className || '')) return 1;
+    return 0;
+  }
+  if (kind === 'resource') {
+    if (/read about the concept/i.test(t)) return 3;
+    if (/clarify with ai reader/i.test(t)) return 1;   // a chat panel, not the page; the last choice
+    return 0;
+  }
+  if (kind === 'back') {
+    if (/^(back |return )?to questions?$/i.test(t)) return 3;
+    if (/\b(to|back to|return to) (the )?questions?\b/i.test(t)) return 2;
+    return 0;
+  }
+  return 0;
+}
+
+// The best usable button of a kind, or null. `disabled` finds the best
+// greyed-out one instead — to know a Next is there but waiting for something.
+function smartFind(kind, { disabled = false } = {}) {
+  let best = null, top = 0;
+  for (const el of document.querySelectorAll(BUTTON_SEL)) {
+    if (el.closest('#__cap-host, #__cap-marks') || !isRendered(el)) continue;
+    if (isDisabled(el) !== disabled) continue;
+    const sc = buttonScore(el, kind);
+    if (sc > top) { top = sc; best = el; }
+  }
+  return best;
+}
+
+// Where a stuck Connect page is, for the background to decide what to press
+function connectState() {
+  const text = document.body?.innerText ?? '';
+  return {
+    graded: GRADED.test(text),
+    needsResource: /select a concept resource to continue/i.test(text),
+    resource: !!smartFind('resource'),
+    back: !!smartFind('back'),
+    next: !!smartFind('next'),
+    nextWaiting: !!smartFind('next', { disabled: true }),
+    // What can be pressed, so a failure says what was there
+    buttons: Array.from(document.querySelectorAll(BUTTON_SEL))
+      .filter(el => isRendered(el) && !el.closest('#__cap-host, #__cap-marks'))
+      .map(labelOf).filter(Boolean).slice(0, 14)
+  };
+}
+
+const sameText = (a, b) => squash(a) === squash(b);
+// Connect's "Your Answer <pill>" line: the pill says correct or incorrect
+const GRADED = /Your Answer\s*([a-z ]*?)\s*(incorrect|correct)\b/i;
+
+// Connect's verdict on the answer just given, with what the right one was. The
+// page says "Your Answer" with a pill reading correct or incorrect; a wrong
+// answer is followed by a "Correct Answer" box listing the right ones. The
+// right ones are taken as the page's own choices whose words appear in that
+// box — so a stray line of explanation can't be mistaken for an answer.
+function connectResult() {
+  const text = document.body?.innerText ?? '';
+  const m = GRADED.exec(text);
+  const verdict = m ? (/incorrect|partially|not/i.test(m[0]) ? 'incorrect' : 'correct') : null;
+
+  const choices = Array.from(document.querySelectorAll('input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]'))
+    .filter(isRendered)
+    .map(el => ({ label: accessibleText(el).trim(), on: el.checked === true || el.getAttribute('aria-checked') === 'true' }))
+    .filter(c => c.label);
+
+  // The lines under a "Correct Answer" heading
+  let lines = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (!/^Correct Answers?:?$/i.test(node.nodeValue.trim())) continue;
+    const heading = node.parentElement;
+    if (!heading || !isRendered(heading)) continue;
+    for (let box = heading.parentElement, i = 0; box && box !== document.body && i < 4; box = box.parentElement, i++) {
+      const got = (box.innerText ?? '').split('\n').map(l => l.trim()).filter(Boolean)
+        .filter(l => !/^Correct Answers?:?$/i.test(l));
+      if (got.length) { lines = got; break; }
+    }
+    break;
+  }
+  // The box may say a choice with its letter, or in part: when no line matches
+  // a choice exactly, one that holds the other will do
+  // (a line holding the whole choice, or a line that is most of it; and where
+  // one choice is part of another, only the longer)
+  const near = (line, label) => {
+    const x = squash(line), y = squash(label);
+    return y.length >= 6 && (x.includes(y) || (y.includes(x) && x.length >= y.length * 0.6));
+  };
+  let correct = choices.filter(c => lines.some(l => sameText(l, c.label))).map(c => c.label);
+  if (!correct.length) {
+    const hit = choices.filter(c => lines.some(l => near(l, c.label))).map(c => c.label);
+    correct = hit.filter(a => !hit.some(b => b !== a && squash(b).includes(squash(a))));
+  }
+  return {
+    verdict,
+    yours: choices.filter(c => c.on).map(c => c.label),
+    correct,
+    lines: lines.slice(0, 12)
+  };
+}
+
 // After the extension is reloaded or updated, an already-open page keeps
 // running this old copy, but its link back to the extension is dead: every
 // chrome.* call throws "Extension context invalidated". Nothing here may throw
@@ -1710,6 +1848,19 @@ function bgSend(msg, cb) {
         </div>
         <div class="row-hint">Saves each question it answers, and how the page looked afterwards, in this browser only. When an answer was wrong, tap the thumbs-down on the bar. Download the log to share it.</div>
 
+        <div class="label">Right answers</div>
+        <div class="group">
+          <div class="row">
+            <span class="row-label">Remember them</span>
+            <div class="switch on" id="bookSw" role="switch" aria-checked="true" tabindex="0"></div>
+          </div>
+          <div class="row" id="bookRow" hidden>
+            <span class="row-label" id="bookCount">Nothing remembered yet</span>
+            <button class="inline-btn quiet" id="bookClear">Clear</button>
+          </div>
+        </div>
+        <div class="row-hint">On McGraw Hill Connect, when an answer is marked wrong the page shows the right one. Page Agent keeps it, in this browser only, and gives it the next time that question comes up, with no call to Claude.</div>
+
         <div class="label">Troubleshooting</div>
         <div class="group">
           <div class="row">
@@ -1751,6 +1902,7 @@ function bgSend(msg, cb) {
   const copyPromptBtn = $('copyPrompt');
   const flagBtn = $('flag'), logSw = $('logSw'), logRow = $('logRow'), logCount = $('logCount');
   const logDownloadBtn = $('logDownload'), logClearBtn = $('logClear');
+  const bookSw = $('bookSw'), bookRow = $('bookRow'), bookCount = $('bookCount'), bookClearBtn = $('bookClear');
   const checkPageBtn = $('checkPage'), checkResult = $('checkResult');
   const root = $('root'), hideBtn = $('hide'), toast = $('toast');
 
@@ -1765,6 +1917,7 @@ function bgSend(msg, cb) {
   let notes = '';          // optional user context, sent only when non-empty
   let hasKey = false;
   let keepLog = false;     // the answer log, off unless switched on
+  let remember = true;     // keep the right answers Connect shows, on unless switched off
   let canFlag = false;     // a run has finished here since the last thumbs-down
   let pageKind = '';       // what the page looks like — "Canvas quiz" — shown when idle
   // Declared up here, not beside the detection code, because the settings
@@ -1772,6 +1925,7 @@ function bgSend(msg, cb) {
   // been reloaded) — before a later `let` would exist.
   let detectTimer = null, detectedHref = '', retriedHref = '';
   let lastModel = '';    // model the most recent question actually used
+  let fromMemory = false;  // ...or the answer came from the memory, not a model
 
   let isRunning = false;   // a request is in flight
   let waiting   = false;   // between questions, watching for the page to change
@@ -1795,7 +1949,7 @@ function bgSend(msg, cb) {
         // Where Connect does need it, Next stays disabled without it — so a
         // genuinely missed click still surfaces, just one step later.
         { label: 'High Confidence', optional: true, candidates: [{ selector: '[data-automation-id="confidence-buttons--high_confidence"]' }, { ariaLabel: 'High Confidence' }] },
-        { label: 'Next Question',   candidates: [{ selector: '.next-button' }, { text: 'Next Question' }, { text: 'Next' }] }
+        { label: 'Next Question',   advance: true, candidates: [{ selector: '.next-button' }, { text: 'Next Question' }, { text: 'Next' }, { smart: 'next' }] }
       ]
     },
     { label: 'Answer only', postClicks: [] }
@@ -1893,7 +2047,8 @@ function bgSend(msg, cb) {
 
     if (answered > 0 && !errorMsg) text += ` · ${answered}`;
     // Show the model only when it differs from the one the run started on
-    if (lastModel && lastModel !== baseModel() && !errorMsg) {
+    if (fromMemory && !errorMsg) text += ' · remembered';
+    else if (lastModel && lastModel !== baseModel() && !errorMsg) {
       text += ` · ↑ ${MODEL_LIST.find(m => m.id === lastModel)?.label ?? lastModel}`;
     }
 
@@ -1938,7 +2093,7 @@ function bgSend(msg, cb) {
 
   // ── Persistence ────────────────────────────────────────────────────────────
   store.get(
-    ['mode', 'lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'model', 'barPos', 'keepLog', 'barHidden'],
+    ['mode', 'lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'model', 'barPos', 'keepLog', 'barHidden', 'rememberAnswers'],
     s => {
       setHidden(s.barHidden === true, false);
 
@@ -1971,6 +2126,10 @@ function bgSend(msg, cb) {
       keepLog = s.keepLog === true;
       logSw.classList.toggle('on', keepLog);
       logSw.setAttribute('aria-checked', String(keepLog));
+
+      remember = s.rememberAnswers !== false;
+      bookSw.classList.toggle('on', remember);
+      bookSw.setAttribute('aria-checked', String(remember));
 
       // Where the user last parked the bar. Clamped on the way in, so a
       // position saved on a bigger screen still lands somewhere visible.
@@ -2032,7 +2191,7 @@ function bgSend(msg, cb) {
     const open = more.hidden;
     more.hidden = !open;
     moreBtn.setAttribute('aria-expanded', String(open));
-    if (open) refreshLogCount();
+    if (open) { refreshLogCount(); refreshBookCount(); }
   });
 
   // ── Answer log ────────────────────────────────────────────────────────────
@@ -2056,6 +2215,38 @@ function bgSend(msg, cb) {
   logSw.addEventListener('click', () => setKeepLog(!keepLog));
   logSw.addEventListener('keydown', e => {
     if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setKeepLog(!keepLog); }
+  });
+
+  // ── Right answers ─────────────────────────────────────────────────────────
+  function refreshBookCount() {
+    bgSend({ type: 'BOOK_COUNT' }, res => {
+      const n = res?.count ?? 0;
+      bookCount.textContent = n ? `${n} answer${n === 1 ? '' : 's'} remembered` : 'Nothing remembered yet';
+      bookClearBtn.disabled = n === 0;
+      bookRow.hidden = n === 0;
+    });
+  }
+  function setRemember(on) {
+    remember = on;
+    bookSw.classList.toggle('on', on);
+    bookSw.setAttribute('aria-checked', String(on));
+    store.set({ rememberAnswers: on });
+  }
+  bookSw.addEventListener('click', () => setRemember(!remember));
+  bookSw.addEventListener('keydown', e => {
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setRemember(!remember); }
+  });
+  let bookArmed = null;
+  bookClearBtn.addEventListener('click', () => {
+    if (!bookArmed) {
+      bookClearBtn.textContent = 'Tap again to clear';
+      bookArmed = setTimeout(() => { bookArmed = null; bookClearBtn.textContent = 'Clear'; }, 3000);
+      return;
+    }
+    clearTimeout(bookArmed);
+    bookArmed = null;
+    bookClearBtn.textContent = 'Clear';
+    bgSend({ type: 'BOOK_CLEAR' }, () => refreshBookCount());
   });
 
   flagBtn.addEventListener('click', () => {
@@ -2320,6 +2511,7 @@ function bgSend(msg, cb) {
     paused = false;
     answered = 0;
     lastModel = '';
+    fromMemory = false;
     if (!hasKey) { togglePanel(true); keyInput.focus(); return; }
     triggerRun();
   });
@@ -2395,6 +2587,7 @@ function bgSend(msg, cb) {
         }
 
         lastModel = result.usedModel ?? '';
+        fromMemory = result.fromMemory === true;
         answered++;
 
         if (result.finished) {
@@ -2619,6 +2812,26 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'CONNECT_STATE') {
+    sendResponse(connectState());
+    return false;
+  }
+
+  if (msg.type === 'CONNECT_RESULT') {
+    sendResponse(connectResult());
+    return false;
+  }
+
+  if (msg.type === 'SCROLL_END') {
+    // A button that's below the fold: the page, and any box of its own that scrolls
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    for (const el of document.querySelectorAll('*')) {
+      if (el.scrollHeight > el.clientHeight + 40 && /(auto|scroll)/.test(getComputedStyle(el).overflowY)) el.scrollTop = el.scrollHeight;
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (msg.type === 'MARK') {
     // Tags on the listed items, then a paint, then the answer — the caller
     // captures the screen once it has it
@@ -2661,7 +2874,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const all = Array.from(document.querySelectorAll('button, [role="button"], a')).filter(usable);
         for (const c of candidates) {
           let el = null;
-          if (c.selector) el = Array.from(document.querySelectorAll(c.selector)).find(usable);
+          if (c.smart) el = smartFind(c.smart);
+          else if (c.selector) el = Array.from(document.querySelectorAll(c.selector)).find(usable);
           else if (c.ariaLabel) el = all.find(b => (b.getAttribute('aria-label') || '').toLowerCase().includes(c.ariaLabel.toLowerCase()));
           else if (c.text) el = all.find(b => (b.innerText || b.textContent || '').trim().toLowerCase().includes(c.text.toLowerCase()));
           if (el) return el;
@@ -2676,7 +2890,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       }
 
       if (!found) {
-        sendResponse({ success: false, error: 'Button not found after 5s' });
+        // What was on the page to press, so a failure can say so
+        const seen = connectState();
+        sendResponse({ success: false, error: `Button not found after ${Math.round((Number(msg.timeoutMs) > 0 ? Number(msg.timeoutMs) : 5000) / 1000)}s`,
+                       buttons: seen.buttons, waiting: seen.nextWaiting });
         return;
       }
 
