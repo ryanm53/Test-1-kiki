@@ -29,6 +29,7 @@ const SUITES = [
   ['test-package.js',    'The Chrome Web Store upload: complete, and a listing the store accepts'],
   ['test-statements.js', 'Accounting: a data table in the question; statements of dropdowns and amounts'],
   ['test-effects.js',    'Accounting: financial statement effects, a dropdown and a box on each line'],
+  ['test-simnet-formula.js', 'SIMnet formulas: typed whole, checked before Enter, never handed in damaged'],
   ['test-screenshot.js', 'A screenshot when the text can\'t carry the question'],
   ['test-marks.js',      'Numbered tags on the screenshot: right numbers, up for the capture, always taken down'],
   ['test-labels.js',     'Accounting worksheet: column and row labels'],

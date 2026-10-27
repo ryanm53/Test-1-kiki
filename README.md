@@ -235,6 +235,9 @@ Canvas has two quiz systems. This works with **Classic Quizzes** — the address
 **"Claude declined to answer this one"**
 Claude's safety filters occasionally turn down a question — mostly ones that look like advanced biology or computer-security research. It automatically tries a different model first; this message means that one declined too. Answer that question yourself and press play to carry on, or pick a different model under **More → Model**.
 
+**SIMnet: a formula comes out wrong or half-typed**
+SIMnet's lists of function names can wipe what was typed so far. Page Agent types a formula in stages, checks the cell before pressing Enter, and puts back anything that went missing; if it can't get a formula in whole it stops and says so rather than hand in a wrong one. If it does, turn on the **Answer log**, run that question again, and send the log: it records which way worked.
+
 **"Could not get to the next question"**
 It answered, but couldn't find a way on from the answer page. The message lists what it pressed and the buttons it could see. Click Next (or the concept resource and *To Questions*) yourself and press play to carry on. If it keeps happening, turn on the **Answer log** under More, press play on the stuck question once more, and send the log, plus a screenshot of the bottom of the page.
 

@@ -54,6 +54,8 @@ const server = http.createServer((req, res) => { res.writeHead(200, { 'content-t
     args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, '--no-proxy-server', '--host-resolver-rules=MAP *.mheducation.com 127.0.0.1']
   });
   let [sw] = ctx.serviceWorkers(); if (!sw) sw = await ctx.waitForEvent('serviceworker');
+  // The worker's Chrome APIs aren't always there the instant it appears
+  for (let i = 0; i < 50 && await sw.evaluate(() => typeof chrome?.storage?.local).catch(() => '') !== 'object'; i++) await new Promise(r => setTimeout(r, 100));
   await sw.evaluate(() => chrome.storage.local.set({ apiKey: 'sk-ant-api03-demo', mode: 'one', lastPresetIndex: 0, autoContinue: false, autoUpgrade: true, model: 'claude-haiku-5-5' }));
   await sw.evaluate(() => {
     globalThis.__reqs = [];

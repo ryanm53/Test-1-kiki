@@ -299,6 +299,27 @@ change between sites.
   `(in: Headings)` for Sheet Options' two Print boxes). And on a graded page
   (the attempt counter is showing), "done" with no popup means nothing was
   graded: the model is told so and continues, twice at most.
+- **SIMnet formulas** — from a real log of 8 formula tasks, 7 graded wrong though
+  every formula was right. SIMnet's own report of the steps said why: `typed =RIG
+  in cell D2, typed HT(A2,2) in cell D2`. The function-name list that opens after
+  `=` and three letters, and the argument hint after `(`, reset SIMnet's editor,
+  and what had been typed before was gone (the cell held `HT(A2,2)`); the one
+  that came out right had been typed in one chunk. Keys went 25 ms apart.
+  `typeFormula` (background) now types a formula starting `=` in stages that end
+  where those open (`stagesOf`: three characters, after each `(`, every 12), and
+  after each asks the page (`READ_EDIT`, content.js) what the editor holds. The
+  page answers `match`, or `have` — only the *tail* of what was typed, in a text
+  box or twice in the page's lines (formula bar and cell): the one symptom taken
+  as damage; a cell reference like the Name Box's `D2` never is, and anything
+  else is "can't tell", which carries on as before. Damage is cleared (Backspace)
+  and typed again at 110 ms a key. Failing that the cell is cancelled (Escape)
+  and tried another way: `=` as a key and the rest inserted whole
+  (`Input.insertText`), then one key at a time at 200 ms. Enter is never pressed
+  on a formula known to be damaged: the last resort is an error naming what was
+  wanted. Each run's log entry has `typing`: the formula, and which way worked
+  and how many repairs. Plain values still go in at 25 ms with nothing read back.
+  `scripts/real-chrome-simnet.js` reproduces the fault in real Chromium (the old
+  code leaves `2)` in the cell).
 - **SIMnet grading** — SIMnet grades with a popup: a "Correct"/"Incorrect"
   heading, a HINT with the exact steps on a wrong answer, and one Continue
   button (back to the question after a wrong try, on to the next after a

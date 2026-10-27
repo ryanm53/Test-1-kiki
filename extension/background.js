@@ -630,6 +630,8 @@ const KEYS = {
   left:  { key: 'ArrowLeft',  code: 'ArrowLeft',  vk: 37 },
   right: { key: 'ArrowRight', code: 'ArrowRight', vk: 39 },
   enter: { key: 'Enter',      code: 'Enter',      vk: 13, text: '\r' },
+  escape:    { key: 'Escape',    code: 'Escape',    vk: 27 },
+  backspace: { key: 'Backspace', code: 'Backspace', vk: 8 },
   tab:   { key: 'Tab',        code: 'Tab',        vk:  9, text: '\t' }
 };
 
@@ -656,7 +658,7 @@ function virtualKey(ch) {
 // Type a value as real keystrokes. Input.insertText would be simpler, but it
 // inserts text without ever producing a keydown — and a spreadsheet only opens
 // its editor once it sees a real keypress, so the characters go nowhere.
-async function typeText(tabId, text) {
+async function typeText(tabId, text, pace = 25) {
   for (const ch of text) {
     const vk = virtualKey(ch);
     const base = { key: ch, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk };
@@ -666,8 +668,89 @@ async function typeText(tabId, text) {
     await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
       type: 'keyUp', ...base
     });
-    await new Promise(r => setTimeout(r, 25));
+    await new Promise(r => setTimeout(r, pace));
   }
+}
+
+// ── A formula, typed so that it arrives whole ───────────────────────────────
+// In a real SIMnet log, 7 formulas of 8 were graded wrong though each was the
+// right one. SIMnet's own report says why: "typed =RIG in cell D2, typed
+// HT(A2,2) in cell D2". The list of function names that opens after "=RIG", and
+// the argument hint that opens after "(", reset the editor, and everything typed
+// before them was gone. The one that came out right was typed in one go.
+//
+// So a formula goes in stages, each ending where one of those opens, with a
+// look at the editor after each (READ_EDIT in content.js). Text that has gone is
+// cleared and typed again, slower. Failing that, the cell is cancelled and
+// tried again a different way: "=" as a key press and the rest inserted whole,
+// then one key at a time, slowly. Enter is never pressed on text that is known
+// to be damaged: the last resort is to say so.
+function stagesOf(text) {
+  const stops = new Set([Math.min(3, text.length), text.length]);
+  [...text].forEach((ch, i) => { if (ch === '(') stops.add(i + 1); });
+  for (let i = 12; i < text.length; i += 12) stops.add(i);
+  return [...stops].filter(n => n > 0).sort((a, b) => a - b);
+}
+
+async function checkEdit(tabId, frameId, expected, wait) {
+  await new Promise(r => setTimeout(r, wait));
+  const r = await sendToTab(tabId, { type: 'READ_EDIT', expect: expected }, frameId).catch(() => null);
+  if (r?.match) return { state: 'ok' };
+  if (r && typeof r.have === 'string') return { state: 'lost', have: r.have };
+  return { state: 'unknown' };
+}
+
+async function typeInStages(tabId, frameId, text, pace, repairs) {
+  let done = 0, seen = false, fixed = 0;
+  for (const stop of stagesOf(text)) {
+    await typeText(tabId, text.slice(done, stop), pace);
+    done = stop;
+    for (let tries = 0; ; tries++) {
+      const c = await checkEdit(tabId, frameId, text.slice(0, done), done <= 3 ? 600 : 350);
+      if (c.state === 'ok') { seen = true; break; }
+      if (c.state === 'unknown') break;     // nothing to go by: carry on, as before
+      if (tries >= repairs) return { ok: false, have: c.have, seen, fixed };
+      fixed++;
+      for (let i = 0; i < c.have.length + 2; i++) await pressKey(tabId, 'backspace');
+      await new Promise(r => setTimeout(r, 150));
+      await typeText(tabId, text.slice(0, done), 110);
+    }
+    reportProgress(tabId, 1, 1);
+  }
+  return { ok: true, seen, fixed };
+}
+
+async function typeInserted(tabId, frameId, text) {
+  await typeText(tabId, text.slice(0, 1), 60);
+  if (text.length > 1) await chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: text.slice(1) });
+  const c = await checkEdit(tabId, frameId, text, 700);
+  return { ok: c.state === 'ok', have: c.have, seen: c.state === 'ok', fixed: 0 };
+}
+
+// `reopen` opens the cell for typing again; `trail` collects what each way came to
+async function typeFormula(tabId, frameId, text, reopen, trail) {
+  const ways = [
+    ['keys', () => typeInStages(tabId, frameId, text, 60, 2)],
+    ['inserted', () => typeInserted(tabId, frameId, text)],
+    ['slow', async () => { const r = await typeInStages(tabId, frameId, text, 200, 0); return { ...r, ok: r.ok && r.seen }; }]
+  ];
+  let have = '';
+  for (const [i, [how, go]] of ways.entries()) {
+    if (i) {
+      await pressKey(tabId, 'escape');
+      await new Promise(r => setTimeout(r, 300));
+      if (!(await reopen())?.success) break;
+      await attachDebugger(tabId);
+    }
+    const r = await go();
+    trail.push({ way: how, ok: r.ok, repaired: r.fixed, verified: r.seen, ...(r.have !== undefined ? { have: r.have } : {}) });
+    if (r.ok) return r;
+    have = r.have ?? have;
+  }
+  await pressKey(tabId, 'escape').catch(() => {});
+  const err = new Error(`SIMnet's formula box kept losing what was typed: it should read ${text} but shows ${have || 'something else'}. Type this one in yourself.`);
+  err.final = true;
+  throw err;
 }
 
 // Spreadsheet cells (jQuery.sheet) have no input to set — the cell is selected
@@ -1401,7 +1484,17 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
           // cell and says so; the keys go through the debugger.
           if (result?.success && result.needsKeys) {
             await attachDebugger(tabId);
-            await typeText(tabId, action.text);
+            if (isSimnet && /^=/.test(action.text ?? '')) {
+              // A formula: in stages, each looked at (see typeFormula)
+              const trail = [];
+              try {
+                await typeFormula(tabId, frameId, action.text, () => sendToTab(tabId, { type: 'EXECUTE', action }, frameId), trail);
+              } finally {
+                if (log) (log.typing = log.typing ?? []).push({ text: action.text, trail });
+              }
+            } else {
+              await typeText(tabId, action.text);
+            }
           }
         }
 

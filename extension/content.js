@@ -1275,6 +1275,35 @@ const painted = () => new Promise(resolve => {
   setTimeout(finish, 400);   // a background tab never draws frames: don't wait on them
 });
 
+// ── A formula being typed into a spreadsheet ────────────────────────────────
+// SIMnet opens a list of function names after "=" and three letters, and an
+// argument hint after "(". In a real log each one reset the editor, and what had
+// been typed before it was gone: "=RIGHT(A2,2)" came out as "HT(A2,2)". The
+// background types in stages and asks here, after each, what the editor holds.
+// match: it holds exactly this. have: it holds only the tail of it — the symptom,
+// and the only thing taken as damage. Neither: it can't be told from here.
+const CELL_REF = /^\$?[A-Z]{1,3}\$?\d{1,7}(:\$?[A-Z]{1,3}\$?\d{1,7})?$/;
+function readEdit(expect) {
+  const clean = t => String(t ?? '').replace(/\u00a0/g, ' ').replace(/\s+$/, '');
+  const want = clean(expect);
+  const boxes = [document.activeElement, ...document.querySelectorAll('[contenteditable], input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="password"]), textarea')]
+    .filter((el, i, all) => el && all.indexOf(el) === i && el.matches?.('[contenteditable], input, textarea')
+      && !el.closest('#__cap-host, #__cap-marks') && isRendered(el));
+  const texts = boxes.map(el => ({ t: clean(el.matches('input, textarea') ? el.value : el.innerText), active: el === document.activeElement }));
+  const lines = (document.body?.innerText ?? '').split('\n').map(clean);
+  if (texts.some(x => x.t === want) || lines.includes(want)) return { match: true, have: want };
+
+  const tail = t => t !== want && want.endsWith(t) && !CELL_REF.test(t.trim());
+  // A box being edited: even an empty one that has the focus has lost it
+  const box = texts.find(x => (x.t.length > 1 || (x.active && x.t === '')) && tail(x.t));
+  if (box) return { match: false, have: box.t };
+  // The formula bar and the cell both show the editor: the same remnant twice
+  const seen = new Map();
+  for (const l of lines) if (l.length > 1 && tail(l)) seen.set(l, (seen.get(l) ?? 0) + 1);
+  const twice = [...seen].find(([, n]) => n >= 2);
+  return { match: false, have: twice ? twice[0] : null };
+}
+
 // ── Connect: getting from a graded question to the next one ─────────────────
 // A question answered wrongly isn't the end of it. Connect greys out Next
 // Question and says "Select a concept resource to continue."; picking one
@@ -2810,6 +2839,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       sendResponse({ success: true });
     })().catch(e => sendResponse({ success: false, error: e?.message ?? String(e) }));
     return true;
+  }
+
+  if (msg.type === 'READ_EDIT') {
+    sendResponse(readEdit(String(msg.expect ?? '')));
+    return false;
   }
 
   if (msg.type === 'CONNECT_STATE') {
