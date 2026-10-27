@@ -320,6 +320,24 @@ change between sites.
   and how many repairs. Plain values still go in at 25 ms with nothing read back.
   `scripts/real-chrome-simnet.js` reproduces the fault in real Chromium (the old
   code leaves `2)` in the cell).
+- **SIMnet, from a second exam** (40 formula tasks, 70% right): the log showed more
+  than the typing fault. (1) The reply schema names every field, so the model fills
+  the ones it has no use for with `""`: six runs stopped on `from must be a cell
+  address like B7, got: ""` after a good click. Empty and `null` fields (and
+  `row: 0`) are now dropped before the reply is checked. (2) A line break on the end
+  of typed text is dropped: Enter is a key press of its own. (3) After Enter or OK,
+  on a graded exam, the verdict is waited for (up to 3s) before the next call: a
+  popup that hadn't arrived yet read as "not graded", and the model went off to the
+  Formulas ribbon's Function Arguments dialog, which needs more steps than it has.
+  (4) That dialog redraws its boxes after each is filled, so an element the model
+  chose could be gone by the time of the fill ("[16] left the page"): `liveElement`
+  finds its twin in the page as it is now (same tag, text, type and name, the same
+  number along among alike ones) from a quiet re-read that leaves the model's list
+  alone. (5) The window's own minimize / restore / close buttons are not offered
+  (a run clicked Close). (6) `READ_EDIT` also notices characters dropped from the
+  middle (a `(` gone), but only in the focused editor; and only a focused or
+  contenteditable box is judged at all, not the Font Size box saying `10`. (7)
+  The prompt says array formulas are Ctrl+Shift+Enter.
 - **SIMnet grading** — SIMnet grades with a popup: a "Correct"/"Incorrect"
   heading, a HINT with the exact steps on a wrong answer, and one Continue
   button (back to the question after a wrong try, on to the next after a

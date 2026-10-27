@@ -36,6 +36,7 @@ const INTERACTIVE_SEL = [
 // Cached element list from the last scrape — execute() uses these references
 // so it operates on exactly the elements Claude was shown.
 let _lastElements = [];
+let _lastDesc = [];   // what each of those was described as, to find it again if the page redraws it
 
 // What a SIMnet look saw, so the next look can tell what has just appeared.
 // Cleared on each task's first look; a peek never changes it.
@@ -561,7 +562,11 @@ function scrape() {
     // unlabelled: the name box that opens on a sheet tab, a dialog field —
     // often exactly what the next step types into.
     const labelled = el => isTextBox(el) || (el.innerText || '').trim() || el.getAttribute('aria-label') || el.getAttribute('title');
-    const candidates = [...new Set([...all, ...extras])].filter(el => !el.matches(CHROME)).filter(labelled);
+    // The Excel window's own minimize / restore / close buttons: nothing a task
+    // asks for, and a real run clicked Close ("In the application header, you
+    // clicked the Close button") and lost the question
+    const windowButton = el => /^(minimize|maximize|restore|close)Button$/i.test(accessibleText(el).trim());
+    const candidates = [...new Set([...all, ...extras])].filter(el => !el.matches(CHROME) && !windowButton(el)).filter(labelled);
     // "New" means new since the previous look — never merely "inside a menu":
     // part of SIMnet's own toolbar sits in menu-like containers, which marked
     // ribbon buttons as just appeared on a task's very first look
@@ -794,13 +799,36 @@ function centreOf(el) {
   return { bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
 }
 
+// An element the model chose from the list, or — if the page has redrawn it in
+// the seconds it spent thinking, as the Function Arguments dialog does after each
+// box is filled ("[16] left the page", twice, in a real log) — its twin in the
+// page as it is now: the same kind of thing, saying the same, the same number of
+// times along. The list the model chose from is left as it was.
+function liveElement(i) {
+  const el = _lastElements[i];
+  if (!el || document.contains(el)) return el;
+  const want = _lastDesc[i];
+  if (!want) return null;
+  const sig = d => `${d.tag}|${d.text}|${d.type ?? ''}|${d.name ?? ''}`;
+  const rank = _lastDesc.slice(0, i).filter(d => sig(d) === sig(want)).length;
+  const keptEls = _lastElements, keptSeen = _simSeen, keptDesc = _lastDesc;
+  let found = null;
+  try {
+    const now = scrape();
+    const same = now.elements.map((d, j) => sig(d) === sig(want) ? j : -1).filter(j => j >= 0);
+    if (same.length) found = _lastElements[same[Math.min(rank, same.length - 1)]];
+  } catch (_) { /* nothing to go by */ }
+  _lastElements = keptEls; _simSeen = keptSeen; _lastDesc = keptDesc;
+  return found;
+}
+
 // The same range and still-on-the-page checks every action needs
 function pickElement(index) {
   if (typeof index !== 'number' || index < 0 || index >= _lastElements.length) {
     return { error: `Index ${index} out of range (${_lastElements.length} elements)` };
   }
-  const el = _lastElements[index];
-  if (!document.contains(el)) return { error: `Element [${index}] is no longer in the DOM` };
+  const el = liveElement(index);
+  if (!el) return { error: `Element [${index}] is no longer in the DOM` };
   return { el };
 }
 
@@ -1006,10 +1034,10 @@ async function execute(action) {
           failed.push(`[${i}] out of range`);
           continue;
         }
-        const el = _lastElements[i];
+        const el = liveElement(i);
         // A cell can go stale if the page re-renders mid-fill; skip it and keep
         // going rather than throwing away every value already entered.
-        if (!document.contains(el)) {
+        if (!el) {
           failed.push(`[${i}] left the page`);
           continue;
         }
@@ -1044,8 +1072,8 @@ async function execute(action) {
         if (typeof idx !== 'number' || idx < 0 || idx >= _lastElements.length) {
           return { success: false, error: `Index ${idx} out of range (${_lastElements.length} elements)` };
         }
-        const el = _lastElements[idx];
-        if (!document.contains(el)) {
+        const el = liveElement(idx);
+        if (!el) {
           return { success: false, error: `Element [${idx}] is no longer in the DOM` };
         }
         // Skip choices already selected, so we never toggle one back off
@@ -1289,13 +1317,23 @@ function readEdit(expect) {
   const boxes = [document.activeElement, ...document.querySelectorAll('[contenteditable], input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="password"]), textarea')]
     .filter((el, i, all) => el && all.indexOf(el) === i && el.matches?.('[contenteditable], input, textarea')
       && !el.closest('#__cap-host, #__cap-marks') && isRendered(el));
-  const texts = boxes.map(el => ({ t: clean(el.matches('input, textarea') ? el.value : el.innerText), active: el === document.activeElement }));
+  const texts = boxes.map(el => ({
+    t: clean(el.matches('input, textarea') ? el.value : el.innerText),
+    active: el === document.activeElement, rich: el.matches('[contenteditable]')
+  }));
   const lines = (document.body?.innerText ?? '').split('\n').map(clean);
   if (texts.some(x => x.t === want) || lines.includes(want)) return { match: true, have: want };
 
   const tail = t => t !== want && want.endsWith(t) && !CELL_REF.test(t.trim());
-  // A box being edited: even an empty one that has the focus has lost it
-  const box = texts.find(x => (x.t.length > 1 || (x.active && x.t === '')) && tail(x.t));
+  // Characters dropped from the middle (a "(" gone, in a real report): what is in
+  // the focused editor is all of it but for some letters. Only the editor in use
+  // is judged this way — another box on the page would match by chance.
+  const subseq = (a, b) => { let k = 0; for (const ch of b) if (ch === a[k]) k++; return k === a.length; };
+  const dropped = t => t !== want && t.length > 1 && t.length < want.length && subseq(t, want) && !CELL_REF.test(t.trim());
+  // A box being edited: even an empty one that has the focus has lost it. Other
+  // boxes (font size, search) are not the editor, however they read
+  const box = texts.find(x => (x.active || x.rich)
+    && (x.t.length > 1 || (x.active && x.t === '')) && (tail(x.t) || (x.active && dropped(x.t))));
   if (box) return { match: false, have: box.t };
   // The formula bar and the cell both show the editor: the same remnant twice
   const seen = new Map();
@@ -2733,15 +2771,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     // A peek (recognising the page, Check this page) must leave alone the
     // list a run's clicks point into, or an idle look could shift an index
     // between a run's read and its click.
-    const kept = _lastElements, keptSeen = _simSeen;
+    const kept = _lastElements, keptSeen = _simSeen, keptDesc = _lastDesc;
     if (msg.firstLook && !msg.peek) _simSeen = null;
     const look = () => {
       try {
-        sendResponse(scrape());
+        const out = scrape();
+        _lastDesc = out.elements ?? [];
+        sendResponse(out);
       } catch (e) {
         sendResponse({ error: e.message, text: '', elements: [] });
       } finally {
-        if (msg.peek) { _lastElements = kept; _simSeen = keptSeen; }
+        if (msg.peek) { _lastElements = kept; _simSeen = keptSeen; _lastDesc = keptDesc; }
       }
     };
     // Custom dropdowns whose choices aren't on the page are opened and read

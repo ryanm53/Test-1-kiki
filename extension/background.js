@@ -229,6 +229,14 @@ the one in the group the task or hint names.
 Marks after an item: (on) a toggle that is on, like Bold; (selected) the
 current tab or item; (open) an expanded menu; (disabled) not usable yet.
 
+An array formula — the task says so, or a block of cells is already selected for the
+results, as with MODE.MULT — is typed with "text" and then entered with
+{"action":"key","key":"Enter","ctrl":true,"shift":true}: Ctrl+Shift+Enter, not
+Ctrl+Enter or Enter alone.
+Typing a formula into a cell is one reply, then Enter: the whole formula, with
+no line break in it. Do not open a ribbon dialog to enter a formula the task
+lets you type. Never click the window's own Close, Minimize or Restore buttons.
+
 Reply {"action":"none"} only once the page shows the task is complete — the
 new name on the tab, the value in the cell, the dialog closed. If it doesn't
 show yet, take the next step instead.`;
@@ -529,6 +537,16 @@ ${elementList || '(none found)'}`;
   if (!['click', 'clickMany', 'fill', 'dragMove', 'doubleClick', 'rightClick', 'type', 'key', 'selectRange', 'hover', 'none'].includes(parsed.action)) {
     throw new Error(`Unexpected action: ${JSON.stringify(parsed.action)}`);
   }
+  // The reply is shaped by a schema that names every field, and the model fills
+  // the ones it has no use for with "" or null (a real log: six runs stopped on
+  // `from must be a cell address, got: ""` after a perfectly good click). An
+  // empty field is an absent one.
+  for (const k of Object.keys(parsed)) {
+    if (parsed[k] === '' || parsed[k] === null || (k === 'row' && parsed[k] === 0)) delete parsed[k];
+  }
+  // A line break on the end of typed text is the model meaning Enter; that is a
+  // key press of its own, and typed as text it was one more character in the cell
+  if (parsed.action === 'type' && typeof parsed.text === 'string') parsed.text = parsed.text.replace(/[\r\n]+$/, '');
   // A cell address stands in for an index; normalise and check it
   for (const f of ['cell', 'from', 'to']) {
     if (parsed[f] === undefined) continue;
@@ -1285,6 +1303,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   let retryHint = '';
   let round = 0;
   let ungradedDone = 0;    // "done" claims SIMnet didn't grade, this round
+  let committed = false;   // the last step handed the answer in (Enter, OK): SIMnet is about to grade it
   let parts = null;        // a question split into tabs (Required 1, Required 2)
   const doneParts = [];    // ...and the ones answered this run
   let escalated = false;   // Auto gave the question to the stronger model after the cheap one gave up
@@ -1301,8 +1320,11 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
     reportProgress(tabId, step + 1, budget);
 
     // A verdict can arrive after any step, not only the last
+    // (just after Enter or OK the popup can be a moment coming: not there yet is
+    // not the answer being wrong, and the model going off to try another way
+    // with the ribbon dialogs is how real runs wandered)
     if (isSimnet && step > 0) {
-      const v = await readVerdict(tabId, frameId);
+      const v = committed && attempts ? await waitForVerdict(tabId, frameId, 3000) : await readVerdict(tabId, frameId);
       if (v.verdict) { verdict = v; break steps; }
     }
 
@@ -1501,6 +1523,8 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         if (result?.success) {
           stepDone = true;
           completed++;
+          committed = (action.action === 'key' && action.key === 'Enter')
+            || (action.action === 'click' && /^(ok|apply)$/i.test((pageData.elements[action.index]?.text ?? '').trim()));
           history.push(actionSummary(action, pageData.elements));
 
           // Repeating one step means it isn't taking effect — the page looks

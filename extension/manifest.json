@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Page Agent",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Answers the questions on your coursework and quiz pages with Claude, using your own Anthropic API key.",
   "permissions": [
     "debugger",
