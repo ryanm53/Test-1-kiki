@@ -172,6 +172,22 @@ change between sites.
   to fill are counted as rows, not the heading rows that start with a word.
   `WORKSHEET_HINT` has a paragraph for these (effects not balances, minus signs,
   it must balance, costs to get an asset ready are its cost).
+- **Matching questions** — a Connect matching question (drop boxes beside labels, a
+  pool of cards) has no inputs, and a real run stopped on `Referred to item 0, which
+  isn't on the page`: the list was empty. `findQuestionFrame` now counts drag
+  handles (`drags`) and buttons as well as inputs, so a stray frame with one hidden
+  input can't outscore the page; and when the chosen frame's list comes back empty
+  `busiestFrame` swaps in the frame with the most things in it. `DRAG_SEL` knows
+  react-beautiful-dnd (`data-rbd-…`), hello-pangea (`data-rfd-…`) and dnd-kit
+  (`aria-roledescription="draggable"`), and lists such handles whether or not they
+  say `role="button"`. An empty list with nothing to act on now ends the run with
+  a message pointing at **Copy page details** (More → Troubleshooting):
+  `probeStructure` runs inside every frame and reports its size, text, iframes,
+  shadow-root hosts (and how many controls sit inside them, which the page reader
+  does not see into), counts of buttons/inputs/draggables, and the attributes and
+  HTML of up to 14 drag-like elements, so a page built some other way can be read
+  from what is actually there. Moves themselves are the keyboard ones (Space lifts,
+  arrows move, Space drops), which need the library's keyboard sensor.
 - **Connect after the answer** — the graded page can hold the way on behind a
   gate. `advanceToNext` (background) is what the preset's Next click runs:
   `connectState` (content) says what is on screen — `graded`, `needsResource`

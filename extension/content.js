@@ -10,6 +10,7 @@ if (window.__pageAgentLoaded) return;
 window.__pageAgentLoaded = true;
 
 // Selectors for elements worth interacting with
+const DRAG_SEL = '[data-rbd-drag-handle-draggable-id], [data-react-beautiful-dnd-drag-handle], [data-rfd-drag-handle-draggable-id], [data-rfd-draggable-id], [aria-roledescription="draggable"]';
 const INTERACTIVE_SEL = [
   'button',
   'a[href]',
@@ -29,6 +30,11 @@ const INTERACTIVE_SEL = [
   'ng-select',
   '[role="listitem"]',
   '[draggable="true"]',
+  // Drag handles of the libraries that tag them (react-beautiful-dnd, its
+  // successor hello-pangea, dnd-kit), whether or not they say role="button"
+  '[data-rbd-drag-handle-draggable-id]',
+  '[data-rfd-drag-handle-draggable-id]',
+  '[aria-roledescription="draggable"]',
   '[contenteditable="true"]',
   '[data-automation-id]'
 ].join(', ');
@@ -505,9 +511,7 @@ function scrape() {
   const isField = new Set(fields);
 
   // Drag questions need spatial reasoning over several sequential moves
-  const isDrag = !!document.querySelector(
-    '[data-rbd-drag-handle-draggable-id], [data-react-beautiful-dnd-drag-handle]'
-  );
+  const isDrag = !!document.querySelector(DRAG_SEL);
 
   // SIMnet renders a full Excel simulation: ~1500 grid cells and ~130 buttons,
   // far too much to send. Cells are addressable (id="cell-B7"), so only the
@@ -1938,9 +1942,13 @@ function bgSend(msg, cb) {
             <span class="row-label">Copy last prompt</span>
             <button class="inline-btn" id="copyPrompt">Copy</button>
           </div>
+          <div class="row">
+            <span class="row-label">Copy page details</span>
+            <button class="inline-btn" id="copyDetails">Copy</button>
+          </div>
         </div>
         <div id="checkResult"></div>
-        <div class="row-hint">Check this page shows what it can see here and whether your key works. Copy last prompt copies exactly what was last sent to Claude, for diagnosing wrong answers.</div>
+        <div class="row-hint">Check this page shows what it can see here and whether your key works. Copy last prompt copies exactly what was last sent to Claude, for diagnosing wrong answers. Copy page details copies how this page is built, for a question it can't read.</div>
       </div>
 
     </div>
@@ -1966,7 +1974,7 @@ function bgSend(msg, cb) {
   const keyInput = $('key'), saveKeyBtn = $('saveKey'), cancelKeyBtn = $('cancelKey');
   const keySavedRow = $('keySaved'), keyEditRow = $('keyEdit'), keyHint = $('keyHint');
   const changeKeyBtn = $('changeKey'), moreBtn = $('moreBtn'), more = $('more');
-  const copyPromptBtn = $('copyPrompt');
+  const copyPromptBtn = $('copyPrompt'), copyDetailsBtn = $('copyDetails');
   const flagBtn = $('flag'), logSw = $('logSw'), logRow = $('logRow'), logCount = $('logCount');
   const logDownloadBtn = $('logDownload'), logClearBtn = $('logClear');
   const bookSw = $('bookSw'), bookRow = $('bookRow'), bookCount = $('bookCount'), bookClearBtn = $('bookClear');
@@ -2416,32 +2424,38 @@ function bgSend(msg, cb) {
     });
   });
 
+  // Text to the clipboard from a button, which says how it went
+  function copyFrom(btn, text) {
+    const flash = msg => {
+      btn.textContent = msg;
+      btn.classList.add('done');
+      setTimeout(() => {
+        btn.textContent = 'Copy';
+        btn.classList.remove('done');
+      }, 1800);
+    };
+    if (!text) { flash('Run it first'); return; }
+    navigator.clipboard.writeText(text)
+      .then(() => flash('Copied'))
+      .catch(() => {
+        // Clipboard API can be blocked on some pages — fall back to a
+        // selection the page can still copy from.
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;top:-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); flash('Copied'); }
+        catch (_) { flash('Copy failed'); }
+        ta.remove();
+      });
+  }
   copyPromptBtn.addEventListener('click', () => {
-    store.get('lastPrompt', ({ lastPrompt }) => {
-      const flash = msg => {
-        copyPromptBtn.textContent = msg;
-        copyPromptBtn.classList.add('done');
-        setTimeout(() => {
-          copyPromptBtn.textContent = 'Copy';
-          copyPromptBtn.classList.remove('done');
-        }, 1800);
-      };
-      if (!lastPrompt) { flash('Run it first'); return; }
-      navigator.clipboard.writeText(lastPrompt)
-        .then(() => flash('Copied'))
-        .catch(() => {
-          // Clipboard API can be blocked on some pages — fall back to a
-          // selection the page can still copy from.
-          const ta = document.createElement('textarea');
-          ta.value = lastPrompt;
-          ta.style.cssText = 'position:fixed;top:-9999px';
-          document.body.appendChild(ta);
-          ta.select();
-          try { document.execCommand('copy'); flash('Copied'); }
-          catch (_) { flash('Copy failed'); }
-          ta.remove();
-        });
-    });
+    store.get('lastPrompt', ({ lastPrompt }) => copyFrom(copyPromptBtn, lastPrompt));
+  });
+  copyDetailsBtn.addEventListener('click', () => {
+    copyDetailsBtn.textContent = '…';
+    bgSend({ type: 'PAGE_DETAILS' }, res => copyFrom(copyDetailsBtn, res?.text ?? 'No response from the extension. Refresh this page and try again.'));
   });
 
   // ── Panel open/close ───────────────────────────────────────────────────────
@@ -2866,7 +2880,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse({ success: false, error: `Element [${index}] is no longer in the DOM` });
         return;
       }
-      const handle = el.closest('[data-rbd-drag-handle-draggable-id], [data-react-beautiful-dnd-drag-handle]') || el;
+      const handle = el.closest(DRAG_SEL) || el;
       handle.scrollIntoView({ behavior: 'smooth', block: 'center' });
       await new Promise(r => setTimeout(r, 200));
       handle.focus();

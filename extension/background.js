@@ -880,7 +880,10 @@ async function findQuestionFrame(tabId) {
           .filter(el => el.closest('table, [role="table"], [role="grid"]')).length;
         // Spreadsheet widgets answer into focusable <td>s, not inputs
         const cells = n('td[tabindex]:not([tabindex="-1"]):not(.td-readOnly), td.responseCell:not(.td-readOnly)');
-        return { fields, choices, gridFields: gridFields + cells };
+        // A matching question has no inputs at all: cards to drag and buttons are what it has
+        const drags = n('[data-rbd-drag-handle-draggable-id], [data-react-beautiful-dnd-drag-handle], [data-rfd-drag-handle-draggable-id], [data-rfd-draggable-id], [aria-roledescription="draggable"], [draggable="true"]');
+        const buttons = Math.min(10, n('button, [role="button"]'));
+        return { fields, choices, drags, buttons, gridFields: gridFields + cells };
       }
     });
   } catch (_) {
@@ -893,11 +896,81 @@ async function findQuestionFrame(tabId) {
     if (!r) continue;
     // A worksheet grid is the strongest signal; then any answerable input.
     // The top frame gets a nudge so it still wins a genuine tie.
-    let score = (r.gridFields >= 4 ? 1000 : 0) + r.fields * 10 + r.choices * 10;
+    let score = (r.gridFields >= 4 ? 1000 : 0) + r.fields * 10 + r.choices * 10 + (r.drags ?? 0) * 10 + (r.buttons ?? 0) * 2;
     if (p.frameId === 0) score += 1;
     if (score > best.score) best = { frameId: p.frameId, score };
   }
   return best.frameId;
+}
+
+// When the frame chosen turns out to hold nothing to act on (a stray frame with
+// one hidden input outscored the page with a matching question, which has no
+// inputs), the frame with the most things in it
+async function busiestFrame(tabId, except) {
+  let probes;
+  try {
+    probes = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => document.querySelectorAll('button, [role="button"], a[href], input:not([type="hidden"]), select, textarea, [draggable="true"], [role="listitem"], [role="radio"], [role="checkbox"], [data-rbd-drag-handle-draggable-id], [data-rfd-drag-handle-draggable-id], [aria-roledescription="draggable"]').length
+    });
+  } catch (_) { return null; }
+  let best = null;
+  for (const p of probes) {
+    if (p.frameId === except || !(p.result > 0)) continue;
+    if (!best || p.result > best.n) best = { frameId: p.frameId, n: p.result };
+  }
+  return best?.frameId ?? null;
+}
+
+// What is on the page, structurally, in every frame — for when something can't be
+// read and someone has to see how it is built. Runs inside each frame, so it can
+// use nothing from here.
+function probeStructure() {
+  const trim = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+  const attrs = el => Array.from(el.attributes).slice(0, 14).map(a => `${a.name}="${trim(a.value, 60)}"`).join(' ');
+  const mark = el => {
+    const cs = getComputedStyle(el);
+    return el.getAttribute('draggable') === 'true' || /grab|move/.test(cs.cursor)
+      || Array.from(el.attributes).some(a => /^(data-rbd|data-rfd|data-dnd|aria-roledescription|aria-grabbed|aria-dropeffect)/.test(a.name))
+      || /drag|drop/i.test(String(el.className?.baseVal ?? el.className));
+  };
+  const seen = [];
+  for (const el of document.querySelectorAll('body *')) {
+    if (seen.length >= 14) break;
+    if (el.closest('#__cap-host')) continue;
+    if (mark(el)) seen.push(el);
+  }
+  const hosts = Array.from(document.querySelectorAll('*')).filter(el => el.shadowRoot);
+  return {
+    url: location.origin + location.pathname,
+    title: trim(document.title, 80),
+    elements: document.querySelectorAll('*').length,
+    text: trim(document.body?.innerText, 240),
+    iframes: Array.from(document.querySelectorAll('iframe')).map(f => ({ src: trim(f.src, 90), w: f.clientWidth, h: f.clientHeight })).slice(0, 8),
+    shadowHosts: hosts.length,
+    insideShadow: hosts.reduce((n, h) => n + h.shadowRoot.querySelectorAll('button, [role="button"], [draggable], [tabindex], input').length, 0),
+    counts: {
+      buttons: document.querySelectorAll('button').length, roleButtons: document.querySelectorAll('[role="button"]').length,
+      links: document.querySelectorAll('a[href]').length, inputs: document.querySelectorAll('input:not([type="hidden"]), select, textarea').length,
+      draggableAttr: document.querySelectorAll('[draggable="true"]').length, tabindex: document.querySelectorAll('[tabindex]').length,
+      listitems: document.querySelectorAll('[role="listitem"]').length
+    },
+    dragLike: seen.map(el => ({
+      tag: el.tagName.toLowerCase(), attrs: attrs(el), text: trim(el.innerText, 60),
+      size: `${Math.round(el.getBoundingClientRect().width)}x${Math.round(el.getBoundingClientRect().height)}`,
+      cursor: getComputedStyle(el).cursor, html: trim(el.outerHTML, 220)
+    }))
+  };
+}
+
+async function pageDetails(tabId) {
+  let probes;
+  try {
+    probes = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: probeStructure });
+  } catch (e) { return `Couldn't read this page: ${e.message}`; }
+  const chosen = await findQuestionFrame(tabId).catch(() => 0);
+  return JSON.stringify({ version: chrome.runtime.getManifest?.().version, chosenFrame: chosen,
+    frames: probes.map(p => ({ frameId: p.frameId, ...(p.result ?? { error: 'unreadable' }) })) }, null, 1);
 }
 
 // Click / clickMany answer a question in a single call. Drag questions need
@@ -1274,7 +1347,8 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   let recalled = false;    // the answer came from the memory, not the model
 
   // Resolve once per run: every scrape, click and fill must hit the same frame
-  const frameId = await findQuestionFrame(tabId);
+  // (changed only if the frame chosen proves to hold nothing)
+  let frameId = await findQuestionFrame(tabId);
 
   cancelledRuns.delete(tabId);   // a fresh run clears any earlier stop
 
@@ -1335,9 +1409,17 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         // The first look of a run has nothing earlier to compare against
-        const pageData = await sendToTab(tabId, { type: 'SCRAPE', firstLook: step === 0 && attempt === 0 }, frameId);
+        let pageData = await sendToTab(tabId, { type: 'SCRAPE', firstLook: step === 0 && attempt === 0 }, frameId);
         if (!pageData || pageData.error) {
           throw new Error(pageData?.error ?? 'No response from content script');
+        }
+        // Nothing to act on in the frame chosen: look for the one that has something
+        if (!pageData.elements?.length) {
+          const other = await busiestFrame(tabId, frameId);
+          if (other !== null) {
+            const there = await sendToTab(tabId, { type: 'SCRAPE', firstLook: step === 0 && attempt === 0 }, other).catch(() => null);
+            if (there?.elements?.length) { frameId = other; pageData = there; }
+          }
         }
 
         // A simulated-Excel task is a procedure — switch tab, open dialog, set
@@ -1420,6 +1502,11 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         });
 
         const bad = badIndexes(action, pageData.elements.length);
+        if (bad.length && !pageData.elements.length) {
+          const err = new Error("Couldn't see anything to click on this page: it may be drawn in a way Page Agent can't read yet. Open the gear, tap More, press Copy next to Copy page details and send that to whoever looks after Page Agent.");
+          err.final = true;
+          throw err;
+        }
         if (bad.length) {
           throw new Error(`Referred to item ${bad.join(', ')}, which isn't on the page.`);
         }
@@ -1907,6 +1994,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const id = sender.tab?.id;
     if (!id) { sendResponse({ kind: '' }); return false; }
     detectKind(id, msg.host).then(kind => sendResponse({ kind }), () => sendResponse({ kind: '' }));
+    return true;
+  }
+
+  if (msg.type === 'PAGE_DETAILS') {
+    const id = msg.tabId ?? sender.tab?.id;
+    pageDetails(id).then(text => sendResponse({ text }), e => sendResponse({ text: `Couldn't read this page: ${e.message}` }));
     return true;
   }
 

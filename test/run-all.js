@@ -31,6 +31,7 @@ const SUITES = [
   ['test-effects.js',    'Accounting: financial statement effects, a dropdown and a box on each line'],
   ['test-simnet-formula.js', 'SIMnet formulas: typed whole, checked before Enter, never handed in damaged'],
   ['test-simnet-log2.js', 'SIMnet, second real exam: empty fields, late verdict, redrawn dialogs, window buttons'],
+  ['test-matching.js',   'Connect matching question: wrong frame, newer drag libraries, page details'],
   ['test-screenshot.js', 'A screenshot when the text can\'t carry the question'],
   ['test-marks.js',      'Numbered tags on the screenshot: right numbers, up for the capture, always taken down'],
   ['test-labels.js',     'Accounting worksheet: column and row labels'],
