@@ -474,7 +474,16 @@ function describeEl(el) {
   const question = nearestQuestionText(el);
   // Fall back to table headers when the field has no label of its own
   const drop = el.tagName === 'SELECT' || isDropdown(el);
-  const text = accessibleText(el, !drop) || tableLabel(el) || nearbyLabel(el) || '';
+  // A worksheet cell (not SIMnet's, which is named by what it holds) is named by its row
+  // and column, with what it holds shown apart: once filled, a cell listed as "Current
+  // liability" no longer says which row it is
+  const worksheetCell = isSheetCell(el) && !cellAddress(el);
+  const own = accessibleText(el, !drop);
+  const held = worksheetCell ? (el.innerText ?? el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+  // (only where the label was nothing but what the cell holds: any other label is as it was)
+  const text = (worksheetCell && own && own.replace(/\s+/g, ' ').trim().slice(0, 80) === held)
+    ? (tableLabel(el) || own)
+    : (own || tableLabel(el) || nearbyLabel(el) || '');
   return {
     tag: el.tagName.toLowerCase(),
     type: el.getAttribute('type') || null,
@@ -483,7 +492,7 @@ function describeEl(el) {
     // Never a password; never a tick box, whose value is just "on"
     value: (isTextBox(el) && el.type !== 'password' && !el.isContentEditable && el.value)
       ? String(el.value).slice(0, 60)
-      : drop ? (chosenText(el).slice(0, 80) || undefined) : undefined,
+      : drop ? (chosenText(el).slice(0, 80) || undefined) : held || undefined,
     // A dropdown list's choices, so one can be picked by its text
     options: el.tagName === 'SELECT'
       ? Array.from(el.options).slice(0, 100).map(o => o.textContent.trim()).filter(Boolean)
@@ -879,6 +888,16 @@ const isTextBox = el => !!el && (el.isContentEditable || el.tagName === 'TEXTARE
 function editingNow() {
   const a = document.activeElement;
   return a && a !== document.body && a.id !== '__cap-host' ? a : null;
+}
+
+// The entries of a list that is open on the page: options of a listbox, menu or
+// autocomplete, or of a select. (A bare <li> counts only inside such a list: the
+// page's own bullet points are not choices.)
+const LIST_BOX = '[role="listbox"], [role="menu"], .ui-autocomplete, .ui-menu, .dropdown-menu, datalist, select, [class*="autocomplete"], [class*="suggest"], [class*="dropdown"], [class*="option-list"]';
+function listedOptions() {
+  return Array.from(document.querySelectorAll('[role="option"], [role="menuitem"], .ui-menu-item, li, option'))
+    .filter(o => !o.closest('#__cap-host, #__cap-marks') && isRendered(o)
+      && (o.matches('[role="option"], [role="menuitem"], .ui-menu-item') || o.closest(LIST_BOX)));
 }
 
 // Whether a ribbon toggle is on, a tab chosen, a menu open, a control usable —
@@ -2992,6 +3011,29 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .then(sendResponse)
       .catch(e => sendResponse({ success: false, error: e.message }));
     return true;
+  }
+
+  if (msg.type === 'READ_CELL') {
+    // What a cell shows now, to tell whether what was typed into it took
+    const el = liveElement(msg.index);
+    sendResponse(el ? { text: (el.innerText ?? el.textContent ?? '').replace(/\s+/g, ' ').trim() } : { text: null });
+    return false;
+  }
+
+  if (msg.type === 'LIST_OPTIONS') {
+    sendResponse({ options: listedOptions().map(o => (o.innerText ?? o.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 30) });
+    return false;
+  }
+
+  if (msg.type === 'CLICK_OPTION') {
+    // A list that has opened beside an editor: click the entry that says exactly this
+    const want = squash(String(msg.text ?? ''));
+    const hit = listedOptions().find(o => squash(o.innerText ?? o.textContent ?? '') === want);
+    if (!hit) { sendResponse({ success: false }); return false; }
+    hit.scrollIntoView({ block: 'nearest' });
+    realClick(hit);
+    sendResponse({ success: true });
+    return false;
   }
 
   if (msg.type === 'FOCUS_CELL') {

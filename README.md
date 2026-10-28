@@ -241,6 +241,9 @@ Claude's safety filters occasionally turn down a question — mostly ones that l
 **SIMnet: a formula comes out wrong or half-typed**
 SIMnet's lists of function names can wipe what was typed so far. Page Agent types a formula in stages, checks the cell before pressing Enter, and puts back anything that went missing; if it can't get a formula in whole it stops and says so rather than hand in a wrong one. If it does, turn on the **Answer log**, run that question again, and send the log: it records which way worked.
 
+**A worksheet dropdown cell didn't fill, or filled wrongly**
+Page Agent reads every cell back after filling it, tries again a different way if it didn't take (waiting for the list, then picking the entry from it), and says which cells it couldn't fill, with what they show and what the list offered, rather than calling them done. If a cell is still missed: click it so its dropdown is showing, then open the gear, tap **More**, press **Copy** next to **Copy page details**, and send that to whoever looks after Page Agent. It shows how that dropdown is built.
+
 **"Could not get to the next question"**
 It answered, but couldn't find a way on from the answer page. The message lists what it pressed and the buttons it could see. Click Next (or the concept resource and *To Questions*) yourself and press play to carry on. If it keeps happening, turn on the **Answer log** under More, press play on the stuck question once more, and send the log, plus a screenshot of the bottom of the page.
 

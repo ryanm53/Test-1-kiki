@@ -172,6 +172,25 @@ change between sites.
   to fill are counted as rows, not the heading rows that start with a word.
   `WORKSHEET_HINT` has a paragraph for these (effects not balances, minus signs,
   it must balance, costs to get an asset ready are its cost).
+- **Dropdown cells in worksheets** — a Connect worksheet cell (`td.responseCell`) whose
+  editor is a dropdown took some answers and not others, and each was reported filled:
+  `typeIntoCell` typed and pressed Enter 60ms later, before the list had opened, and never
+  read the cell back. Now every cell is read back (`READ_CELL`) after each try and
+  compared (`cellHolds`: amounts by value within rounding, a name by its exact words) and
+  tried again a different way if it doesn't hold what was meant: typed at 25ms with 350ms
+  for the list to open; typed at 90ms with 700ms, the entry clicked in the list if one is
+  showing (`CLICK_OPTION`, matching the exact words, only inside a listbox / menu /
+  autocomplete: `listedOptions`); the cell opened a second time first. Arrow keys are not
+  used: on a sheet they move the selection. A cell that still doesn't hold it is missed
+  and reported with what it shows and what the list showed (`LIST_OPTIONS`), the editor
+  is closed with Escape, and those entries go into the retry's history so a label that
+  isn't one of them is corrected. A filled cell used to be listed by what it held, so on
+  a retry no row could be told from another; a worksheet cell is now listed by its row and
+  column with what it holds as `value=` (not SIMnet's, which are named by content, and
+  only where the label was the content). Verified against a simulator with the four ways
+  such an editor misbehaves; 8 of its 13 checks fail on 1.0.12, with the cells empty and
+  the bar saying it was done. *Copy page details* now includes the focused element, the
+  first cells and any open list, to read the real widget.
 - **Quiz pages** — the newer Canvas quizzes (and other sites') put every question on
   one page, each as a block, and draw the choices themselves: the real radio sits
   see-through (`opacity: 0`) over a styled stand-in, which `isRendered` counted as

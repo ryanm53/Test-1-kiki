@@ -832,18 +832,70 @@ async function typeFormula(tabId, frameId, text, reopen, trail) {
 // sheet lives in an iframe, so it would land somewhere else and move the
 // selection off the cell just chosen. Keystrokes are safe to send this way:
 // they follow focus rather than coordinates.
+//
+// Typing and pressing Enter 60ms later is not enough where the cell's editor is a
+// dropdown: its list opens a beat after the letters, Enter before that commits
+// nothing, and the cell stays empty — in a real run, some cells took and some
+// didn't, and every one was reported as filled. So a cell is read back afterwards,
+// and one that didn't take is tried again, slower, picking the entry from the list
+// if it can be seen; and one that still won't is said to be missed.
+const num = s => {
+  const t = String(s ?? '').replace(/[,$\s]/g, '');
+  return /^\(?-?\d*\.?\d+\)?$/.test(t) ? (/^\(.*\)$/.test(t) ? -1 : 1) * parseFloat(t.replace(/[()]/g, '')) : null;
+};
+const letters = s => String(s ?? '').toLowerCase().replace(/[^a-z0-9.\-]/g, '');
+// Whether a cell shows what was typed into it. Unknown (null) counts as yes: a cell
+// that can't be read is no reason to type into it again.
+function cellHolds(shown, want) {
+  if (shown === null) return true;
+  if (!shown) return false;
+  const a = num(shown), b = num(want);
+  if (a !== null && b !== null) return Math.abs(a - b) <= Math.max(0.5, Math.abs(b) * 0.005);   // formatting rounds
+  if (b !== null) return true;                  // a number typed, shown some other way
+  // Exactly the name asked for (a longer one that merely contains it is another entry)
+  return letters(shown) === letters(want);
+}
+
 async function typeIntoCell(tabId, frameId, index, value) {
-  const focused = await sendToTab(tabId, { type: 'FOCUS_CELL', index }, frameId);
-  if (!focused?.success) {
-    return { success: false, error: focused?.error ?? `Could not open cell [${index}]` };
+  const want = String(value ?? '');
+  const wordy = /[A-Za-z]/.test(want);          // a name from a list, not an amount
+  const read = async () => (await sendToTab(tabId, { type: 'READ_CELL', index }, frameId).catch(() => null))?.text ?? null;
+  const focus = async () => sendToTab(tabId, { type: 'FOCUS_CELL', index }, frameId);
+
+  // Ways of getting a choice into a cell, each read back before the next is tried:
+  // typed and given time for its list to open; typed slowly and the entry clicked in
+  // the list if it can be seen; the cell opened a second time first. (Arrow keys are
+  // left out: on a sheet they move the selection to another cell.)
+  const ways = wordy
+    ? [{ pace: 25, settle: 350 }, { pace: 90, settle: 700, pick: true }, { pace: 60, settle: 600, pick: true, again: true }]
+    : [{ pace: 25, settle: 60 }, { pace: 90, settle: 200 }];
+  for (const way of ways) {
+    const focused = await focus();
+    if (!focused?.success) {
+      return { success: false, error: focused?.error ?? `Could not open cell [${index}]` };
+    }
+    if (way.again) { await new Promise(r => setTimeout(r, 300)); await focus(); }
+    await attachDebugger(tabId);
+    await typeText(tabId, want, way.pace);
+    // A list of names opens a moment after the letters; Enter before it does nothing
+    await new Promise(r => setTimeout(r, way.settle));
+    const picked = way.pick
+      ? (await sendToTab(tabId, { type: 'CLICK_OPTION', text: want }, frameId).catch(() => null))?.success
+      : false;
+    if (!picked) await pressKey(tabId, 'enter');
+    await new Promise(r => setTimeout(r, 160));
+    if (cellHolds(await read(), want)) return { success: true };
   }
 
-  await attachDebugger(tabId);
-  await typeText(tabId, String(value ?? ''));
-  await new Promise(r => setTimeout(r, 60));
-  await pressKey(tabId, 'enter');
-  await new Promise(r => setTimeout(r, 160));
-  return { success: true };
+  // Nothing worked. Say what is in the cell and what the list offers, so a wrong label
+  // can be seen to be one — then close the editor rather than leave it half-open
+  const shown = await read();
+  const offered = (await sendToTab(tabId, { type: 'LIST_OPTIONS' }, frameId).catch(() => null))?.options ?? [];
+  await pressKey(tabId, 'escape').catch(() => {});
+  return {
+    success: false, options: offered,
+    error: `[${index}] shows "${shown ?? ''}", not "${want.slice(0, 40)}"${offered.length ? ` (the list showed: ${offered.slice(0, 8).join(' | ')})` : ''}`
+  };
 }
 
 // rbd keyboard drag: Space lifts, arrows move, Space drops.
@@ -1009,6 +1061,12 @@ function probeStructure() {
       draggableAttr: document.querySelectorAll('[draggable="true"]').length, tabindex: document.querySelectorAll('[tabindex]').length,
       listitems: document.querySelectorAll('[role="listitem"]').length
     },
+    // For a cell whose editor is a dropdown: the cell, whatever has the focus, and any
+    // list that is open (press Copy page details while a cell is being edited)
+    focus: document.activeElement && document.activeElement !== document.body ? trim(document.activeElement.outerHTML, 260) : null,
+    cells: Array.from(document.querySelectorAll('td[tabindex], td.responseCell')).slice(0, 3).map(td => trim(td.outerHTML, 240)),
+    lists: Array.from(document.querySelectorAll('[role="listbox"], [role="menu"], .ui-autocomplete, .ui-menu, .dropdown-menu, [class*="autocomplete"], [class*="suggest"], [class*="dropdown"] ul'))
+      .filter(l => l.getClientRects().length).slice(0, 3).map(l => trim(l.outerHTML, 320)),
     dragLike: seen.map(el => ({
       tag: el.tagName.toLowerCase(), attrs: attrs(el), text: trim(el.innerText, 60),
       size: `${Math.round(el.getBoundingClientRect().width)}x${Math.round(el.getBoundingClientRect().height)}`,
@@ -1684,7 +1742,11 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
             // bar's silence timer on its own, so keep telling it we're alive.
             reportProgress(tabId, step + 1, budget);
             const r = await typeIntoCell(tabId, frameId, f.index, f.value);
-            if (!r.success) missed.push(`[${f.index}]`);
+            if (!r.success) {
+              missed.push(r.error?.startsWith('[') ? r.error : `[${f.index}]`);
+              // What the list really offers goes into what the retry is told, so a wrong word can be corrected
+              if (r.options?.length) history.push(`the list for cell [${f.index}] showed: ${r.options.slice(0, 12).join(' | ')} (it may show only the entries that match what was typed) — use the exact words of one of these`);
+            }
           }
           if (missed.length === action.fills.length) {
             result = { success: false, error: `No cells could be filled: ${missed.join(', ')}` };
