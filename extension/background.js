@@ -19,7 +19,9 @@
 // prompts up to 100K tokens, far above anything sent here). Cache reads cost a
 // tenth of input and cache writes 1.25x, for both.
 const MODELS = {
-  'claude-haiku-5-5':  { label: 'Haiku 5.5',  maxTokens: 2048, effort: 'low', price: { in: 0.10, out: 0.50 } },
+  // `hard`: on a worksheet, a drag, SIMnet or a calculation, which Auto no longer hands
+  // to Sonnet first, Haiku thinks harder and has the room to
+  'claude-haiku-5-5':  { label: 'Haiku 5.5',  maxTokens: 2048, effort: 'low', hard: { effort: 'medium', maxTokens: 8000 }, price: { in: 0.10, out: 0.50 } },
   'claude-sonnet-5-5': { label: 'Sonnet 5.5', maxTokens: 8000, effort: 'low', fallbacks: true, price: { in: 2.00, out: 10.00 } }
 };
 
@@ -66,19 +68,23 @@ const MODEL_ALIASES = {
 };
 const resolveModel = id => MODELS[id] ? id : MODELS[MODEL_ALIASES[id]] ? MODEL_ALIASES[id] : DEFAULT_MODEL;
 
-// Worksheets, drag questions and SIMnet need real reasoning — multi-step
-// arithmetic, spatial planning over several moves, a procedure — where the
-// cheap model tends to fumble. Those go to Sonnet 5.5, which thinks them
-// through; everything else keeps costing what it costs.
+// Auto starts every question on Haiku 5.5, which is cheap and good, and brings in
+// Sonnet 5.5 only where Haiku has already fallen short: a question it gave up on
+// or fumbled, an answer SIMnet marked wrong (the retry, with SIMnet's hint), or a
+// graded SIMnet task where a wrong answer would stand. Worksheets, drag questions,
+// SIMnet and calculations, where it is likeliest to slip, get more thinking time
+// and room on Haiku (MODELS.hard). "Sonnet for hard questions" (hardOnSonnet) in
+// the bar's settings starts those on Sonnet instead, as versions before 1.0.14 did.
 const UPGRADE_TO = {
   'claude-haiku-5-5':  'claude-sonnet-5-5',
   'claude-sonnet-5-5': 'claude-sonnet-5-5'
 };
 
-function pickModel(baseModel, pageData, autoUpgrade) {
+const isHard = pageData => !!(pageData?.isWorksheet || pageData?.isDrag || pageData?.isSimnet || isMath(pageData));
+
+function pickModel(baseModel, pageData, autoUpgrade, stronger = false) {
   if (!autoUpgrade) return baseModel;
-  const hard = pageData?.isWorksheet || pageData?.isDrag || pageData?.isSimnet || isMath(pageData);
-  return hard ? (UPGRADE_TO[baseModel] ?? baseModel) : baseModel;
+  return stronger ? (UPGRADE_TO[baseModel] ?? baseModel) : baseModel;
 }
 
 // A multiple-choice page answered with a click that picks no choice at all
@@ -408,9 +414,12 @@ function systemFor(hint) {
   return text.length >= 1800 ? [{ type: 'text', text, cache_control: { type: 'ephemeral' } }] : text;
 }
 
-async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = [], isCanvas = false, retryHint = '', picture = null, instruction = '', only = null) {
+async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = [], isCanvas = false, retryHint = '', picture = null, instruction = '', only = null, hard = false) {
   const model = resolveModel(modelId);
   const cfg = MODELS[model];
+  // More thinking time and room, on the models that are given less by default
+  const stretch = hard ? cfg.hard : null;
+  const room = stretch?.maxTokens ?? cfg.maxTokens;
 
   // The question each control belongs to. Usually one for the whole page,
   // and then it's stated once, in full: repeated beside every element it was
@@ -489,9 +498,9 @@ ${elementList || '(none found)'}`;
     // single index does
     // One index per question adds up on a long quiz
     // — and thinking first, on a model that thinks: twice its usual room.
-    max_tokens: isWorksheet ? Math.max(cfg.maxTokens * 2, 1500 + 20 * elements.length)
-              : isCanvas    ? Math.max(cfg.maxTokens, 600)
-              : cfg.maxTokens,
+    max_tokens: isWorksheet ? Math.max(room * 2, 1500 + 20 * elements.length)
+              : isCanvas    ? Math.max(room, 600)
+              : room,
     system: systemFor(isSimnet ? SIMNET_HINT : isWorksheet ? WORKSHEET_HINT : isCanvas ? CANVAS_HINT : ''),
     // A screenshot, when the page's text wasn't enough, goes ahead of the words
     messages: [{ role: 'user', content: picture
@@ -510,7 +519,7 @@ ${elementList || '(none found)'}`;
     requestBody.output_config = { format: { type: 'json_schema', schema: ACTION_SCHEMA } };
     // A retry is the last automatic chance at the task, and a worksheet is a
     // whole problem's worth of linked entries, so those think harder
-    if (cfg.effort) requestBody.output_config.effort = (retryHint || isWorksheet) ? 'medium' : cfg.effort;
+    if (cfg.effort) requestBody.output_config.effort = (retryHint || isWorksheet) ? 'medium' : stretch?.effort ?? cfg.effort;
   }
 
   // "default" lets Anthropic pick the fallback by the reason for the decline,
@@ -1473,7 +1482,7 @@ const tidySimnetText = t => String(t)
   .replace(/\nFile\nHome\n[\s\S]*?\n100%\n/, '\n')
   .replace(/\n\d{1,2}:\d{2} (?:AM|PM)\n\d{1,2}\/\d{1,2}\/\d{4}\n/, '\n');
 
-async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true, log = null, host = '', remember = false, cheapFirst = false) {
+async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true, log = null, host = '', remember = false, cheapFirst = false, hardOnSonnet = false) {
   let usedModel = baseModel;   // reported back so the UI can show an upgrade
   const isConnect = /(^|\.)mheducation\.com$/.test(host);
   const useBook = remember && isConnect;   // the answer memory: Connect shows the right answer, so only there
@@ -1516,6 +1525,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   let parts = null;        // a question split into tabs (Required 1, Required 2)
   const doneParts = [];    // ...and the ones answered this run
   let escalated = false;   // Auto gave the question to the stronger model after the cheap one gave up
+  let hardPage = false;    // the page is one Haiku is likeliest to slip on: a failed step there goes to the stronger model
   let shotTried = false;   // a screenshot was added after the text alone failed
   const canEscalate = () => autoUpgrade && !escalated
     && !!UPGRADE_TO[baseModel] && UPGRADE_TO[baseModel] !== usedModel;
@@ -1619,14 +1629,17 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         } else {
           const simStuck = pageData.isSimnet && (ungradedDone > 0 || attempt > 0);
           picture = (pageData.isSimnet ? simStuck : (pageData.needsPicture || shotTried)) ? await captureTab(tabId, frameId) : null;
-          // A formula to type, on a graded exam where a wrong one can be tried again:
-          // the cheapest model first if asked, SIMnet's own verdict being the check
-          // and the stronger model (with its hint) the retry
+          // Haiku first on everything. SIMnet's own verdict is the check on a formula,
+          // and the stronger model (with SIMnet's hint) the retry; on a graded task
+          // where a wrong answer would stand — the last attempt, or Answer only,
+          // where nothing retries — it is the stronger model from the start
           const formulaTask = !!pageData.isSimnet && isFormulaTask(pageText);
           const retryPossible = !!postClicks.length && !!attempts && attempts.current + 1 < attempts.total;
+          hardPage = isHard(pageData);
+          const stronger = (hardOnSonnet && hardPage)
+            || (!!pageData.isSimnet && (!!retryHint || (!!attempts && !retryPossible)));
           usedModel = escalated ? (UPGRADE_TO[baseModel] ?? baseModel)
-            : (cheapFirst && formulaTask && round === 0 && !retryHint && retryPossible) ? baseModel
-            : pickModel(baseModel, pageData, autoUpgrade);
+            : pickModel(baseModel, pageData, autoUpgrade, stronger);
           // The cells, what just appeared and nothing else, for a formula to be typed
           const compact = cheapFirst && formulaTask && completed === 0 && !retryHint && !compactFailed;
           const only = compact
@@ -1635,7 +1648,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
           // A worksheet can think for longer than the bar's silence
           // timer, which would call the run dead mid-answer
           const stopBeat = heartbeat(tabId, step + 1, budget);
-          ({ action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint, picture, '', only)
+          ({ action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint, picture, '', only, hardPage)
             .finally(stopBeat));
           // Anything but typing, from a list with no ribbon in it, means it wanted the
           // ribbon: ask again with all of it
@@ -1806,6 +1819,9 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         }
 
         lastError = result?.error ?? 'Execution returned failure without an error message';
+        // A step that didn't take, on a page Haiku is likeliest to slip on:
+        // the stronger model has the next try
+        if (hardPage && canEscalate()) escalated = true;
       } catch (e) {
         lastError = e.message;
         // Haiku 5.5 has no server-side fallback: on Auto, a question it
@@ -1814,6 +1830,9 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         if (e.message.startsWith('Rate limit') || e.final) {
           return { success: false, error: lastError };
         }
+        // ...and so does a reply that can't be used (ran out of room, not an action,
+        // an item that isn't there) on one of those pages
+        if (hardPage && canEscalate()) { escalated = true; attempt--; continue; }
       }
 
       if (attempt < MAX_RETRIES) {
@@ -2237,8 +2256,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type !== 'RUN_GOAL') return;
 
   (async () => {
-    const { apiKey: rawKey, model: savedModel, autoUpgrade, keepLog, rememberAnswers, cheapFormulas } =
-      await chrome.storage.local.get(['apiKey', 'model', 'autoUpgrade', 'keepLog', 'rememberAnswers', 'cheapFormulas']).catch(() => ({}));
+    const { apiKey: rawKey, model: savedModel, autoUpgrade, keepLog, rememberAnswers, cheapFormulas, hardOnSonnet } =
+      await chrome.storage.local.get(['apiKey', 'model', 'autoUpgrade', 'keepLog', 'rememberAnswers', 'cheapFormulas', 'hardOnSonnet']).catch(() => ({}));
     const baseModel = resolveModel(savedModel);
     const apiKey = cleanKey(rawKey);
     if (!apiKey) {
@@ -2259,7 +2278,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     let result;
     try {
       result = await runGoal(apiKey, msg.notes ?? '', tabId, msg.postClicks ?? [], baseModel, autoUpgrade !== false, log,
-        hostOf(sender.url ?? sender.tab?.url), rememberAnswers !== false, cheapFormulas === true);
+        hostOf(sender.url ?? sender.tab?.url), rememberAnswers !== false, cheapFormulas === true, hardOnSonnet === true);
     } catch (e) {
       // Anything unexpected still has to come back as an answer. Without this
       // the reply never arrives and the widget sits on "Answering…" forever.

@@ -179,7 +179,7 @@ Tap **More** for the rest:
 
 | Setting | What it does |
 |---|---|
-| **Model** | Which AI does the thinking. **Auto** *(default, recommended)* uses **Haiku 5.5**, the cheapest, for most questions and **Sonnet 5.5** for SIMnet, worksheets, drag-and-drop and questions with sums to work out — and it hands a question to Sonnet 5.5 when the cheap one gets stuck. The bar shows **↑ Sonnet 5.5** when it steps up. Or pick one to use every time: **Haiku 5.5** is fastest and cheapest, **Sonnet 5.5** is better at hard subjects (around a cent a question) |
+| **Model** | Which AI does the thinking. **Auto** *(default, recommended)* uses **Haiku 5.5**, the cheapest, for everything — SIMnet, worksheets, drag-and-drop and calculations too, where it is given longer to think — and hands a question to **Sonnet 5.5** when Haiku gets stuck, or when SIMnet marks a formula wrong (the retry), or on a graded SIMnet task where a wrong answer would stand (your last attempt). The bar shows **↑ Sonnet 5.5** when it steps up. Or pick one to use every time: **Haiku 5.5** is fastest and cheapest, **Sonnet 5.5** is better at hard subjects (around a cent a question) |
 | **Notes** *(optional)* | Extra context to improve accuracy, e.g. *"This is financial accounting — use GAAP conventions."* Fine to leave blank |
 | **Answer log** | *Off unless you turn it on.* Saves each question it answers — what it was asked, what it picked, and how the page looked straight after, which is where Connect shows "Correct"/"Incorrect" and SIMnet its hint — in your browser only. When an answer was wrong, tap the **thumbs-down** that appears on the bar (most reliable in *One question* mode, since on Autopilot it may already have moved on). **Download** saves it as a file you can share to help tune Auto; **Clear** takes two taps. It adds under a second per question while it's on |
 | **Right answers** | *On by default.* On Connect, when an answer is marked wrong the page shows the right one. Page Agent keeps it, in your browser only, and gives it the next time that question comes up, with no call to Claude. The switch turns it off; **Clear** (two taps) forgets everything it has kept |
@@ -198,9 +198,14 @@ You're billed by Anthropic for what you use. With the default model, Haiku 5.5:
 | 100 questions | **about 3 cents** |
 | $5 of credit | **well over 10,000 questions** |
 
-On **Auto**, the harder questions (SIMnet, worksheets, drag-and-drop, calculations) go to Sonnet 5.5. A SIMnet formula question costs about **2 cents** (a 40-question exam, under a dollar); it used to be about 5, because pressing Enter after each typed formula was a call of its own. Most of what Sonnet costs is it thinking, not what it reads: on a real day's bill, about 60%. These are estimates; the exact cost depends on how long the question is and how much the model thinks. **More → Cost** shows what Anthropic actually charged for what you've answered since you last pressed Reset, split by model and with how much came from the cache; your account's own figures are on console.anthropic.com under **Usage**.
+On **Auto**, everything starts on Haiku 5.5, the harder questions (SIMnet, worksheets, drag-and-drop, calculations) included. Before 1.0.14 those went straight to Sonnet 5.5, where a SIMnet formula question cost about **2 cents** (a 40-question exam, under a dollar; it was about 5 before pressing Enter after each typed formula stopped being a call of its own). Haiku is roughly a tenth of that when it gets the answer first time; when it doesn't, Sonnet is called on top. Most of what Sonnet costs is it thinking, not what it reads: on a real day's bill, about 60%. These are estimates; the exact cost depends on how long the question is and how much the model thinks. **More → Cost** shows what Anthropic actually charged for what you've answered since you last pressed Reset, split by model and with how much came from the cache; your account's own figures are on console.anthropic.com under **Usage**.
 
-**Cheapest formulas** (More → Cost, off unless you turn it on) goes further, and changes what the model sees and which model answers, so try it on a practice exam first: SIMnet formulas go to Haiku 5.5 first, with less of the page sent, and to Sonnet 5.5 with SIMnet's hint if SIMnet marks the first try wrong (Autopilot only, and never on your last attempt). That is roughly a tenth of the cost again, but a wrong first try uses one of your attempts.
+Two switches under More → Cost, both off:
+
+- **Sonnet for hard questions** brings back the old plan: SIMnet, worksheets, drag-and-drop and calculations start on Sonnet 5.5 instead of Haiku 5.5. It costs several times more on those, and is the one to turn on if Haiku gets more of them wrong than you'd like.
+- **Cheapest formulas** sends SIMnet formula questions with less of the page. It costs a little less again, but changes what the model reads, so try it on a practice exam first.
+
+A wrong first try on SIMnet uses one of your attempts, whichever model made it. Haiku-first on those has not been measured against Sonnet's accuracy; **More → Cost** and the answer log are how to see how it's going.
 
 ---
 

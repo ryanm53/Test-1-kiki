@@ -92,8 +92,8 @@ const WORDS = '<p class="prompt">Which of the following best describes how the a
     const p = boot(html, { installLayout: flat, storage: oneQuestion, reply: b => as(b, { action: 'click', index: 0 }) });
     p.pressPlay();
     await settle(p);
-    check('a question with sums AND a picture: Sonnet reads it, picture and all',
-      hasImage(p.requests[0]) && p.requests[0].model === 'claude-sonnet-5-5', `${p.requests[0]?.model}`);
+    check('a question with sums AND a picture: Haiku reads it, picture and all',
+      hasImage(p.requests[0]) && p.requests[0].model === 'claude-haiku-5-5', `${p.requests[0]?.model}`);
   }
   {
     const html = `<body><div role="main">${WORDS}<img src="exhibit.png" alt="">${CHOICES}</div></body>`;
@@ -146,7 +146,7 @@ const WORDS = '<p class="prompt">Which of the following best describes how the a
     const shots = p.requests.map(r => hasImage(r));
     check('SIMnet: the first looks are text only', shots[0] === false && shots[1] === false, shots.join());
     check('SIMnet: once a "done" goes ungraded, the next step comes with a screenshot',
-      shots.length >= 3 && shots[2] === true && p.requests[2].model === 'claude-sonnet-5-5', `${shots.join()} ${p.requests[2]?.model}`);
+      shots.length >= 3 && shots[2] === true && p.requests[2].model === 'claude-haiku-5-5', `${shots.join()} ${p.requests[2]?.model}`);
   }
   {
     const cells = Array.from({ length: 60 }, (_, i) => `<td class="grdbdy-cell has-value" id="cell-A${i + 1}" tabindex="0">${i}</td>`).join('');

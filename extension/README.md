@@ -121,12 +121,28 @@ replaced carry over: `claude-haiku-4-5` → `claude-haiku-5-5`, `claude-sonnet-5
 
 ### Auto model choice
 
-On **Auto** (the default: Haiku 5.5 with `autoUpgrade` on), `pickModel` sends a page to
-Sonnet 5.5 when it needs working out rather than recall: SIMnet, worksheets, drag
-questions, and calculation questions — three or more distinct dollar amounts or
-percentages across the question and its choices (`isMath`; Canvas excepted, since a
-whole quiz on one page would add up every question's). A real accounting log had Haiku
-wrong or giving up on every one of those. Everything else stays on Haiku.
+On **Auto** (the default: Haiku 5.5 with `autoUpgrade` on), every page starts on Haiku
+5.5, and Sonnet 5.5 takes over only where Haiku has already fallen short. Before 1.0.14
+`pickModel` sent a page to Sonnet at once when it needed working out rather than recall
+(`isHard`: SIMnet, worksheets, drag questions, and calculation questions — three or more
+distinct dollar amounts or percentages across the question and its choices, `isMath`;
+Canvas excepted, since a whole quiz on one page would add up every question's), because
+a real accounting log had Haiku, at low effort, wrong or giving up on every calculation.
+Now those pages stay on Haiku but are given what Sonnet had: `MODELS[].hard` makes it
+think at `medium` effort with `maxTokens` 8000 (a worksheet doubles that, as before),
+and Sonnet comes in on any of these: (1) a first-step `none`, a click that picks no
+choice, or a refusal (below); (2) on a hard page, a step that fails or a reply that
+can't be used (ran out of room, not an action, an item that isn't there) — `hardPage`,
+`escalated`; (3) SIMnet marking a formula wrong, retried with its hint (Autopilot, never
+on the last attempt); (4) a graded SIMnet task where a wrong answer would stand — the
+attempt counter is showing and no retry is possible (the last attempt, or Answer only) —
+which is Sonnet from the start. An ungraded SIMnet page, with no counter, stays on
+Haiku. **Sonnet for hard questions** (`hardOnSonnet`, More → Cost, off) brings back the
+old plan: those pages start on Sonnet at `low` effort, and the request is word for word
+what picking Sonnet 5.5 sends. An ordinary question is the same request as before in
+every setting. The cost of Haiku-first on a hard page is accuracy that has not been
+measured against Sonnet's (no API key was available to do it); More → Cost and the log's
+per-step `usage` are how to see what it costs, and the wrong answers are the other half.
 
 Haiku can still give up on a question it could see. On Auto, a first-step `none`, or a
 click that picks no radio/checkbox on a page that has them (the question's own box, a
@@ -220,14 +236,14 @@ change between sites.
   total (`recordSpend`, shown under More → Cost, `SPEND_GET` / `SPEND_RESET`) and kept
   on each log step. Verified: with the setting off, the first request of a SIMnet
   formula, a Connect question and a calculation is byte-identical to the previous
-  version's but for the cache marker. **Cheapest formulas** (`cheapFormulas`, off) is the
-  part that is not free: on a graded exam where a retry is possible, a formula task
-  (`isFormulaTask`: the first sentence says to enter/type/write a formula or function,
-  and doesn't mention a dialog, ribbon, button, menu or tab) goes to the base model
-  with the list cut to the cells (`only`, numbers unchanged) and the page text
-  stripped of the ribbon's words and the clock (`tidySimnetText`); a wrong verdict
-  retries on the stronger model with the hint and everything; and a reply that isn't
-  typing gets the whole list.
+  version's but for the cache marker (that was before Haiku-first, 1.0.14, which does
+  change the model: see Auto model choice). **Cheapest formulas** (`cheapFormulas`, off) is
+  the part that changes what the model reads: on a graded exam where a retry is
+  possible, a formula task (`isFormulaTask`: the first sentence says to
+  enter/type/write a formula or function, and doesn't mention a dialog, ribbon, button,
+  menu or tab) is sent with the list cut to the cells (`only`, numbers unchanged) and
+  the page text stripped of the ribbon's words and the clock (`tidySimnetText`), and a
+  reply that isn't typing gets the whole list; a wrong verdict's retry has everything.
 - **Matching questions** — a Connect matching question (drop boxes beside labels, a
   pool of cards) has no inputs, and a real run stopped on `Referred to item 0, which
   isn't on the page`: the list was empty. `findQuestionFrame` now counts drag
@@ -296,9 +312,8 @@ change between sites.
   window, only if the tab is the active one, shrunk to 1568px on a side in the
   service worker (`OffscreenCanvas`) — as an image block ahead of the text. It's
   also tried once when the text alone gives "none" or a click that picks no choice,
-  before a stronger model is. It goes to whichever model the page calls for: Haiku 5.5
-  for an ordinary question, Sonnet 5.5 for a worksheet, a sum or a table, and for
-  a question that Auto steps up on (about 0.4¢ more on Sonnet, 0.02¢ on Haiku).
+  before a stronger model is. It goes to whichever model is answering: Haiku 5.5
+  to begin with, Sonnet 5.5 for a question that Auto steps up on (about 0.4¢ more on Sonnet, 0.02¢ on Haiku).
   The model still answers with listed items by number — the image is to read, not
   to point at. On SIMnet only once a task is going wrong (`ungradedDone`, or a retry
   after a failed step), not on every step; a failed capture just means text

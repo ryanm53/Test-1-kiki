@@ -60,7 +60,7 @@ const PAGE = (card = id => `data-rfd-drag-handle-draggable-id="${id}" data-rfd-d
     await wait(300);
     const keys = p.debuggerCalls.filter(c => c.type === 'keyDown' || c.type === 'rawKeyDown').map(c => c.key);
     check('a move is made with real keys: lift, up, drop', keys.join() === ' ,ArrowUp, ' || (keys[0] === ' ' && keys.includes('ArrowUp') && keys.at(-1) === ' '), keys.join('|'));
-    check('  on the stronger model, as drag questions are', p.requests[0]?.model === 'claude-sonnet-5-5', p.requests[0]?.model);
+    check('  on Haiku 5.5 like the rest, given longer to think', p.requests[0]?.model === 'claude-haiku-5-5' && p.requests[0]?.output_config?.effort === 'medium', `${p.requests[0]?.model} ${p.requests[0]?.output_config?.effort}`);
   }
 
   // dnd-kit says it with aria-roledescription

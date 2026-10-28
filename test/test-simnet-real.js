@@ -188,7 +188,9 @@ test(async check => {
   // No attempt counter: not a graded page; "done" is taken at its word
   const { p } = start({ counter: false }, b => as(b, { action: 'none' }));
   p.pressPlay(); const final = await settle(p, 60000);
-  check('ungraded SIMnet: no nagging, one call', p.requests.length === 1, `${p.requests.length} calls: ${final}`);
+  // Haiku saying "none" at the start is taken as it giving up: Sonnet looks once more, and no more
+  check('ungraded SIMnet: no nagging — Haiku, then Sonnet once more, then it stops',
+    p.requests.length === 2 && p.requests.map(r => r.model).join() === 'claude-haiku-5-5,claude-sonnet-5-5', `${p.requests.map(r => r.model)}: ${final}`);
 });
 
 // Q29 "Modify this worksheet so gridlines will print": Sheet Options has two

@@ -84,7 +84,8 @@ const oneQuestion = { lastPresetIndex: 0, autoContinue: false };
     check('page text is the question area, not an empty form', pageText.includes('Clayton Carpentry'), JSON.stringify(pageText.slice(0, 80)));
     check('the question is there in full, amounts and all', prompt.includes('estimated uncollectible accounts of $9,000'));
     check('stated once, not cut short beside every element', !prompt.includes('(question:'));
-    check('a question with sums in it goes to Sonnet 5.5 on Auto', p.requests[0]?.model === 'claude-sonnet-5-5', p.requests[0]?.model);
+    check('a question with sums in it starts on Haiku 5.5 on Auto, given longer to think', p.requests[0]?.model === 'claude-haiku-5-5'
+      && p.requests[0]?.output_config?.effort === 'medium' && p.requests[0]?.max_tokens >= 8000, `${p.requests[0]?.model} ${p.requests[0]?.output_config?.effort} ${p.requests[0]?.max_tokens}`);
     check('picked the choice it was told to', p.w.document.getElementById('c3').checked);
   }
 

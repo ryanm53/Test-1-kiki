@@ -5,10 +5,12 @@
 // 1,200 tokens a call) — and 2.5 calls went into every SIMnet question, because
 // pressing Enter after a typed formula was a call of its own, every time.
 //
-// By default only things that cannot change an answer are done: the long
-// instructions are marked for caching, Enter is pressed without asking, and what
-// each call really cost is recorded and shown. The cheaper-but-different things —
-// less of the page sent, the cheapest model first — are behind a switch, off.
+// Three things cannot change an answer, and are always on: the long instructions
+// are marked for caching, Enter is pressed without asking, and what each call
+// really cost is recorded and shown. Haiku 5.5 as the starting model for everything
+// can, so Sonnet 5.5 takes over wherever Haiku has already fallen short, and one
+// switch ("Sonnet for hard questions") brings back the old way. Sending less of the
+// page is a second switch, off.
 const { boot, settle, until, bodyText } = require('./harness');
 
 let failed = 0;
@@ -138,13 +140,89 @@ const typeIt = formula => (b, n) => as(b, n === 1 ? { action: 'type', cell: 'D2'
     check('a formula typed into a dialog box gets no Enter of ours', enters === 0 && p.w.document.getElementById('rule').value === '=A1>5', `${enters} Enters`);
   }
 
-  // ── Off by default: what the model reads and which model reads it ────────
+  // ── Which model: Haiku 5.5 first, on everything ──────────────────────────
+  const TASK = 'Enter a formula in cell D2 to extract the last two letters of the code in cell A2.';
   {
     const f = '=RIGHT(A2,2)';
-    const { p } = await run(sheet('Enter a formula in cell D2 to extract the last two letters of the code in cell A2.'), f, typeIt(f));
+    const { p } = await run(sheet(TASK), f, typeIt(f));
     const prompt = bodyText(p.requests[0]);
     check('by default the model reads the ribbon and Windows items as before', /Home tab/.test(prompt) && /Recycle Bin/.test(prompt), prompt.slice(-300));
-    check('  and it is Sonnet 5.5, as before', p.requests[0]?.model === 'claude-sonnet-5-5', p.requests[0]?.model);
+    check('  and a SIMnet formula starts on Haiku 5.5, given room and time to think',
+      p.requests[0]?.model === 'claude-haiku-5-5' && p.requests[0]?.output_config?.effort === 'medium' && p.requests[0]?.max_tokens === 8000,
+      `${p.requests[0]?.model} ${p.requests[0]?.output_config?.effort} ${p.requests[0]?.max_tokens}`);
+    check('  right the first time, so Sonnet is never called', p.requests.length === 1, p.requests.map(r => r.model).join());
+
+    // "Sonnet for hard questions": exactly the request that used to be sent
+    const old = await run(sheet(TASK), f, typeIt(f), { hardOnSonnet: true });
+    const fixed = await run(sheet(TASK), f, typeIt(f), { model: 'claude-sonnet-5-5', autoUpgrade: false });
+    check('with Sonnet for hard questions on, it starts on Sonnet 5.5, thinking as little as it did',
+      old.p.requests[0]?.model === 'claude-sonnet-5-5' && old.p.requests[0]?.output_config?.effort === 'low' && old.p.requests[0]?.max_tokens === 8000,
+      `${old.p.requests[0]?.model} ${old.p.requests[0]?.output_config?.effort}`);
+    check('  and what it sends is what choosing Sonnet 5.5 sends, word for word',
+      JSON.stringify(old.p.requests[0]) === JSON.stringify(fixed.p.requests[0]));
+  }
+  {
+    // An ordinary question is asked as it always was
+    const html = '<body><div role="main"><p>Pick one.</p><input type="radio" aria-label="Yes"><input type="radio" aria-label="No"><button class="next-button">Next</button></div></body>';
+    const ask = async storage => {
+      const q = boot(html, { installLayout: flat, url: CONNECT, storage: { lastPresetIndex: 1, autoContinue: false, ...storage }, reply: b => as(b, { action: 'click', index: 0 }) });
+      q.pressPlay(); await settle(q); return q.requests[0];
+    };
+    const auto = await ask({}), haiku = await ask({ model: 'claude-haiku-5-5', autoUpgrade: false }), hard = await ask({ hardOnSonnet: true });
+    check('an ordinary question: Haiku 5.5, thinking low, as before',
+      auto?.model === 'claude-haiku-5-5' && auto?.output_config?.effort === 'low' && auto?.max_tokens === 2048, `${auto?.model} ${auto?.output_config?.effort} ${auto?.max_tokens}`);
+    check('  the same request with or without Auto, and with Sonnet for hard questions on',
+      JSON.stringify(auto) === JSON.stringify(haiku) && JSON.stringify(auto) === JSON.stringify(hard));
+  }
+  {
+    // SIMnet marks it wrong: Sonnet, with SIMnet's hint, is the retry — on Autopilot
+    const right = '=RIGHT(A2,2)';
+    const reply = (b, n) => as(b, n === 1 ? { action: 'type', cell: 'D2', text: '=LEFT(A2,2)' } : { action: 'type', cell: 'D2', text: right });
+    const { p, st } = await run(sheet(TASK), right, reply);
+    check('a wrong first formula: Haiku, then Sonnet 5.5 with SIMnet\'s hint',
+      p.requests.map(r => r.model).join() === 'claude-haiku-5-5,claude-sonnet-5-5' && /marked your previous attempt at this task INCORRECT/.test(bodyText(p.requests[1])), p.requests.map(r => r.model).join());
+    check('  and that one thinks harder', p.requests[1]?.output_config?.effort === 'medium');
+    check('  the right formula ends up in the cell', st.committed === right && st.popups.join() === 'Incorrect,Correct', `${JSON.stringify(st.committed)} ${st.popups}`);
+  }
+  {
+    // Where a wrong answer would stand, it is Sonnet from the start
+    const f = '=RIGHT(A2,2)';
+    const last = await run(sheet(TASK, '3 of 3 Attempts'), f, typeIt(f));
+    check('on the last attempt: Sonnet 5.5 from the start', last.p.requests[0]?.model === 'claude-sonnet-5-5', last.p.requests[0]?.model);
+    const answerOnly = await run(sheet(TASK), f, typeIt(f), { lastPresetIndex: 1 });
+    check('  and graded in Answer only mode, where nothing retries', answerOnly.p.requests[0]?.model === 'claude-sonnet-5-5', answerOnly.p.requests[0]?.model);
+    const bare = sheet(TASK).replace('<span id="attempts">1 of 3 Attempts</span>', '');
+    const ungraded = await run(bare, f, typeIt(f));
+    check('  not on an ungraded page, where nothing is at stake: Haiku 5.5', ungraded.p.requests[0]?.model === 'claude-haiku-5-5', ungraded.p.requests[0]?.model);
+  }
+  {
+    // Haiku fumbles a step on a hard page: Sonnet has the next try
+    const f = '=RIGHT(A2,2)';
+    const { p } = await run(sheet(TASK), f, (b, n) => as(b, n === 1 ? { action: 'click', index: 999 } : { action: 'type', cell: 'D2', text: f }));
+    check('a reply Haiku gets wrong on SIMnet: Sonnet 5.5 for the next try',
+      p.requests.map(r => r.model).join() === 'claude-haiku-5-5,claude-sonnet-5-5', p.requests.map(r => r.model).join());
+    // ...but not for a plain question, which asks Haiku again, as it always did
+    const q = boot('<body><div role="main"><p>Pick one.</p><input type="radio" aria-label="Yes"><input type="radio" aria-label="No"><button class="next-button">Next</button></div></body>', {
+      installLayout: flat, url: CONNECT, storage: { lastPresetIndex: 1, autoContinue: false },
+      reply: (b, n) => as(b, n === 1 ? { action: 'click', index: 999 } : { action: 'click', index: 0 }) });
+    q.pressPlay(); await settle(q);
+    check('  and not for a plain question: Haiku again', q.requests.map(r => r.model).join() === 'claude-haiku-5-5,claude-haiku-5-5', q.requests.map(r => r.model).join());
+  }
+  {
+    // A worksheet and a calculation, likewise
+    const cell = id => `<td><input id="${id}"></td>`;
+    const ws = `<body><div role="main"><p>Record the December adjustments.</p><table>
+      <tr><td></td><td>Deferred Revenue</td><td>Service Revenue</td></tr>
+      <tr><td>Adjustment</td>${cell('w1')}${cell('w2')}</tr>
+      <tr><td>Ending balance</td>${cell('w3')}${cell('w4')}</tr></table></div></body>`;
+    const fill = b => as(b, { action: 'fill', fills: [0, 1, 2, 3].map(i => ({ index: i, value: '5' })) });
+    const w = boot(ws, { installLayout: flat, url: CONNECT, storage: { lastPresetIndex: 1, autoContinue: false }, reply: fill });
+    w.pressPlay(); await settle(w);
+    const wh = boot(ws, { installLayout: flat, url: CONNECT, storage: { lastPresetIndex: 1, autoContinue: false, hardOnSonnet: true }, reply: fill });
+    wh.pressPlay(); await settle(wh);
+    check('a worksheet: Haiku 5.5, or Sonnet 5.5 with Sonnet for hard questions on',
+      w.requests[0]?.model === 'claude-haiku-5-5' && wh.requests[0]?.model === 'claude-sonnet-5-5', `${w.requests[0]?.model} / ${wh.requests[0]?.model}`);
+    check('  a worksheet on Haiku has as much room as on Sonnet', w.requests[0]?.max_tokens >= 16000 && w.requests[0]?.max_tokens === wh.requests[0]?.max_tokens, `${w.requests[0]?.max_tokens} / ${wh.requests[0]?.max_tokens}`);
   }
 
   // ── Cheapest formulas, switched on ───────────────────────────────────────
@@ -185,6 +263,14 @@ const typeIt = formula => (b, n) => as(b, n === 1 ? { action: 'type', cell: 'D2'
     sw.dispatchEvent(new p.w.MouseEvent('click', { bubbles: true }));
     await until(() => p.store.cheapFormulas === true, 8000);
     check('  and the switch turns it on', p.store.cheapFormulas === true && sw.getAttribute('aria-checked') === 'true');
+    const hs = p.shadow().getElementById('hardSw');
+    check('Sonnet for hard questions starts off', hs.getAttribute('aria-checked') === 'false' && p.store.hardOnSonnet === undefined);
+    hs.dispatchEvent(new p.w.MouseEvent('click', { bubbles: true }));
+    await until(() => p.store.hardOnSonnet === true, 8000);
+    check('  and the switch turns it on', p.store.hardOnSonnet === true && hs.getAttribute('aria-checked') === 'true');
+    hs.dispatchEvent(new p.w.MouseEvent('click', { bubbles: true }));
+    await until(() => p.store.hardOnSonnet === false, 8000);
+    check('  and off again', p.store.hardOnSonnet === false && hs.getAttribute('aria-checked') === 'false');
   }
 
   console.log(failed ? `\n${failed} failed` : '\nAll cost checks passed');

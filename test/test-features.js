@@ -70,8 +70,8 @@ const run = async (html, opts) => {
     const v = id => doc.getElementById(id).value;
     check('accounting worksheet: every cell filled',
       v('w1') === '-500' && v('w2') === '500' && v('w3') === '1500' && v('w4') === '500', final);
-    check('accounting worksheet: upgraded model', page.requests[0]?.model === 'claude-sonnet-5-5',
-      page.requests[0]?.model);
+    check('accounting worksheet: Haiku 5.5, thinking harder', page.requests[0]?.model === 'claude-haiku-5-5'
+      && page.requests[0]?.output_config?.effort === 'medium', `${page.requests[0]?.model} ${page.requests[0]?.output_config?.effort}`);
     check('accounting worksheet: cells labelled by column and row',
       JSON.stringify(page.requests[0]?.messages).includes('Deferred Revenue — Adjustment'));
   });

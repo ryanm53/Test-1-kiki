@@ -126,7 +126,7 @@ const ANSWER = {
   check('every line it was told to fill lands in the right box', wrong.length === 0, wrong.join('; '));
   const empty = Array.from(p.w.document.querySelectorAll('[data-id]')).filter(el => !(el.dataset.id in ANSWER)).filter(el => el.value);
   check('and no other box is touched', empty.length === 0, empty.map(e => e.dataset.id).join());
-  check('it goes to Sonnet 5.5 (a worksheet), in one call', p.requests.length === 1 && p.requests[0].model === 'claude-sonnet-5-5', `${p.requests.map(r => r.model)}`);
+  check('it starts on Haiku 5.5 (a worksheet), in one call', p.requests.length === 1 && p.requests[0].model === 'claude-haiku-5-5', `${p.requests.map(r => r.model)}`);
   check('with the guidance for effects tables: changes, minus signs, balancing',
     /EFFECTS of a transaction/.test(p.requests[0]?.system ?? '') && /It must balance/.test(p.requests[0]?.system ?? ''));
   check('and the figures and the note are in what it reads', /72,000/.test(bodyText(p.requests[0])) && /minus sign/.test(bodyText(p.requests[0])));

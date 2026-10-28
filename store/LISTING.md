@@ -5,8 +5,8 @@ Once it's on the store, your friends install it with one click and Chrome keeps 
 ## What you do, once (about 20 minutes, plus waiting for Google)
 
 1. **Make a developer account.** Go to <https://chrome.google.com/webstore/devconsole>, sign in with your Google account and pay the one-time $5 fee. Google may ask you to verify your email or identity first. When it asks whether you're a *trader*, answer **No**: you're not selling anything.
-2. **Upload the extension.** Click **New item** and upload **`page-agent-1.0.13.zip`**. Download it here:
-   <https://github.com/ryanm53/Test-1-kiki/raw/claude/page-agent-extension-0xpw4s/store/page-agent-1.0.13.zip>
+2. **Upload the extension.** Click **New item** and upload **`page-agent-1.0.14.zip`**. Download it here:
+   <https://github.com/ryanm53/Test-1-kiki/raw/claude/page-agent-extension-0xpw4s/store/page-agent-1.0.14.zip>
 
    ⚠️ Not GitHub's green **Code → Download ZIP** button: that's the whole project (tests, notes, these instructions), and the store turns it down with *"Files outside directory with manifest … are not allowed"*. Upload the zip from the link exactly as it downloads; don't unzip it first.
 3. **Fill in the four tabs** by copying from the sections below: **Store listing**, **Privacy**, **Distribution**, and **Test instructions** if it's shown.
@@ -54,7 +54,7 @@ PICTURES TOO
 If a question is a picture, a chart or a table drawn as an image, or a task gets stuck, Page Agent sends a screenshot of what's on screen along with the text, with a small number on each button so it can point at the right one — only then.
 
 YOUR OWN KEY, YOUR OWN COST
-Page Agent uses Claude through your own Anthropic API key (console.anthropic.com). On Auto, easy questions go to the cheapest model (a few cents per 100 questions) and hard ones (worksheets, calculations, spreadsheets) to a stronger one (a few cents each). A running total of what your answers have cost is under More → Cost.
+Page Agent uses Claude through your own Anthropic API key (console.anthropic.com). On Auto, everything starts on the cheapest model (a few cents per 100 questions), and a stronger one steps in when it gets stuck or a spreadsheet answer is marked wrong. A running total of what your answers have cost is under More → Cost.
 
 OUT OF THE WAY WHEN YOU WANT
 Drag the bar anywhere, or hide it with the – button and bring it back with Alt+Shift+H or the toolbar button.

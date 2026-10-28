@@ -92,7 +92,7 @@ test(async check => {
   check('model: menu has Auto and the two models',
     [...$('model').options].map(o => o.textContent).join() === 'Auto,Haiku 5.5,Sonnet 5.5');
   page.pressPlay(); await settle(page);
-  check('model: Auto upgrades a worksheet to Sonnet 5.5', page.requests[0]?.model === 'claude-sonnet-5-5', page.requests[0]?.model);
+  check('model: Auto starts a worksheet on Haiku 5.5', page.requests[0]?.model === 'claude-haiku-5-5', page.requests[0]?.model);
 });
 
 test(async check => {

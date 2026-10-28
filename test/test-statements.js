@@ -55,7 +55,7 @@ const oneQuestion = { lastPresetIndex: 0, autoContinue: false };
       /Beginning Inventory \| 450 \| \$ 2\.45/.test(prompt) && /Purchase \| 450 \| 2\.70/.test(prompt), prompt.slice(0, 400));
     check('with its column headings', /Date \| Transaction \| Number of Units \| Unit Cost/.test(prompt));
     check('and the question under it', prompt.includes('Capetown sold 580 units'));
-    check('a question with sums goes to Sonnet 5.5', p.requests[0]?.model === 'claude-sonnet-5-5', p.requests[0]?.model);
+    check('a question with sums starts on Haiku 5.5', p.requests[0]?.model === 'claude-haiku-5-5', p.requests[0]?.model);
     check('the choice it names is ticked', p.w.document.getElementById('c2').checked);
   }
 
@@ -137,8 +137,8 @@ const oneQuestion = { lastPresetIndex: 0, autoContinue: false };
       drops.slice(0, 2).join(' || ').slice(0, 300));
     check(`${kind}: the list is written out once, not ${LINES} times`, (prompt.match(/Prepaid insurance/g) ?? []).length === 1,
       `${(prompt.match(/Prepaid insurance/g) ?? []).length}`);
-    check(`${kind}: seen as a worksheet, so the stronger model and the statement guidance`,
-      p.requests[0]?.model === 'claude-sonnet-5-5' && /financial statement/.test(p.requests[0]?.system ?? ''),
+    check(`${kind}: seen as a worksheet, so the statement guidance (on Haiku 5.5, thinking harder)`,
+      p.requests[0]?.model === 'claude-haiku-5-5' && p.requests[0]?.output_config?.effort === 'medium' && /financial statement/.test(p.requests[0]?.system ?? ''),
       `${p.requests[0]?.model}`);
     check(`${kind}: boxes without a label take the text before them, or none`, els.filter(l => /^\[\d+\] input/.test(l)).length === LINES);
 
