@@ -2,9 +2,12 @@
 //
 // These are not unit tests of pretty functions: each check drives the real
 // extension, and many pin a bug that actually shipped and cost a round of
-// "it didn't work". Suites run side by side, so the whole thing takes about
-// as long as the slowest one.
+// "it didn't work". Suites run side by side — as many at once as the machine can
+// give a fair share to: every suite waits on real timers, and starting thirty on one
+// core stretches each past its own time limits (a pinned single core, a small CI
+// runner), which showed up as checks failing that pass alone.
 const { execFile } = require('child_process');
+const os = require('os');
 const fs = require('fs');
 const path = require('path');
 
@@ -31,6 +34,7 @@ const SUITES = [
   ['test-effects.js',    'Accounting: financial statement effects, a dropdown and a box on each line'],
   ['test-simnet-formula.js', 'SIMnet formulas: typed whole, checked before Enter, never handed in damaged'],
   ['test-simnet-log2.js', 'SIMnet, second real exam: empty fields, late verdict, redrawn dialogs, window buttons'],
+  ['test-simnet-log3.js', 'SIMnet, third log: the selected cell, array formulas, function names'],
   ['test-matching.js',   'Connect matching question: wrong frame, newer drag libraries, page details'],
   ['test-screenshot.js', 'A screenshot when the text can\'t carry the question'],
   ['test-marks.js',      'Numbered tags on the screenshot: right numbers, up for the capture, always taken down'],
@@ -47,7 +51,11 @@ if (!fs.existsSync(path.join(__dirname, '..', 'node_modules', 'jsdom'))) {
 }
 
 const started = Date.now();
-const runs = SUITES.map(([file, what]) => new Promise(resolve => {
+// availableParallelism follows a pinned core (taskset); cpus() would not
+const cores = os.availableParallelism ? os.availableParallelism() : os.cpus().length;
+const WIDTH = Math.max(3, cores * 2);
+
+const runOne = ([file, what]) => new Promise(resolve => {
   execFile(process.execPath, [path.join(__dirname, file)], { timeout: 240000 }, (err, stdout, stderr) => {
     const lines = String(stdout).split('\n');
     resolve({
@@ -58,9 +66,22 @@ const runs = SUITES.map(([file, what]) => new Promise(resolve => {
       output: `${stdout}\n${stderr}`.trim()
     });
   });
-}));
+});
 
-Promise.all(runs).then(results => {
+// A few at a time, results kept in the order of the list
+async function runAll() {
+  const results = new Array(SUITES.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(WIDTH, SUITES.length) }, async () => {
+    while (next < SUITES.length) {
+      const i = next++;
+      results[i] = await runOne(SUITES[i]);
+    }
+  }));
+  return results;
+}
+
+runAll().then(results => {
   let total = 0;
   for (const r of results) {
     total += r.checks;

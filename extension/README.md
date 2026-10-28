@@ -281,7 +281,7 @@ change between sites.
   in the page until opened are opened, read and closed before the scrape, so
   the model sees their options — once each, in the question area only, never
   on SIMnet or a peek.
-- **SIMnet** — detected by its grid (`td.grdbdy-cell`). Up to eight steps per task,
+- **SIMnet** — detected by its grid (`td.grdbdy-cell`). Up to ten steps per task,
   then the run ends with a note: no Connect post-clicks, and no second pass that
   would start editing a finished task.
 - **SIMnet moves** — besides click, SIMnet steps can `doubleClick`, `rightClick`,
@@ -354,6 +354,18 @@ change between sites.
   middle (a `(` gone), but only in the focused editor; and only a focused or
   contenteditable box is judged at all, not the Font Size box saying `10`. (7)
   The prompt says array formulas are Ctrl+Shift+Enter.
+- **SIMnet, from a third log** (101 runs; Connect nearly all right; 32 formulas typed
+  whole, 14 repaired on the way): (1) "in the selected cell" names no cell, and `type`
+  with nothing named and nothing open was refused. `selectedSheetCells` (the cells
+  the list shows as `(selected)`) is now where it goes (the active one, else the
+  first of a block). (2) A selected block for an array formula's results (G1:G3) is
+  kept: naming one of its cells no longer clicks it, which shrank the block to one
+  cell. (3) Ctrl+Enter for an array formula (the task, or SIMnet's hint, says
+  "array formula" or "Ctrl+Shift+Enter") is sent as Ctrl+Shift+Enter: the model sent
+  it with the hint in front of it, twice. (4) The prompt gives current function names
+  (RANK.EQ not RANK; SYD, not SOYD, for sum-of-the-years' digits) and says a dialog's
+  boxes go in one fill: the run typed SOYD, then took one Function Arguments box a
+  reply and ran out of steps. SIMnet gets ten steps (`MAX_STEPS_SIMNET`), not eight.
 - **SIMnet grading** — SIMnet grades with a popup: a "Correct"/"Incorrect"
   heading, a HINT with the exact steps on a wrong answer, and one Continue
   button (back to the question after a wrong try, on to the next after a

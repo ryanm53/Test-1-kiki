@@ -838,6 +838,11 @@ function pickElement(index) {
 
 // SIMnet's cells carry their address in the id (cell-B7), so any cell can
 // be named directly — listed or not
+// The cells marked selected — the same marks the list shows as "(selected)"
+function selectedSheetCells() {
+  return Array.from(document.querySelectorAll('td.grdbdy-cell'))
+    .filter(c => /select|active|focused/i.test(c.className) && isRendered(c));
+}
 function cellByAddress(ref) {
   return document.getElementById(`cell-${String(ref).toUpperCase()}`);
 }
@@ -1138,11 +1143,16 @@ async function execute(action) {
 
     if (action.action === 'type') {
       let target = null;
+      // The cells SIMnet has selected: where typing goes when no cell is named
+      // ("enter a formula in the selected cell"), and, for a block chosen for an
+      // array formula's results, a block that must stay selected
+      const picked = selectedSheetCells();
       if (action.index !== undefined || action.cell !== undefined) {
         const { el, error } = pickTarget(action);
         if (error) return { success: false, error };
         el.scrollIntoView({ behavior: 'auto', block: 'center' });
-        realClick(el);
+        // Clicking one cell of a selected block would shrink it to that cell
+        if (!(picked.length > 1 && picked.includes(el))) realClick(el);
         target = el;
         await new Promise(r => setTimeout(r, 150));
       }
@@ -1152,6 +1162,9 @@ async function execute(action) {
         typeIntoBox(box, action.text);
         return { success: true };
       }
+      // Nothing named and nothing open for editing: the selected cell (the first
+      // of a selected block, which is where Excel types)
+      if (!target && picked.length) target = picked.find(c => /active|focused/i.test(c.className)) ?? picked[0];
       if (!target) {
         return { success: false, error: 'Nothing is being edited to type into — name the element to type into.' };
       }

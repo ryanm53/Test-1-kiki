@@ -230,9 +230,16 @@ Marks after an item: (on) a toggle that is on, like Bold; (selected) the
 current tab or item; (open) an expanded menu; (disabled) not usable yet.
 
 An array formula — the task says so, or a block of cells is already selected for the
-results, as with MODE.MULT — is typed with "text" and then entered with
+results, as with MODE.MULT — is typed with "text" and NO "cell" (naming a cell
+clicks it and shrinks the selected block to that one cell), and then entered with
 {"action":"key","key":"Enter","ctrl":true,"shift":true}: Ctrl+Shift+Enter, not
 Ctrl+Enter or Enter alone.
+"In the selected cell" means the cell marked (selected) in the list: type with no
+"cell" and it goes there.
+Use Excel's current function names: RANK.EQ (not RANK), STDEV.S and STDEV.P, MODE.SNGL,
+and SYD for sum-of-the-years' digits (not SOYD), SLN, DB, DDB.
+A dialog with several boxes (Function Arguments) is filled in ONE reply: a fill with
+every box in "fills" — not one box a reply — and then click OK.
 Typing a formula into a cell is one reply, then Enter: the whole formula, with
 no line break in it. Do not open a ribbon dialog to enter a formula the task
 lets you type. Never click the window's own Close, Minimize or Restore buttons.
@@ -982,7 +989,7 @@ const MAX_STEPS_DRAG   = 8;
 // the dialog, switch its tab, set a field or two, OK). Every step is a model
 // call, so no more than that: a task still unfinished after 8 is stuck, and
 // says so. Heartbeats keep a long run from being mistaken for a hung one.
-const MAX_STEPS_SIMNET = 8;
+const MAX_STEPS_SIMNET = 10;
 
 // True when every question on the page has at least one choice ticked.
 // Pages with typed blanks don't qualify: an empty blank carries no flag, so
@@ -1493,6 +1500,14 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         if (cancelledRuns.has(tabId)) {
           cancelledRuns.delete(tabId);
           return { success: false, error: 'Stopped.', usedModel };
+        }
+
+        // An array formula is entered with Ctrl+Shift+Enter. Told so in the prompt
+        // and by SIMnet's own hint, the model still sent Ctrl+Enter (twice, in a real
+        // log), which fills the block with the plain formula instead
+        if (isSimnet && action.action === 'key' && action.key === 'Enter' && action.ctrl && !action.shift
+            && /array formula|ctrl\s*\+\s*shift\s*\+\s*enter/i.test(`${pageText} ${retryHint}`)) {
+          action.shift = true;
         }
 
         log?.steps.push({

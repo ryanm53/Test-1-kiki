@@ -114,7 +114,7 @@ test(async check => {
     <button class="shell-btn" aria-label="Home">Home</button><button class="shell-btn" aria-label="Insert">Insert</button>
     <table><tr>${grid}</tr></table></div></body>`;
   const { page, final } = await run(html, { reply: (b, n) => as(b, { action: 'click', index: n % 2 }) });
-  check('out of steps: reported as unfinished', /Used all 8 steps without finishing/.test(final) && page.isError(), final);
+  check('out of steps: reported as unfinished', /Used all 10 steps without finishing/.test(final) && page.isError(), final);
   check('out of steps: never "Finished"', !/Finished/.test(final));
 });
 
