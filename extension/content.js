@@ -1945,6 +1945,20 @@ function bgSend(msg, cb) {
         </div>
         <div class="row-hint">On McGraw Hill Connect, when an answer is marked wrong the page shows the right one. Page Agent keeps it, in this browser only, and gives it the next time that question comes up, with no call to Claude.</div>
 
+        <div class="label">Cost</div>
+        <div class="group">
+          <div class="row">
+            <span class="row-label" id="spendText">Nothing spent yet</span>
+            <button class="inline-btn quiet" id="spendReset">Reset</button>
+          </div>
+          <div class="row">
+            <span class="row-label">Cheapest formulas</span>
+            <div class="switch" id="cheapSw" role="switch" aria-checked="false" tabindex="0"></div>
+          </div>
+        </div>
+        <div class="row-hint" id="spendDetail">What the questions answered have cost, as Anthropic reported it, since you last pressed Reset.</div>
+        <div class="row-hint">Cheapest formulas is off, and answers are exactly as they were. Turn it on to try SIMnet formulas on the cheapest model first (Sonnet is used if SIMnet marks it wrong, on Autopilot) and with less of the page sent. It costs far less; try it on a practice exam before a graded one.</div>
+
         <div class="label">Troubleshooting</div>
         <div class="group">
           <div class="row">
@@ -1991,6 +2005,7 @@ function bgSend(msg, cb) {
   const flagBtn = $('flag'), logSw = $('logSw'), logRow = $('logRow'), logCount = $('logCount');
   const logDownloadBtn = $('logDownload'), logClearBtn = $('logClear');
   const bookSw = $('bookSw'), bookRow = $('bookRow'), bookCount = $('bookCount'), bookClearBtn = $('bookClear');
+  const spendText = $('spendText'), spendDetail = $('spendDetail'), spendResetBtn = $('spendReset'), cheapSw = $('cheapSw');
   const checkPageBtn = $('checkPage'), checkResult = $('checkResult');
   const root = $('root'), hideBtn = $('hide'), toast = $('toast');
 
@@ -2006,6 +2021,7 @@ function bgSend(msg, cb) {
   let hasKey = false;
   let keepLog = false;     // the answer log, off unless switched on
   let remember = true;     // keep the right answers Connect shows, on unless switched off
+  let cheapFormulas = false;   // SIMnet formulas on the cheapest model first, with less sent: off unless switched on
   let canFlag = false;     // a run has finished here since the last thumbs-down
   let pageKind = '';       // what the page looks like — "Canvas quiz" — shown when idle
   // Declared up here, not beside the detection code, because the settings
@@ -2181,7 +2197,7 @@ function bgSend(msg, cb) {
 
   // ── Persistence ────────────────────────────────────────────────────────────
   store.get(
-    ['mode', 'lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'model', 'barPos', 'keepLog', 'barHidden', 'rememberAnswers'],
+    ['mode', 'lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'model', 'barPos', 'keepLog', 'barHidden', 'rememberAnswers', 'cheapFormulas'],
     s => {
       setHidden(s.barHidden === true, false);
 
@@ -2218,6 +2234,10 @@ function bgSend(msg, cb) {
       remember = s.rememberAnswers !== false;
       bookSw.classList.toggle('on', remember);
       bookSw.setAttribute('aria-checked', String(remember));
+
+      cheapFormulas = s.cheapFormulas === true;
+      cheapSw.classList.toggle('on', cheapFormulas);
+      cheapSw.setAttribute('aria-checked', String(cheapFormulas));
 
       // Where the user last parked the bar. Clamped on the way in, so a
       // position saved on a bigger screen still lands somewhere visible.
@@ -2279,7 +2299,7 @@ function bgSend(msg, cb) {
     const open = more.hidden;
     more.hidden = !open;
     moreBtn.setAttribute('aria-expanded', String(open));
-    if (open) { refreshLogCount(); refreshBookCount(); }
+    if (open) { refreshLogCount(); refreshBookCount(); refreshSpend(); }
   });
 
   // ── Answer log ────────────────────────────────────────────────────────────
@@ -2303,6 +2323,37 @@ function bgSend(msg, cb) {
   logSw.addEventListener('click', () => setKeepLog(!keepLog));
   logSw.addEventListener('keydown', e => {
     if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setKeepLog(!keepLog); }
+  });
+
+  // ── Cost ──────────────────────────────────────────────────────────────────
+  const money = usd => usd < 0.1 ? `$${usd.toFixed(3)}` : `$${usd.toFixed(2)}`;
+  function refreshSpend() {
+    bgSend({ type: 'SPEND_GET' }, res => {
+      const s = res?.spend;
+      if (!s || !s.calls) {
+        spendText.textContent = 'Nothing spent yet';
+        spendDetail.textContent = 'What the questions answered have cost, as Anthropic reported it, since you last pressed Reset.';
+        spendResetBtn.disabled = true;
+        return;
+      }
+      spendResetBtn.disabled = false;
+      spendText.textContent = `${money(s.usd)} · ${s.calls} call${s.calls === 1 ? '' : 's'}`;
+      const label = id => id.replace(/^claude-/, '').replace(/-(\d)-(\d)$/, ' $1.$2').replace(/^./, c => c.toUpperCase());
+      const parts = Object.entries(s.byModel ?? {}).map(([id, m]) => `${label(id)} ${money(m.usd)} (${m.calls})`);
+      const cached = s.input + s.cached > 0 ? ` · ${Math.round(100 * s.cached / (s.input + s.cached))}% of what was read came from the cache` : '';
+      spendDetail.textContent = `${parts.join(' · ')}${cached}. Since ${new Date(s.since).toLocaleDateString()}.`;
+    });
+  }
+  spendResetBtn.addEventListener('click', () => bgSend({ type: 'SPEND_RESET' }, () => refreshSpend()));
+  function setCheap(on) {
+    cheapFormulas = on;
+    cheapSw.classList.toggle('on', on);
+    cheapSw.setAttribute('aria-checked', String(on));
+    store.set({ cheapFormulas: on });
+  }
+  cheapSw.addEventListener('click', () => setCheap(!cheapFormulas));
+  cheapSw.addEventListener('keydown', e => {
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setCheap(!cheapFormulas); }
   });
 
   // ── Right answers ─────────────────────────────────────────────────────────
@@ -2665,6 +2716,7 @@ function bgSend(msg, cb) {
           return;
         }
         if (keepLog) canFlag = true;
+        if (!more.hidden) refreshSpend();
 
         if (!result.success) {
           const err = result.error ?? 'Unknown error.';

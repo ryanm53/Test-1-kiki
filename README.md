@@ -183,6 +183,7 @@ Tap **More** for the rest:
 | **Notes** *(optional)* | Extra context to improve accuracy, e.g. *"This is financial accounting — use GAAP conventions."* Fine to leave blank |
 | **Answer log** | *Off unless you turn it on.* Saves each question it answers — what it was asked, what it picked, and how the page looked straight after, which is where Connect shows "Correct"/"Incorrect" and SIMnet its hint — in your browser only. When an answer was wrong, tap the **thumbs-down** that appears on the bar (most reliable in *One question* mode, since on Autopilot it may already have moved on). **Download** saves it as a file you can share to help tune Auto; **Clear** takes two taps. It adds under a second per question while it's on |
 | **Right answers** | *On by default.* On Connect, when an answer is marked wrong the page shows the right one. Page Agent keeps it, in your browser only, and gives it the next time that question comes up, with no call to Claude. The switch turns it off; **Clear** (two taps) forgets everything it has kept |
+| **Cost** | What the answers so far have cost, as Anthropic reported it, by model; **Reset** starts the count again. **Cheapest formulas** *(off)*: see [What it costs](#what-it-costs) |
 | **Troubleshooting** | *Check this page* — see [Troubleshooting](#troubleshooting). *Copy last prompt* copies exactly what was sent to Claude last time |
 
 ---
@@ -197,7 +198,9 @@ You're billed by Anthropic for what you use. With the default model, Haiku 5.5:
 | 100 questions | **about 3 cents** |
 | $5 of credit | **well over 10,000 questions** |
 
-On **Auto**, the harder questions (SIMnet, worksheets, drag-and-drop, calculations) go to Sonnet 5.5 — around a cent each, a few cents for a big worksheet. These are estimates: the exact cost depends on how long the question is and how much the model thinks. Your real spending is on console.anthropic.com under **Usage**.
+On **Auto**, the harder questions (SIMnet, worksheets, drag-and-drop, calculations) go to Sonnet 5.5. A SIMnet formula question costs about **2 cents** (a 40-question exam, under a dollar); it used to be about 5, because pressing Enter after each typed formula was a call of its own. Most of what Sonnet costs is it thinking, not what it reads: on a real day's bill, about 60%. These are estimates; the exact cost depends on how long the question is and how much the model thinks. **More → Cost** shows what Anthropic actually charged for what you've answered since you last pressed Reset, split by model and with how much came from the cache; your account's own figures are on console.anthropic.com under **Usage**.
+
+**Cheapest formulas** (More → Cost, off unless you turn it on) goes further, and changes what the model sees and which model answers, so try it on a practice exam first: SIMnet formulas go to Haiku 5.5 first, with less of the page sent, and to Sonnet 5.5 with SIMnet's hint if SIMnet marks the first try wrong (Autopilot only, and never on your last attempt). That is roughly a tenth of the cost again, but a wrong first try uses one of your attempts.
 
 ---
 

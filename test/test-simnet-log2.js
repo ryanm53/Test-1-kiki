@@ -137,7 +137,7 @@ const grid = ['A1', 'B1', 'C1', 'D1', 'A2', 'B2', 'C2', 'D2'].concat(Array.from(
       }
     });
     check('the popup 1.5s after Enter is waited for, not mistaken for no result', /Marked incorrect/.test(final) || p.isError(), final);
-    check('  and no more calls are spent going off to try another way', p.requests.length === 2, `${p.requests.length} calls`);
+    check('  and no more calls are spent going off to try another way: one call, Enter being pressed without asking', p.requests.length === 1, `${p.requests.length} calls`);
   }
 
   // ── A dialog that redraws its boxes ──────────────────────────────────────

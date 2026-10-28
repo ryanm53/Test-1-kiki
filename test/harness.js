@@ -116,6 +116,12 @@ function boot(html, options = {}) {
 
   const fakeFetch = async (url, init) => {
     const body = JSON.parse(init.body);
+    // The long instructions go as one block marked for caching; what a test asks is
+    // what they say, so it sees them as text, and `cacheMarked` says whether they were
+    if (Array.isArray(body.system)) {
+      body.cacheMarked = body.system.some(b => b.cache_control);
+      body.system = body.system.map(b => b.text).join('');
+    }
     requests.push(body);
     requestHeaders.push(init.headers ?? {});
     // A reply may be a promise, to stand for Claude taking its time

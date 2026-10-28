@@ -15,10 +15,43 @@
 // 5.5 has no such fallback, so on Auto a question it declines goes to
 // Sonnet 5.5 (see runGoal). Opus was dropped: for coursework it cost twice
 // as much as Sonnet 5.5 and added nothing worth it.
+// price: dollars per million tokens (Anthropic's list prices; Haiku's are for
+// prompts up to 100K tokens, far above anything sent here). Cache reads cost a
+// tenth of input and cache writes 1.25x, for both.
 const MODELS = {
-  'claude-haiku-5-5':  { label: 'Haiku 5.5',  maxTokens: 2048, effort: 'low' },
-  'claude-sonnet-5-5': { label: 'Sonnet 5.5', maxTokens: 8000, effort: 'low', fallbacks: true }
+  'claude-haiku-5-5':  { label: 'Haiku 5.5',  maxTokens: 2048, effort: 'low', price: { in: 0.10, out: 0.50 } },
+  'claude-sonnet-5-5': { label: 'Sonnet 5.5', maxTokens: 8000, effort: 'low', fallbacks: true, price: { in: 2.00, out: 10.00 } }
 };
+
+// What one call cost, from the usage Anthropic sent back. Thinking is billed as
+// output, and in a real day's bill was most of it.
+function costOf(model, usage) {
+  const p = MODELS[model]?.price;
+  if (!p || !usage) return 0;
+  return ((usage.input_tokens ?? 0) * p.in
+        + (usage.cache_creation_input_tokens ?? 0) * p.in * 1.25
+        + (usage.cache_read_input_tokens ?? 0) * p.in * 0.1
+        + (usage.output_tokens ?? 0) * p.out) / 1e6;
+}
+
+// A running total of what the extension has spent, kept in this browser and shown
+// under More → Cost, so what a change saves can be seen rather than guessed
+let spendQueue = Promise.resolve();
+const freshSpend = () => ({ since: Date.now(), usd: 0, calls: 0, input: 0, output: 0, cached: 0, byModel: {} });
+function recordSpend(model, usage) {
+  if (!usage) return;
+  const usd = costOf(model, usage);
+  const done = spendQueue.then(async () => {
+    const { spend } = await chrome.storage.local.get('spend').catch(() => ({}));
+    const s = spend && typeof spend === 'object' && spend.byModel ? spend : freshSpend();
+    s.usd += usd; s.calls += 1;
+    s.input += usage.input_tokens ?? 0; s.output += usage.output_tokens ?? 0; s.cached += usage.cache_read_input_tokens ?? 0;
+    const m = s.byModel[model] = s.byModel[model] ?? { usd: 0, calls: 0 };
+    m.usd += usd; m.calls += 1;
+    await chrome.storage.local.set({ spend: s });
+  });
+  spendQueue = done.catch(() => {});
+}
 const DEFAULT_MODEL = 'claude-haiku-5-5';
 
 // Newer models replaced older ones in the menu, each at the same price or
@@ -366,7 +399,16 @@ async function postToApi(apiKey, requestBody, betas = []) {
   throw err;
 }
 
-async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = [], isCanvas = false, retryHint = '', picture = null, instruction = '') {
+// The instructions are the same on every call of a kind, which makes them the
+// cheap part to keep: marked for caching, a repeat within five minutes reads them
+// at a tenth of the price. Below the cacheable minimum (512 tokens, about 1,800
+// characters) a marker does nothing, so short ones are sent plain.
+function systemFor(hint) {
+  const text = SYSTEM_PROMPT + hint;
+  return text.length >= 1800 ? [{ type: 'text', text, cache_control: { type: 'ephemeral' } }] : text;
+}
+
+async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_MODEL, isWorksheet = false, isSimnet = false, history = [], isCanvas = false, retryHint = '', picture = null, instruction = '', only = null) {
   const model = resolveModel(modelId);
   const cfg = MODELS[model];
 
@@ -382,8 +424,11 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
     : '';
 
   const seenOptions = new Map();
+  // `only`: the indexes worth listing. The numbers stay what they are, so a reply
+  // still names the right item; the rest are left out to save sending them
   const elementList = elements
     .map((el, i) => {
+      if (only && !only.has(i)) return null;
       const parts = [`[${i}]`, el.tag];
       if (el.type) parts.push(`type="${el.type}"`);
       if (el.text) parts.push(`"${el.text.slice(0, 80)}"`);
@@ -405,6 +450,7 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
       if (el.question && perElementQuestion) parts.push(`(question: "${el.question.slice(0, 120)}")`);
       return parts.join(' ');
     })
+    .filter(Boolean)
     .join('\n');
 
   // Optional user context (subject, conventions, hints) — omitted when blank
@@ -446,7 +492,7 @@ ${elementList || '(none found)'}`;
     max_tokens: isWorksheet ? Math.max(cfg.maxTokens * 2, 1500 + 20 * elements.length)
               : isCanvas    ? Math.max(cfg.maxTokens, 600)
               : cfg.maxTokens,
-    system: SYSTEM_PROMPT + (isSimnet ? SIMNET_HINT : isWorksheet ? WORKSHEET_HINT : isCanvas ? CANVAS_HINT : ''),
+    system: systemFor(isSimnet ? SIMNET_HINT : isWorksheet ? WORKSHEET_HINT : isCanvas ? CANVAS_HINT : ''),
     // A screenshot, when the page's text wasn't enough, goes ahead of the words
     messages: [{ role: 'user', content: picture
       ? [{ type: 'image', source: { type: 'base64', media_type: picture.type, data: picture.data } },
@@ -494,6 +540,7 @@ ${elementList || '(none found)'}`;
   } catch (_) {
     throw new Error('Claude sent back a reply that could not be read. Try again.');
   }
+  recordSpend(model, data.usage);
   // A decline arrives as a normal reply with stop_reason "refusal" — after any
   // fallback has also declined — and carries no answer. Reading on would
   // report it as garbled JSON; and trying the same question again would only
@@ -612,7 +659,7 @@ ${elementList || '(none found)'}`;
   // exactly the prompt a model saw — enough to replay it against another model.
   return {
     action: parsed,
-    request: { model, kind: isSimnet ? 'simnet' : isWorksheet ? 'worksheet' : isCanvas ? 'canvas' : 'question',
+    request: { model, usage: data.usage ?? undefined, kind: isSimnet ? 'simnet' : isWorksheet ? 'worksheet' : isCanvas ? 'canvas' : 'question',
                // The image itself isn't kept in the log, only that there was one
                prompt: picture ? `[a screenshot of the page was attached]\n${userContent}` : userContent }
   };
@@ -1346,7 +1393,29 @@ async function askWhatToPress({ apiKey, notes, tabId, frameId, model, log }, tri
   return done?.success ? label : null;
 }
 
-async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true, log = null, host = '', remember = false) {
+// ── Sending less (only when the "cheapest formulas" setting is on) ───────────
+// By default what the model reads and which model reads it are exactly as they were:
+// nothing here can change an answer. This is for those who would rather pay less and
+// have tried it on a practice exam.
+// A SIMnet task that is "enter a formula in cell D2" is answered by typing it: the
+// ribbon's hundred-odd controls, the Windows taskbar and the page's own copy of the
+// ribbon's words are about two thirds of every prompt and nothing it needs. The
+// list is cut down to the cells (numbers unchanged), and if the model turns out to
+// want the rest, it gets the rest.
+const FORMULA_TASK = /\b(enter|type|write)\b[^.\n]{0,80}\b(formula|function)\b|\bformula\b[^.\n]{0,40}\bin (the )?(selected )?cell\b/i;
+const NEEDS_RIBBON = /\b(dialog|ribbon|button|menu|tab|Function Arguments|Evaluate Formula|click)\b/i;
+// The task's first sentence only: the page's text goes on to the ribbon's words
+const firstSentence = t => String(t ?? '').trim().slice(0, 400).split(/(?<=[.!?])\s+/)[0];
+const isFormulaTask = text => { const t = firstSentence(text); return FORMULA_TASK.test(t) && !NEEDS_RIBBON.test(t); };
+const ARRAY_FORMULA = /array formula|ctrl\s*\+\s*shift\s*\+\s*enter/i;
+
+// SIMnet's page text begins with the ribbon's words (File Home Insert ... 100%) and a
+// clock, which the element list already says better and which change every minute
+const tidySimnetText = t => String(t)
+  .replace(/\nFile\nHome\n[\s\S]*?\n100%\n/, '\n')
+  .replace(/\n\d{1,2}:\d{2} (?:AM|PM)\n\d{1,2}\/\d{1,2}\/\d{4}\n/, '\n');
+
+async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true, log = null, host = '', remember = false, cheapFirst = false) {
   let usedModel = baseModel;   // reported back so the UI can show an upgrade
   const isConnect = /(^|\.)mheducation\.com$/.test(host);
   const useBook = remember && isConnect;   // the answer memory: Connect shows the right answer, so only there
@@ -1385,6 +1454,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   let round = 0;
   let ungradedDone = 0;    // "done" claims SIMnet didn't grade, this round
   let committed = false;   // the last step handed the answer in (Enter, OK): SIMnet is about to grade it
+  let compactFailed = false;   // the cut-down list wasn't enough for this task: send all of it
   let parts = null;        // a question split into tabs (Required 1, Required 2)
   const doneParts = [];    // ...and the ones answered this run
   let escalated = false;   // Auto gave the question to the stronger model after the cheap one gave up
@@ -1467,6 +1537,9 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
           } catch (_) { /* outer frame unreachable — use what we have */ }
         }
 
+        // (only in the cheapest mode: by default what the model reads is left as it is)
+        if (pageData.isSimnet && cheapFirst) pageText = tidySimnetText(pageText);
+
         // The Required tabs can be in the outer page when the table is in a frame
         if (!isSimnet && !isCanvas) parts = pageData.parts ?? outerParts;
         // A screenshot where the page says it needs one (a picture, almost no
@@ -1488,12 +1561,30 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         } else {
           const simStuck = pageData.isSimnet && (ungradedDone > 0 || attempt > 0);
           picture = (pageData.isSimnet ? simStuck : (pageData.needsPicture || shotTried)) ? await captureTab(tabId, frameId) : null;
-          usedModel = escalated ? (UPGRADE_TO[baseModel] ?? baseModel) : pickModel(baseModel, pageData, autoUpgrade);
+          // A formula to type, on a graded exam where a wrong one can be tried again:
+          // the cheapest model first if asked, SIMnet's own verdict being the check
+          // and the stronger model (with its hint) the retry
+          const formulaTask = !!pageData.isSimnet && isFormulaTask(pageText);
+          const retryPossible = !!postClicks.length && !!attempts && attempts.current + 1 < attempts.total;
+          usedModel = escalated ? (UPGRADE_TO[baseModel] ?? baseModel)
+            : (cheapFirst && formulaTask && round === 0 && !retryHint && retryPossible) ? baseModel
+            : pickModel(baseModel, pageData, autoUpgrade);
+          // The cells, what just appeared and nothing else, for a formula to be typed
+          const compact = cheapFirst && formulaTask && completed === 0 && !retryHint && !compactFailed;
+          const only = compact
+            ? new Set(pageData.elements.map((e, i) => (e.cell || e.fresh) ? i : -1).filter(i => i >= 0))
+            : null;
           // A worksheet can think for longer than the bar's silence
           // timer, which would call the run dead mid-answer
           const stopBeat = heartbeat(tabId, step + 1, budget);
-          ({ action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint, picture)
+          ({ action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint, picture, '', only)
             .finally(stopBeat));
+          // Anything but typing, from a list with no ribbon in it, means it wanted the
+          // ribbon: ask again with all of it
+          if (only && !(['type', 'key', 'selectRange'].includes(action.action)
+              && !(action.action === 'type' && typeof action.index === 'number' && !only.has(action.index)))) {
+            compactFailed = true; attempt--; continue;
+          }
         }
 
         // Stop pressed while Claude was thinking: its answer is not acted on
@@ -1506,13 +1597,13 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         // and by SIMnet's own hint, the model still sent Ctrl+Enter (twice, in a real
         // log), which fills the block with the plain formula instead
         if (isSimnet && action.action === 'key' && action.key === 'Enter' && action.ctrl && !action.shift
-            && /array formula|ctrl\s*\+\s*shift\s*\+\s*enter/i.test(`${pageText} ${retryHint}`)) {
+            && ARRAY_FORMULA.test(`${pageText} ${retryHint}`)) {
           action.shift = true;
         }
 
         log?.steps.push({
           round: round + 1, step: step + 1, attempt: attempt + 1,
-          model: request.model, kind: request.kind, prompt: request.prompt,
+          model: request.model, kind: request.kind, prompt: request.prompt, usage: request.usage,
           action, answer: actionSummary(action, pageData.elements)
         });
 
@@ -1628,6 +1719,14 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
           committed = (action.action === 'key' && action.key === 'Enter')
             || (action.action === 'click' && /^(ok|apply)$/i.test((pageData.elements[action.index]?.text ?? '').trim()));
           history.push(actionSummary(action, pageData.elements));
+          // A formula typed into a cell is always followed by Enter (an array formula
+          // by Ctrl+Shift+Enter), and in the logs it was a model call every time to
+          // say so. Pressing it needs no call; what comes of it is read straight after.
+          if (isSimnet && action.action === 'type' && result.needsKeys && /^=/.test(action.text ?? '')) {
+            const enter = { action: 'key', key: 'Enter', ...(ARRAY_FORMULA.test(`${pageText} ${retryHint}`) ? { ctrl: true, shift: true } : {}) };
+            const pressed = await sendToTab(tabId, { type: 'EXECUTE', action: enter }, frameId).catch(() => null);
+            if (pressed?.success) { history.push(actionSummary(enter, pageData.elements)); committed = true; }
+          }
 
           // Repeating one step means it isn't taking effect — the page looks
           // unchanged, so the same move keeps looking correct. Stop rather than
@@ -2052,6 +2151,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'SPEND_GET' || msg.type === 'SPEND_RESET') {
+    spendQueue.then(async () => {
+      if (msg.type === 'SPEND_RESET') await chrome.storage.local.set({ spend: freshSpend() });
+      const { spend } = await chrome.storage.local.get('spend');
+      sendResponse({ spend: spend ?? null });
+    }).catch(() => sendResponse({ spend: null }));
+    return true;
+  }
+
   if (msg.type === 'BOOK_COUNT') {
     bookQueue.then(() => chrome.storage.local.get('answerBook')).then(
       ({ answerBook }) => sendResponse({ count: Object.keys(answerBook ?? {}).length }),
@@ -2067,8 +2175,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type !== 'RUN_GOAL') return;
 
   (async () => {
-    const { apiKey: rawKey, model: savedModel, autoUpgrade, keepLog, rememberAnswers } =
-      await chrome.storage.local.get(['apiKey', 'model', 'autoUpgrade', 'keepLog', 'rememberAnswers']).catch(() => ({}));
+    const { apiKey: rawKey, model: savedModel, autoUpgrade, keepLog, rememberAnswers, cheapFormulas } =
+      await chrome.storage.local.get(['apiKey', 'model', 'autoUpgrade', 'keepLog', 'rememberAnswers', 'cheapFormulas']).catch(() => ({}));
     const baseModel = resolveModel(savedModel);
     const apiKey = cleanKey(rawKey);
     if (!apiKey) {
@@ -2089,7 +2197,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     let result;
     try {
       result = await runGoal(apiKey, msg.notes ?? '', tabId, msg.postClicks ?? [], baseModel, autoUpgrade !== false, log,
-        hostOf(sender.url ?? sender.tab?.url), rememberAnswers !== false);
+        hostOf(sender.url ?? sender.tab?.url), rememberAnswers !== false, cheapFormulas === true);
     } catch (e) {
       // Anything unexpected still has to come back as an answer. Without this
       // the reply never arrives and the widget sits on "Answering…" forever.

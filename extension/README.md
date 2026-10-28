@@ -172,6 +172,27 @@ change between sites.
   to fill are counted as rows, not the heading rows that start with a word.
   `WORKSHEET_HINT` has a paragraph for these (effects not balances, minus signs,
   it must balance, costs to get an asset ready are its cost).
+- **Cost** — measured, then cut without touching what the model is sent. A real day's
+  bill (240 Sonnet 5.5 calls, $4.65) was about 40% input and 60% the model thinking
+  (billed as output, ~1,200 tokens a call at `effort: low`), and a SIMnet formula
+  question took 2.5 calls because Enter was one of them. What is done by default
+  cannot change an answer: (1) the long instructions (SIMnet's and the worksheet's,
+  past the 512-token cache minimum) go as one `cache_control` block (`systemFor`);
+  (2) a formula typed into a cell by key presses is followed by Enter (Ctrl+Shift+Enter
+  for an array formula) without a call, as it was in 28 of 28 logged formulas, and the
+  verdict wait that follows ends the question; (3) `usage` from every reply is priced
+  (`costOf`, `MODELS[].price`; cache reads a tenth, writes 1.25x) and added to a running
+  total (`recordSpend`, shown under More → Cost, `SPEND_GET` / `SPEND_RESET`) and kept
+  on each log step. Verified: with the setting off, the first request of a SIMnet
+  formula, a Connect question and a calculation is byte-identical to the previous
+  version's but for the cache marker. **Cheapest formulas** (`cheapFormulas`, off) is the
+  part that is not free: on a graded exam where a retry is possible, a formula task
+  (`isFormulaTask`: the first sentence says to enter/type/write a formula or function,
+  and doesn't mention a dialog, ribbon, button, menu or tab) goes to the base model
+  with the list cut to the cells (`only`, numbers unchanged) and the page text
+  stripped of the ribbon's words and the clock (`tidySimnetText`); a wrong verdict
+  retries on the stronger model with the hint and everything; and a reply that isn't
+  typing gets the whole list.
 - **Matching questions** — a Connect matching question (drop boxes beside labels, a
   pool of cards) has no inputs, and a real run stopped on `Referred to item 0, which
   isn't on the page`: the list was empty. `findQuestionFrame` now counts drag

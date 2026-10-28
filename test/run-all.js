@@ -35,6 +35,7 @@ const SUITES = [
   ['test-simnet-formula.js', 'SIMnet formulas: typed whole, checked before Enter, never handed in damaged'],
   ['test-simnet-log2.js', 'SIMnet, second real exam: empty fields, late verdict, redrawn dialogs, window buttons'],
   ['test-simnet-log3.js', 'SIMnet, third log: the selected cell, array formulas, function names'],
+  ['test-cost.js',       'Cost: recorded and shown; caching; Enter without a call; cheapest mode off by default'],
   ['test-matching.js',   'Connect matching question: wrong frame, newer drag libraries, page details'],
   ['test-screenshot.js', 'A screenshot when the text can\'t carry the question'],
   ['test-marks.js',      'Numbered tags on the screenshot: right numbers, up for the capture, always taken down'],
