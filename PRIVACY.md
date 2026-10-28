@@ -10,6 +10,7 @@ These are kept in Chrome's storage for the extension, in your browser only:
 - **Your settings**: mode, model, notes, where you've put the control bar, and whether it's hidden.
 - **The last request sent to Claude**, so you can copy it under Troubleshooting.
 - **Right answers from Connect**, unless you switch it off under More → Right answers. When Connect marks an answer wrong and shows the right one, Page Agent keeps a fingerprint of the question, the first few words of it, and the text of the right choices, so it can answer the same question again without asking Claude. It stays in your browser and is never sent anywhere; Clear deletes it.
+- **A running cost total**: how many calls to Claude were made and what Anthropic reported they cost, by model, shown under More → Cost. It holds numbers only, no questions or answers, and Reset clears it.
 - **The answer log**, only if you switch it on. It records the questions answered and how the page looked afterwards. It never leaves your browser unless you press Download and share the file yourself, and Clear deletes it.
 
 ## What is sent, and where
@@ -30,6 +31,7 @@ Nothing is sent anywhere else. There is no server of ours, no analytics, no trac
 - It reads the page only to find the question and the controls to answer it with (and, in the case above, to take a screenshot of it), and only when you ask it to: when you press play, or briefly when a page loads, to show what kind of page it is in the control bar.
 - On drag-and-drop questions and spreadsheet tasks it uses Chrome's debugger permission to press keys for real, on the tab you started it on, only while it's answering. It lets go as soon as it's done.
 - It never submits a quiz or test for you.
+- **Copy page details** (More → Troubleshooting), when you press it, copies a description of how the page is built (its size, buttons and drag handles, and the first few words of text) to your clipboard so you can send it to whoever looks after Page Agent. It is never sent anywhere by the extension; you choose whether to paste it anywhere.
 
 ## Sale and use of data
 
@@ -43,4 +45,4 @@ Remove the extension from Chrome, and everything it stored is deleted with it. O
 
 Questions or problems: <https://github.com/ryanm53/Test-1-kiki/issues>
 
-*Last updated: October 2026*
+*Last updated: October 28, 2026*

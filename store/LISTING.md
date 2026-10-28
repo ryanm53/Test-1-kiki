@@ -42,7 +42,7 @@ Page Agent puts a small control bar on your coursework pages. Press play and it 
 WHAT IT HANDLES
 • Homework questions — multiple choice, select all that apply, fill in the blank, dropdowns, accounting worksheets (including ones split into Required 1 / Required 2 tabs and financial statement effects tables) and drag-and-drop. It rates its confidence and moves on to the next question, opening a concept resource and coming back to the questions when the page asks for one first.
 • Remembers right answers — when the page shows the right answer after a wrong one, it keeps it in your browser and uses it the next time that question comes up.
-• Simulated Excel tasks — ribbon menus, dialogs, cells, ranges, sheet tabs, right-click menus and typing. It reads the Correct/Incorrect result, and never spends your last attempt.
+• Simulated Excel tasks — ribbon menus, dialogs, cells, ranges, sheet tabs, right-click menus and typing. Formulas are typed, checked in the cell, and only then entered. It reads the Correct/Incorrect result, and never spends your last attempt.
 • Quizzes — every question on the page at once, or one at a time. It never submits a quiz for you.
 
 THREE MODES
@@ -54,13 +54,13 @@ PICTURES TOO
 If a question is a picture, a chart or a table drawn as an image, or a task gets stuck, Page Agent sends a screenshot of what's on screen along with the text, with a small number on each button so it can point at the right one — only then.
 
 YOUR OWN KEY, YOUR OWN COST
-Page Agent uses Claude through your own Anthropic API key (console.anthropic.com). On Auto, easy questions go to the cheapest model (a few cents per 100 questions) and hard ones (worksheets, calculations, spreadsheets) to a stronger one (around a cent each).
+Page Agent uses Claude through your own Anthropic API key (console.anthropic.com). On Auto, easy questions go to the cheapest model (a few cents per 100 questions) and hard ones (worksheets, calculations, spreadsheets) to a stronger one (a few cents each). A running total of what your answers have cost is under More → Cost.
 
 OUT OF THE WAY WHEN YOU WANT
 Drag the bar anywhere, or hide it with the – button and bring it back with Alt+Shift+H or the toolbar button.
 
 PRIVATE
-Your key, your settings and the right answers it remembers stay in your browser. The question is sent only to Anthropic's API, only when you press play. No accounts, no tracking, no analytics.
+Your key, your settings, a running cost total and the right answers it remembers stay in your browser. The question is sent only to Anthropic's API, only when you press play. No accounts, no tracking, no analytics.
 ```
 
 **Category:** Education
