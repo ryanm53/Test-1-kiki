@@ -233,7 +233,7 @@ Check that the gear ⚙ shows **API key ✓ Saved**, and that your account actua
 Refresh the page. If it's still missing, go to `chrome://extensions` and check Page Agent is still enabled — and that you haven't moved or deleted the folder from Step 1.
 
 **Canvas: nothing happens, or "Couldn't find an answer here"**
-Canvas has two quiz systems. This works with **Classic Quizzes** — the address bar shows `/quizzes/` followed by `/take`. The newer *New Quizzes* (the address shows `/assignments/`, and the quiz sits in a box inside the page) isn't supported yet.
+Canvas has two quiz systems. **Classic Quizzes** (the address bar shows `/quizzes/` followed by `/take`) are the best tested. The newer *New Quizzes* (the address shows `/assignments/`, and the quiz sits in a box inside the page) is read as a **Quiz page** when it has every question on one page: it answers all of them at once and never presses Submit. One question at a time works through Next. That support was written without being able to see a real New Quizzes page, so if it still says *"Couldn't find an answer here"*, open the gear, tap **More**, press **Copy** next to **Copy page details**, and send that to whoever looks after Page Agent.
 
 **"Claude declined to answer this one"**
 Claude's safety filters occasionally turn down a question — mostly ones that look like advanced biology or computer-security research. It automatically tries a different model first; this message means that one declined too. Answer that question yourself and press play to carry on, or pick a different model under **More → Model**.

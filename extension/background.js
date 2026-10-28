@@ -1997,7 +1997,7 @@ function describePage(p, frameId) {
   if (p.isCanvas) {
     const questions = new Set(els.map(e => e.question)).size;
     return { ok: questions > 0,
-             text: `Canvas quiz · ${n(questions, 'question')}, ${n(els.length, 'answer')} to pick from${where}` };
+             text: `${p.quizLabel ?? 'Canvas quiz'} · ${n(questions, 'question')}, ${n(els.length, 'answer')} to pick from${where}` };
   }
   if (p.isWorksheet) {
     const fields = els.filter(e => e.sheet || /^(input|textarea|select)$/.test(e.tag)).length;
@@ -2034,7 +2034,7 @@ async function checkKey(apiKey) {
 function pageKind(p, host) {
   if (!p || p.error) return '';
   if (p.isSimnet)    return 'SIMnet';
-  if (p.isCanvas)    return 'Canvas quiz';
+  if (p.isCanvas)    return p.quizLabel ?? 'Canvas quiz';
   if (p.isWorksheet) return 'Worksheet';
   if (p.isDrag)      return 'Drag and drop';
   if (/(^|\.)mheducation\.com$/.test(host ?? '')) return 'Connect';

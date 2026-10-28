@@ -240,6 +240,81 @@ function nearestQuestionText(el) {
   return null;
 }
 
+// ── Quiz pages that aren't Canvas Classic ───────────────────────────────────
+// The newer Canvas quizzes (and other sites') put every question on one page, each
+// as a block of its own, and draw the choices themselves: the real radio input is
+// laid, see-through, over a styled circle. A see-through input counts as not on the
+// page, so the page looked to have no choices at all ("Couldn't find an answer
+// here"), and anyway the ordinary path takes the page to be one question.
+const isTick = el => el.tagName === 'INPUT' && /^(radio|checkbox)$/.test(el.type);
+// A radio or checkbox that is only see-through (opacity 0), not hidden: clicking it answers
+function seeThrough(el) {
+  if (!isTick(el)) return false;
+  const r = el.getBoundingClientRect();
+  if (!r.width || !r.height) return false;
+  const cs = getComputedStyle(el);
+  return cs.display !== 'none' && cs.visibility !== 'hidden';
+}
+const choiceOk = el => !el.closest('#__cap-host, #__cap-marks') && (isRendered(el) || seeThrough(el));
+const byDocumentOrder = (a, b) => (a.compareDocumentPosition(b) & 4) ? -1 : 1;
+
+// The questions of a page of several: each is the widest box that holds one group of
+// choices and no other group's. Null unless there are at least two.
+function quizBlocks() {
+  const choices = Array.from(document.querySelectorAll('input[type="radio"], [role="radio"]'))
+    .filter(choiceOk)
+    // a styled wrapper is not a second choice beside the input inside it
+    .filter(el => !(el.matches('[role="radio"]') && el.querySelector('input[type="radio"]')));
+  const ids = new WeakMap();
+  const idOf = el => { if (!ids.has(el)) ids.set(el, ids.size + 1); return ids.get(el); };
+  const keyOf = el => {
+    if (el.name) return `n:${el.name}`;
+    const g = el.closest('[role="radiogroup"], fieldset, [role="group"]');
+    return g ? `g:${idOf(g)}` : null;
+  };
+  const groups = new Map();
+  for (const el of choices) {
+    const k = keyOf(el);
+    if (!k) continue;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(el);
+  }
+  const blocks = [];
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const mine = new Set(group);
+    const others = choices.filter(c => !mine.has(c));
+    let box = null;
+    for (let node = group[0].parentElement; node && node !== document.body; node = node.parentElement) {
+      if (others.some(c => node.contains(c))) break;
+      box = node;
+    }
+    if (!box || !group.every(c => box.contains(c)) || !isRendered(box)) continue;
+    const text = (box.innerText ?? '').trim();
+    if (text.length < 25) continue;   // a rating scale, not a question
+    blocks.push({ box, group, text });
+  }
+  return blocks.length >= 2 ? blocks : null;
+}
+
+// The prose of a question in its block: the longest piece of text in it that isn't a
+// choice or a control (the number, "True or False" and "2 points" around it are short)
+function blockQuestion(block, labels) {
+  const parts = [];
+  const walker = document.createTreeWalker(block.box, NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = walker.nextNode())) {
+    const t = n.nodeValue.replace(/\s+/g, ' ').trim();
+    const host = n.parentElement;
+    if (!t || labels.has(t) || !host || /^(SCRIPT|STYLE)$/.test(host.tagName)) continue;
+    if (host.closest('label, [role="radio"], [role="checkbox"], button, option')) continue;
+    parts.push(t);
+  }
+  const longest = parts.reduce((a, t) => t.length > a.length ? t : a, '');
+  const all = parts.join(' ');
+  return (longest.length >= 25 && longest.length >= all.length * 0.5 ? longest : all).slice(0, 500);
+}
+
 // Matches real tables and ARIA grids alike — Angular apps often build the
 // latter out of divs, which a `table`/`tr`/`td` selector would miss entirely.
 const CELL_SEL  = 'td, th, [role="cell"], [role="gridcell"], [role="columnheader"], [role="rowheader"]';
@@ -488,7 +563,12 @@ function scrape() {
   // Prefer the main content area to skip nav/header/footer noise
   const root = pageRoot();
 
-  const all = Array.from(document.querySelectorAll(INTERACTIVE_SEL)).filter(isRendered);
+  let all = Array.from(document.querySelectorAll(INTERACTIVE_SEL)).filter(isRendered);
+  // No choice listed, but see-through ones on the page: those are the choices
+  if (!all.some(isTick)) {
+    const hidden = Array.from(document.querySelectorAll('input[type="radio"], input[type="checkbox"]')).filter(choiceOk);
+    if (hidden.length) all = [...new Set([...all, ...hidden])].sort(byDocumentOrder);
+  }
 
   // Spreadsheet cells are plain <td>s, so they never match INTERACTIVE_SEL
   const sheetCells = Array.from(document.querySelectorAll('td')).filter(
@@ -677,6 +757,40 @@ function scrape() {
       needsPicture: pictureNeeded(document.querySelector('#questions') ?? document.body, canvasQs.map(questionOf).join('')) === 'picture' ? 'picture' : undefined,
       // Typed answers go in a second step after the choices are clicked
       hasBlanks: _lastElements.some(el => el.tagName === 'SELECT' || /^(text|number)$/.test(el.type)),
+      isWorksheet: false,
+      isDrag: false
+    };
+  }
+
+  // A page of several questions that isn't Canvas Classic: all of them at once, as
+  // for Canvas. (Not Connect, which puts one question on a page.)
+  const quiz = isWorksheet || /(^|\.)mheducation\.com$/.test(window.location.hostname) ? null : quizBlocks();
+  if (quiz) {
+    const els = [], owners = [], questions = [];
+    quiz.forEach((b, qi) => {
+      const members = Array.from(b.box.querySelectorAll(
+        'input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"], input[type="text"], input[type="number"], textarea, select'))
+        .filter(el => choiceOk(el) || (!isTick(el) && isRendered(el)))
+        .filter(el => !(el.matches('[role="radio"], [role="checkbox"]') && el.querySelector('input[type="radio"], input[type="checkbox"]')));
+      const labels = new Set(members.map(el => accessibleText(el).trim()).filter(Boolean));
+      const q = blockQuestion(b, labels);
+      questions.push(`Question ${qi + 1}: ${q}`);
+      for (const el of members) { els.push(el); owners.push(q); }
+    });
+    _lastElements = els.slice(0, 150);
+    const described = _lastElements.map((el, i) => {
+      const d = describeEl(el);
+      // A choice with no label of its own reads as what is around it
+      if (!d.text) d.text = (el.closest('label, [role="radio"], [role="checkbox"]')?.innerText ?? el.parentElement?.innerText ?? '').trim().slice(0, 100);
+      return { ...d, question: owners[i].slice(0, 200) };
+    });
+    return {
+      text: questions.join('\n\n').slice(0, 5000),
+      elements: described,
+      isCanvas: true,        // the whole page at once, never submitted for the student
+      quizLabel: 'Quiz page',
+      hasBlanks: _lastElements.some(el => el.tagName === 'SELECT' || /^(text|number)$/.test(el.type)),
+      needsPicture: pictureNeeded(document.body, questions.join('')) === 'picture' ? 'picture' : undefined,
       isWorksheet: false,
       isDrag: false
     };
@@ -2728,7 +2842,7 @@ function bgSend(msg, cb) {
         if (result.noAnswer) {
           // Nothing clickable — likely a question type we can't do yet.
           paused = true;
-          fail("Couldn't find an answer here. Do this one yourself, then press play.");
+          fail("Couldn't find an answer here. Do this one yourself, then press play. (If it keeps saying this on a page that has questions, tap More and press Copy next to Copy page details, and send that to whoever looks after Page Agent.)");
           return;
         }
 

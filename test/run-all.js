@@ -23,6 +23,7 @@ const SUITES = [
   ['test-connect-next.js', 'Connect: past a wrong answer to the next question; remembering the right one'],
   ['test-platforms.js',  'SIMnet, Connect and Canvas on the same default settings'],
   ['test-canvas.js',     'Canvas quizzes: whole page, one at a time, never submits'],
+  ['test-quiz-page.js',  'A quiz with every question on one page (the newer Canvas quizzes): see-through choices'],
   ['test-resilience.js', 'Survives re-injection, extension reload, pages that wipe the bar'],
   ['test-drag.js',       'The control bar can be dragged and stays put'],
   ['test-load.js',       'The extension loads and the control bar appears'],

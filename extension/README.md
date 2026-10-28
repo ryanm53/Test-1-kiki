@@ -172,6 +172,22 @@ change between sites.
   to fill are counted as rows, not the heading rows that start with a word.
   `WORKSHEET_HINT` has a paragraph for these (effects not balances, minus signs,
   it must balance, costs to get an asset ready are its cost).
+- **Quiz pages** — the newer Canvas quizzes (and other sites') put every question on
+  one page, each as a block, and draw the choices themselves: the real radio sits
+  see-through (`opacity: 0`) over a styled stand-in, which `isRendered` counted as
+  not on the page, so the page had no choices at all and the ordinary path would
+  have taken it for one question anyway. `quizBlocks` finds each group of radios
+  (by `name`, else the `radiogroup` / `fieldset` it is in), takes the widest box
+  holding that group and no other, and needs at least two blocks, each with more
+  than 25 characters of text (a rating scale isn't a question). The page is then
+  read like Canvas Classic: `isCanvas`, every choice tagged with its question
+  (`blockQuestion`: the longest piece of text in the block that isn't a choice or
+  a control), answered in one `clickMany`, never submitted; the bar says "Quiz
+  page" (`quizLabel`). Not on `*.mheducation.com`, SIMnet, or Classic Canvas (which
+  match first). Separately, when the ordinary path finds no choice at all but there
+  are see-through ones (`seeThrough`: not hidden, not zero-size), they are listed.
+  Written without sight of a real New Quizzes page: `Copy page details` is how to
+  see how one is built.
 - **Cost** — measured, then cut without touching what the model is sent. A real day's
   bill (240 Sonnet 5.5 calls, $4.65) was about 40% input and 60% the model thinking
   (billed as output, ~1,200 tokens a call at `effort: low`), and a SIMnet formula
