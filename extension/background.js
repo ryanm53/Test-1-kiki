@@ -451,6 +451,7 @@ async function callClaude(apiKey, notes, pageText, elements, modelId = DEFAULT_M
         else { seenOptions.set(key, i); parts.push(`options=[${el.options.join(' | ')}]`); }
       }
       if (el.group) parts.push(`(in: ${el.group})`);
+      if (el.place) parts.push(`(${el.place})`);
       if (el.state) parts.push(`(${el.state})`);
       if (el.fresh) parts.push('(just appeared)');
       if (el.name) parts.push(`name="${el.name}"`);
@@ -1098,7 +1099,7 @@ async function pageDetails(tabId) {
 // several sequential moves, so the budget is raised only once a drag actually
 // starts — multiple choice still costs exactly one API call.
 const MAX_STEPS_SIMPLE = 1;
-const MAX_STEPS_DRAG   = 8;
+const MAX_STEPS_DRAG   = 14;
 // Most tasks are 2-5 steps; a dialog task runs to 6-7 (select the cells, open
 // the dialog, switch its tab, set a field or two, OK). Every step is a model
 // call, so no more than that: a task still unfinished after 8 is stuck, and
@@ -1426,6 +1427,24 @@ function recallAction(entry, elements) {
   return picks.length === 1 ? { action: 'click', index: todo[0] } : { action: 'clickMany', indexes: todo };
 }
 
+// A question that isn't answered by ticking choices — cards to drag, dropdowns in a
+// worksheet — can't be given back as a click, but what Connect showed as its right
+// answer can be handed to the model the next time it comes up. It is the same
+// question when its words (where it has any) and the labels of what is to be
+// filled or moved are, whatever order they come in and whatever is in them now.
+function looseQuestionId(elements) {
+  const parts = elements.filter(e => e.place || e.sheet || e.options || e.tag === 'select' || e.tag === 'input' || e.tag === 'textarea');
+  if (parts.length < 2) return null;
+  const qs = [...new Set(parts.map(e => e.question).filter(Boolean))];
+  const labels = parts.map(e => choiceKey(e.text)).filter(Boolean).sort();
+  if (labels.length < 2) return null;
+  const words = qs.sort().map(q => choiceKey(q)).join('\u0002').slice(0, 600);
+  return { key: 'n' + fingerprint(words + '\u0001' + labels.join('\u0001')), question: qs[0] ?? labels[0] };
+}
+
+// What the model is told on a question Connect once marked wrong
+const rememberedNote = lines => `This exact question came up before. The answer given then was marked wrong, and Connect showed this as the correct answer:\n${lines.slice(0, 12).join('\n').slice(0, 800)}\nAnswer so that yours matches it.`;
+
 // Nothing the page says to press worked: the model looks at the page — with a
 // screenshot, and tags on the buttons — and names the one that moves on.
 // Returns what it pressed, or null.
@@ -1487,6 +1506,9 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   const isConnect = /(^|\.)mheducation\.com$/.test(host);
   const useBook = remember && isConnect;   // the answer memory: Connect shows the right answer, so only there
   let qid = null;          // this question as first read, to find it in the memory and to put it there
+  let loose = null;        // the same for a question that isn't ticking choices: what Connect showed as right is kept as words
+  let recallNote = '';     // ...and given to the model when that question comes round again
+  let dragNudges = 0;      // "done" said with cards still in the pool, this run
   let recalled = false;    // the answer came from the memory, not the model
 
   // Resolve once per run: every scrape, click and fill must hit the same frame
@@ -1605,6 +1627,9 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
           } catch (_) { /* outer frame unreachable — use what we have */ }
         }
 
+        // A drag question: the lists the cards can go into, and what each holds now
+        if (pageData.dragZones) pageText = `${pageData.dragZones}\n\n${pageText}`;
+
         // (only in the cheapest mode: by default what the model reads is left as it is)
         if (pageData.isSimnet && cheapFirst) pageText = tidySimnetText(pageText);
 
@@ -1620,6 +1645,11 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         // A question seen before, with its right answer kept: no need to ask
         let action, request, picture = null;
         if (useBook && !qid && completed === 0) qid = questionId(pageData.elements);
+        if (useBook && !qid && !loose && completed === 0) {
+          loose = looseQuestionId(pageData.elements);
+          const seen = loose ? await bookEntry(loose.key) : null;
+          if (seen?.n) recallNote = rememberedNote(seen.n.split('\n'));
+        }
         const recall = qid && !recalled && completed === 0 && !isSimnet && !isCanvas
           ? recallAction(await bookEntry(qid.key), pageData.elements) : null;
         if (recall) {
@@ -1648,7 +1678,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
           // A worksheet can think for longer than the bar's silence
           // timer, which would call the run dead mid-answer
           const stopBeat = heartbeat(tabId, step + 1, budget);
-          ({ action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint, picture, '', only, hardPage)
+          ({ action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint, picture, recallNote, only, hardPage)
             .finally(stopBeat));
           // Anything but typing, from a list with no ribbon in it, means it wanted the
           // ribbon: ask again with all of it
@@ -1729,6 +1759,13 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
             if (!shotTried && !pageData.isSimnet && !picture) { shotTried = true; attempt--; continue; }
             if (canEscalate()) { escalated = true; attempt--; continue; }
             return { success: true, action, noAnswer: true, usedModel };
+          }
+          // A drag question called done with cards still in the pool and a box empty
+          // is not: say so, twice at most
+          if (pageData.isDrag && pageData.dragLeft > 0 && ++dragNudges <= 2) {
+            history.push(`said it was done, but ${pageData.dragLeft} card${pageData.dragLeft > 1 ? 's are' : ' is'} still in the pool while a box is empty, so it is NOT done — move the next card`);
+            stepDone = true;
+            break;
           }
           finished = true;
           saidDone = true;
@@ -1960,9 +1997,17 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   // is answered right next time — and if what was remembered turned out wrong,
   // it is put right (or dropped, when the page doesn't say what was).
   const learn = async () => {
-    if (!useBook || !qid) return;
+    if (!useBook || !(qid || loose)) return;
     const r = await connectResultOf(tabId, frameId);
     if (!r?.verdict) return;
+    // Not ticking choices: what the box under "Correct Answer" says is kept as it is
+    if (!qid) {
+      log?.verdicts.push({ round: 1, verdict: r.verdict, ...(r.verdict === 'incorrect' ? { right: r.lines } : {}) });
+      if (r.verdict === 'incorrect' && r.lines?.length) {
+        await changeBook(book => { book[loose.key] = { n: r.lines.slice(0, 12).join('\n').slice(0, 800), q: String(loose.question).slice(0, 80), t: Date.now() }; return book; }).catch(() => {});
+      }
+      return;
+    }
     const said = r.verdict === 'correct' ? r.yours : r.correct;
     const right = said.map(choiceKey).filter(k => qid.labels.includes(k));
     const whole = right.length > 0 && right.length === said.length;

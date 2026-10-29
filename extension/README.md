@@ -288,6 +288,28 @@ change between sites.
   replaced by the right one shown, or dropped when the page doesn't say. 800
   entries at most, the oldest out first; `rememberAnswers` (default on) and
   `BOOK_COUNT` / `BOOK_CLEAR` are the setting and the bar's count and Clear.
+  Questions that aren't ticked choices (cards to drag, worksheet dropdowns) are
+  kept as words: `looseQuestionId` fingerprints the question's words and the sorted
+  labels of the cards/cells/boxes (never what they hold now); on a wrong verdict
+  `learn` stores the lines under "Correct Answer" (`n`, 800 characters, 12 lines),
+  and the next time the key is found `rememberedNote` goes to the model as the
+  `instruction` of every call of the run (log: in each step's prompt). That case
+  can't be clicked from memory (`recalled` stays false). `connectResult` takes the
+  box to mean a wrong answer when no "Your Answer" pill is shown (`GRADED` no
+  longer takes the box's own "Correct Answer" heading for the pill).
+- **Drag state** — a hello-pangea / react-beautiful-dnd / dnd-kit card used to be
+  listed by its words alone, so the model couldn't tell where a card was after a move
+  or what boxes there were; a real matching question got one card moved and stopped.
+  `dragPlace` (content) gives each card `in "<label>", place N of M`, the label being the
+  aria-label of its droppable or the text of the row it sits alone in (a list sharing
+  its row with others is "the pool"; one list alone is "list 1"), and `dragSummary`
+  puts a "Drop areas" line, with what each holds and what to do when a move changes
+  nothing, at the head of the page text (`dragZones`). `dragLeft` counts pool cards
+  while a labelled box is empty: "done" then is not accepted (`dragNudges`, twice at
+  most). `MAX_STEPS_DRAG` is 14. The keys are the same Space / arrow / Space; whether a
+  key crosses from one list to another depends on the page's layout and has not been
+  seen on a real Connect page. If the log shows a card not moving, real mouse events
+  through the debugger (`Input.dispatchMouseEvent`) are the next thing to try.
 - **Parts** — tabs named Required 1 / Required 2 / Req A / Part 1 (`partTabs`).
   After a part is answered the background opens the next unanswered one
   (`OPEN_PART`) and answers it in the same run; Next is pressed once, after

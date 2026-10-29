@@ -470,8 +470,78 @@ function nearbyLabel(el) {
   return '';
 }
 
+// ── Drag questions: where each card is ─────────────────────────────────────
+// A card listed by its words alone reads the same before and after it is moved,
+// and says nothing of the boxes it can go into — a real matching question got one
+// card moved and then went no further. So each card says which list it is in
+// and its place there, and the lists are summed up for the page's text.
+const DRAG_ZONE_SEL = '[data-rfd-droppable-id], [data-rbd-droppable-id], [data-react-beautiful-dnd-droppable]';
+
+// The label beside a list: its own, or the text of the row it sits in. A list
+// that shares its row with others (the pool of cards) has none.
+function zoneLabel(zone) {
+  const own = (zone.getAttribute('aria-label') || zone.getAttribute('title') || '').trim();
+  if (own) return own.slice(0, 80);
+  const held = zone.innerText ?? zone.textContent ?? '';
+  for (let node = zone, i = 0; i < 3 && node.parentElement && node.parentElement !== document.body; i++, node = node.parentElement) {
+    const row = node.parentElement;
+    if (row.querySelectorAll(DRAG_ZONE_SEL).length !== 1) return '';
+    const text = (row.innerText ?? row.textContent ?? '').replace(held, '').replace(/\s+/g, ' ').trim();
+    if (text && text.length <= 80) return text;
+  }
+  return '';
+}
+
+// The cards in a list, one for each (a card can be tagged on a wrapper and its handle)
+const cardsIn = zone => {
+  const all = Array.from(zone.querySelectorAll(DRAG_SEL));
+  return all.filter(c => !all.some(o => o !== c && o.contains(c)));
+};
+
+function dragLayout() {
+  const zones = Array.from(document.querySelectorAll(DRAG_ZONE_SEL)).filter(z => !z.closest('[hidden], [aria-hidden="true"]'));
+  if (!zones.length) return null;
+  // (one list alone needs no name, and the text around it is the question's)
+  const labels = zones.map(z => zones.length > 1 ? zoneLabel(z) : '');
+  const labelled = labels.some(Boolean);
+  let pools = 0;
+  const names = zones.map((z, i) => labels[i] ? `"${labels[i]}"`
+    : labelled ? `the pool${zones.filter((_, j) => !labels[j]).length > 1 ? ` ${++pools}` : ''}` : `list ${i + 1}`);
+  return { zones, names, labels, labelled };
+}
+
+function dragPlace(el) {
+  if (!el.matches?.(DRAG_SEL)) return undefined;
+  const zone = el.closest(DRAG_ZONE_SEL);
+  const lay = zone && dragLayout();
+  if (!lay) return undefined;
+  const at = lay.zones.indexOf(zone);
+  if (at < 0) return undefined;
+  const cards = cardsIn(zone);
+  const mine = cards.findIndex(c => c.contains(el));
+  return `in ${lay.names[at]}, place ${mine + 1} of ${cards.length}`;
+}
+
+// The lists in page order and what each holds, for the page's text; and how many
+// cards are still in the pool while a labelled box stands empty
+function dragSummary() {
+  const lay = dragLayout();
+  if (!lay) return null;
+  const said = lay.zones.map((z, i) => {
+    const cards = cardsIn(z).map(c => `"${(c.innerText ?? c.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 50)}"`);
+    return `${lay.names[i]} (${cards.length ? `holds ${cards.slice(0, 8).join(', ')}` : 'empty'})`;
+  });
+  const left = lay.labelled && lay.zones.some((z, i) => lay.labels[i] && !cardsIn(z).length)
+    ? lay.zones.reduce((n, z, i) => n + (lay.labels[i] ? 0 : cardsIn(z).length), 0) : 0;
+  return {
+    text: `Drop areas, in page order: ${said.join('; ')}. Each card below says which area it is in and its place there. Put every card in the area it belongs to; a card left in the pool is unanswered. If a card is in the same place after a move, that direction does not work from where it is — try another direction or another number of steps.`,
+    left
+  };
+}
+
 function describeEl(el) {
   const question = nearestQuestionText(el);
+  const place = dragPlace(el);
   // Fall back to table headers when the field has no label of its own
   const drop = el.tagName === 'SELECT' || isDropdown(el);
   // A worksheet cell (not SIMnet's, which is named by what it holds) is named by its row
@@ -499,6 +569,7 @@ function describeEl(el) {
       : isDropdown(el) ? (dropdownOptions(el)?.slice(0, 100) ?? undefined) : undefined,
     name: el.getAttribute('name') || null,
     question: question || null,
+    ...(place ? { place } : {}),
     sheet: isSheetCell(el) || undefined,
     cell: cellAddress(el) || undefined,
     // Only meaningful for spreadsheet cells. Scoped to them deliberately:
@@ -820,6 +891,7 @@ function scrape() {
 
   const parts = partTabs();
   const text = textOf(root).slice(0, 5000);
+  const drops = isDrag ? dragSummary() : null;
   return {
     text,
     needsPicture: _lastElements.length ? pictureNeeded(root, text) : undefined,
@@ -827,6 +899,7 @@ function scrape() {
     elements: _lastElements.map(describeEl),
     isWorksheet,
     isDrag,
+    ...(drops ? { dragZones: drops.text, dragLeft: drops.left } : {}),
     // A question in parts: which there are, and which is on screen
     parts: parts.length > 1 ? parts.map(p => ({ text: p.text, current: p.current })) : undefined
   };
@@ -1564,7 +1637,8 @@ function connectState() {
 
 const sameText = (a, b) => squash(a) === squash(b);
 // Connect's "Your Answer <pill>" line: the pill says correct or incorrect
-const GRADED = /Your Answer\s*([a-z ]*?)\s*(incorrect|correct)\b/i;
+// ("Correct Answer", the heading of the box that follows, is not the pill)
+const GRADED = /Your Answer\s*([a-z ]*?)\s*(incorrect|correct)\b(?!\s*answer)/i;
 
 // Connect's verdict on the answer just given, with what the right one was. The
 // page says "Your Answer" with a pill reading correct or incorrect; a wrong
@@ -1574,7 +1648,7 @@ const GRADED = /Your Answer\s*([a-z ]*?)\s*(incorrect|correct)\b/i;
 function connectResult() {
   const text = document.body?.innerText ?? '';
   const m = GRADED.exec(text);
-  const verdict = m ? (/incorrect|partially|not/i.test(m[0]) ? 'incorrect' : 'correct') : null;
+  let verdict = m ? (/incorrect|partially|not/i.test(m[0]) ? 'incorrect' : 'correct') : null;
 
   const choices = Array.from(document.querySelectorAll('input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]'))
     .filter(isRendered)
@@ -1596,6 +1670,9 @@ function connectResult() {
     }
     break;
   }
+  // A question that isn't ticking choices (cards, dropdowns) may show the box with
+  // no "Your Answer" pill: the box is only there when the answer was wrong
+  if (!verdict && lines.length) verdict = 'incorrect';
   // The box may say a choice with its letter, or in part: when no line matches
   // a choice exactly, one that holds the other will do
   // (a line holding the whole choice, or a line that is most of it; and where

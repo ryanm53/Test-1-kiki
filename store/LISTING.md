@@ -5,8 +5,8 @@ Once it's on the store, your friends install it with one click and Chrome keeps 
 ## What you do, once (about 20 minutes, plus waiting for Google)
 
 1. **Make a developer account.** Go to <https://chrome.google.com/webstore/devconsole>, sign in with your Google account and pay the one-time $5 fee. Google may ask you to verify your email or identity first. When it asks whether you're a *trader*, answer **No**: you're not selling anything.
-2. **Upload the extension.** Click **New item** and upload **`page-agent-1.0.14.zip`**. Download it here:
-   <https://github.com/ryanm53/Test-1-kiki/raw/claude/page-agent-extension-0xpw4s/store/page-agent-1.0.14.zip>
+2. **Upload the extension.** Click **New item** and upload **`page-agent-1.0.15.zip`**. Download it here:
+   <https://github.com/ryanm53/Test-1-kiki/raw/claude/page-agent-extension-0xpw4s/store/page-agent-1.0.15.zip>
 
    ⚠️ Not GitHub's green **Code → Download ZIP** button: that's the whole project (tests, notes, these instructions), and the store turns it down with *"Files outside directory with manifest … are not allowed"*. Upload the zip from the link exactly as it downloads; don't unzip it first.
 3. **Fill in the four tabs** by copying from the sections below: **Store listing**, **Privacy**, **Distribution**, and **Test instructions** if it's shown.
@@ -41,7 +41,7 @@ Page Agent puts a small control bar on your coursework pages. Press play and it 
 
 WHAT IT HANDLES
 • Homework questions — multiple choice, select all that apply, fill in the blank, dropdowns, accounting worksheets (including ones split into Required 1 / Required 2 tabs and financial statement effects tables) and drag-and-drop. It rates its confidence and moves on to the next question, opening a concept resource and coming back to the questions when the page asks for one first.
-• Remembers right answers — when the page shows the right answer after a wrong one, it keeps it in your browser and uses it the next time that question comes up.
+• Remembers right answers — when the page shows the right answer after a wrong one (including dragging and dropdown questions), it keeps it in your browser and uses it the next time that question comes up.
 • Simulated Excel tasks — ribbon menus, dialogs, cells, ranges, sheet tabs, right-click menus and typing. Formulas are typed, checked in the cell, and only then entered. It reads the Correct/Incorrect result, and never spends your last attempt.
 • Quizzes — every question on the page at once, or one at a time. It never submits a quiz for you.
 
