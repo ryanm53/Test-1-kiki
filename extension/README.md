@@ -297,6 +297,29 @@ change between sites.
   can't be clicked from memory (`recalled` stays false). `connectResult` takes the
   box to mean a wrong answer when no "Your Answer" pill is shown (`GRADED` no
   longer takes the box's own "Correct Answer" heading for the pill).
+- **Boxes the scan can't see** — a real Connect log had eight fill-in-the-blank questions fail
+  the same way: the question in the page's text, `Elements: (none found)`, the model guessing
+  `[0]`. When nothing on the page can be answered (or the page says "fill in the blank" and the
+  only text box is a search box), `scrape` looks harder (`hiddenBoxes`): `deepAll` goes into open
+  shadow roots (never the bar's own, `OWN_UI`), and `TEXT_BOX_SEL` takes in `role="textbox"`,
+  `contenteditable` in any form, and boxes that are see-through (opacity 0) as long as they
+  have a size. Those come first in the list (not viewport-filtered), named by their own label
+  or else "the blank" / "blank N" (not the text before them, which is the question's heading).
+  Found inside a shadow root, `_deepMode` makes the Connect button search (`smartFind`,
+  `connectState`, `CLICK_TEXT`) look there too (`qsa`). `liveElement` tests `isConnected`
+  (`document.contains` is false inside a shadow root), and the fill events are `composed`.
+  When a list comes back empty anyway, `scrape` returns `empty` (`emptyProbe`: counts of
+  buttons, inputs, editable, shadow hosts, iframes, and the first boxes with their size and
+  opacity) and the answer log entry gets `details` (that plus `pageDetails`, whose
+  `probeStructure` now also gives `drawn`, `boxes`, `blankLike`) — so the next fix is in the
+  file that is sent. `scripts/real-chrome-blank.js` checks a shadow-root blank and a see-through
+  one in real Chromium (and fails on 1.0.15).
+- **Graded pills, and select-all** — a graded multiple-select choice can carry its own
+  "correct" / "incorrect" pill, read by the page's text as part of the choice, so no
+  multiple-select answer was ever remembered (the right ones didn't match the question as
+  asked). `connectResult` matches a choice with and without it (`bare`); `learn` keeps the choice as
+  asked (`asAsked`). And a `clickMany` that names a button among the choices (a real log:
+  "Progress information") has the button dropped when the page has choices.
 - **Drag state** — a hello-pangea / react-beautiful-dnd / dnd-kit card used to be
   listed by its words alone, so the model couldn't tell where a card was after a move
   or what boxes there were; a real matching question got one card moved and stopped.

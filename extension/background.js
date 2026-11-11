@@ -1073,6 +1073,17 @@ function probeStructure() {
     },
     // For a cell whose editor is a dropdown: the cell, whatever has the focus, and any
     // list that is open (press Copy page details while a cell is being edited)
+    // Whether anything here is drawn at all, and the boxes to type into, shadow roots included
+    drawn: { inner: `${window.innerWidth}x${window.innerHeight}`, scrollY: Math.round(window.scrollY), body: getComputedStyle(document.body).visibility, landmarks: document.querySelectorAll('[role="main"], main, article, form').length },
+    boxes: (function deep(root, out) {
+      for (const el of root.querySelectorAll('input:not([type="hidden"]), textarea, [contenteditable], [role="textbox"]')) out.push(el);
+      for (const h of root.querySelectorAll('*')) if (h.shadowRoot && !/^__cap-/.test(h.id)) deep(h.shadowRoot, out);
+      return out;
+    })(document, []).slice(0, 6).map(el => {
+      const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+      return { html: trim(el.outerHTML, 220), size: `${Math.round(r.width)}x${Math.round(r.height)}`, display: cs.display, opacity: cs.opacity, shadow: el.getRootNode() !== document };
+    }),
+    blankLike: Array.from(document.querySelectorAll('[class*="blank" i], [id*="blank" i], [class*="fitb" i], [data-automation-id*="blank" i], [data-automation-id*="fill" i], [aria-label*="blank" i]')).slice(0, 6).map(el => trim(el.outerHTML, 220)),
     focus: document.activeElement && document.activeElement !== document.body ? trim(document.activeElement.outerHTML, 260) : null,
     cells: Array.from(document.querySelectorAll('td[tabindex], td.responseCell')).slice(0, 3).map(td => trim(td.outerHTML, 240)),
     lists: Array.from(document.querySelectorAll('[role="listbox"], [role="menu"], .ui-autocomplete, .ui-menu, .dropdown-menu, [class*="autocomplete"], [class*="suggest"], [class*="dropdown"] ul'))
@@ -1589,6 +1600,15 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
           }
         }
 
+        // Nothing to act on anywhere: what the page is made of goes into the answer log, so
+        // the next fix has what it needs in the file that is sent
+        if (log && !pageData.elements?.length && !log.details) {
+          log.details = {
+            frame: frameId, empty: pageData.empty,
+            page: (await pageDetails(tabId).catch(() => '')).slice(0, 6000)
+          };
+        }
+
         // A simulated-Excel task is a procedure — switch tab, open dialog, set
         // arguments, confirm — so it needs room for several steps. Set from the
         // scrape rather than from the action, since the page says what it is
@@ -1716,6 +1736,13 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         }
         if (bad.length) {
           throw new Error(`Referred to item ${bad.join(', ')}, which isn't on the page.`);
+        }
+
+        // Select-all-that-apply with a header button among the numbers (a real log: "Progress
+        // information" was clicked as an answer): only the choices are ticked
+        if (action.action === 'clickMany' && pageData.elements.some(isChoice)) {
+          const keep = action.indexes.filter(i => isChoice(pageData.elements[i]));
+          if (keep.length && keep.length !== action.indexes.length) action.indexes = keep;
         }
 
         // Clicking the question's own box, or a confidence button, answers
@@ -2009,7 +2036,11 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
       return;
     }
     const said = r.verdict === 'correct' ? r.yours : r.correct;
-    const right = said.map(choiceKey).filter(k => qid.labels.includes(k));
+    // A graded choice can carry its own "correct" / "incorrect" pill, which the page's
+    // text then reads as part of the choice (a real log: every multiple-select answer
+    // went unremembered for it): the choice as it was asked is what is kept
+    const asAsked = k => qid.labels.includes(k) ? k : qid.labels.includes(k.replace(/\s*(incorrect|correct)$/, '')) ? k.replace(/\s*(incorrect|correct)$/, '') : null;
+    const right = said.map(choiceKey).map(asAsked).filter(Boolean);
     const whole = right.length > 0 && right.length === said.length;
     log?.verdicts.push({ round: 1, verdict: r.verdict, ...(r.verdict === 'incorrect' ? { right: r.correct } : {}) });
     if (whole && (r.verdict === 'incorrect' || !recalled)) await rememberAnswer(qid, right).catch(() => {});

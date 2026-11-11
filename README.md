@@ -225,6 +225,9 @@ You almost certainly pasted the key **ID** instead of the key. See the warning i
 **"Rate limit hit"**
 You've sent requests faster than your account allows. It counts down and retries by itself — just let it sit. New accounts have lower limits that rise over time.
 
+**A fill-in-the-blank question says "Couldn't find an answer here" or "Couldn't see anything to click"**
+The box to type in is built in a way the page scan didn't expect. Page Agent now looks inside shadow roots, at see-through boxes and at other kinds of editable box before giving up. If it still can't, turn on the **Answer log** under More, press play on that question once, and send the log: the entry for it records what the page is made of (the counts of buttons, inputs and shadow roots, and the first boxes with their sizes), which is what a fix needs. **Copy page details** under More → Troubleshooting says the same.
+
 **Drag-and-drop questions don't work / "Close DevTools"**
 Drag questions need Chrome's debugger, and only one thing can use that at a time. **Close DevTools** (the inspector panel) on that tab and try again. You'll briefly see a yellow *"Chrome is being debugged"* banner while it drags — that's normal, and it disappears when it's done.
 

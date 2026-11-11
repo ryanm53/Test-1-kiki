@@ -639,6 +639,63 @@ function pictureNeeded(root, text) {
 }
 
 
+// ── A box the ordinary scan can't see ─────────────────────────────────────
+// A real log of Connect fill-in-the-blank questions (eight of them, every one a
+// failure) had the question in the page's text and nothing at all to type into: the
+// model could only guess at "[0]". So when nothing on the page can be answered, look
+// harder for a box: inside shadow roots, of the kinds the usual list leaves out
+// (role="textbox", contenteditable in any form), and see-through ones (opacity 0).
+const TEXT_BOX_SEL = 'input:not([type="hidden"]):not([type="radio"]):not([type="checkbox"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]):not([type="file"]), textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="searchbox"], [role="spinbutton"]';
+const OWN_UI = /^__cap-/;
+
+function deepAll(root, sel, out = []) {
+  for (const el of root.querySelectorAll(sel)) out.push(el);
+  for (const host of root.querySelectorAll('*')) {
+    if (host.shadowRoot && !OWN_UI.test(host.id)) deepAll(host.shadowRoot, sel, out);
+  }
+  return out;
+}
+
+// Set once a scan has had to go inside shadow roots for the page's blank: the buttons
+// that go with it (the confidence rating, Next) are then looked for there too
+let _deepMode = false;
+const qsa = sel => _deepMode ? deepAll(document, sel) : Array.from(document.querySelectorAll(sel));
+
+const answerable = el => isTick(el) || isTextBox(el) || el.tagName === 'SELECT' || isDropdown(el) || el.matches?.(DRAG_SEL);
+
+function hiddenBoxes() {
+  const found = deepAll(document, TEXT_BOX_SEL).filter(el => {
+    if (el.disabled || el.readOnly || el.closest?.('#__cap-host, #__cap-marks')) return false;
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return false;
+    const cs = getComputedStyle(el);
+    return cs.display !== 'none' && cs.visibility !== 'hidden';
+  });
+  // The inner one where a box holds another (a role="textbox" wrapper round an input)
+  return found.filter(c => !found.some(o => o !== c && c.contains(o)));
+}
+
+// What the page is made of, for an empty list: kept in the answer log, so that what
+// the next fix needs is in the file that is sent and not left to be asked for
+function emptyProbe() {
+  const n = sel => document.querySelectorAll(sel).length;
+  let shadowHosts = 0;
+  for (const el of document.querySelectorAll('*')) if (el.shadowRoot && !OWN_UI.test(el.id)) shadowHosts++;
+  const trim = (t, k) => String(t ?? '').replace(/\s+/g, ' ').trim().slice(0, k);
+  return {
+    frame: window === window.top ? 'top' : 'inner',
+    size: `${window.innerWidth}x${window.innerHeight}`,
+    buttons: n('button, [role="button"]'), links: n('a[href]'),
+    inputs: n('input:not([type="hidden"])'), textareas: n('textarea'),
+    editable: n('[contenteditable]:not([contenteditable="false"]), [role="textbox"]'),
+    shadowHosts, iframes: n('iframe'), landmarks: n('[role="main"], main, article, form'),
+    boxes: deepAll(document, TEXT_BOX_SEL).slice(0, 6).map(el => {
+      const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+      return { html: trim(el.outerHTML, 200), size: `${Math.round(r.width)}x${Math.round(r.height)}`, display: cs.display, opacity: cs.opacity, shadow: el.getRootNode() !== document };
+    })
+  };
+}
+
 function scrape() {
   // Prefer the main content area to skip nav/header/footer noise
   const root = pageRoot();
@@ -648,6 +705,15 @@ function scrape() {
   if (!all.some(isTick)) {
     const hidden = Array.from(document.querySelectorAll('input[type="radio"], input[type="checkbox"]')).filter(choiceOk);
     if (hidden.length) all = [...new Set([...all, ...hidden])].sort(byDocumentOrder);
+  }
+
+  // Nothing on the page can be answered: a box the usual list leaves out?
+  let deepBoxes = [];
+  const wantsBlank = /fill in the blank|enter one word per blank/i.test((root.innerText ?? '').slice(0, 600));
+  if (!all.some(answerable) || (wantsBlank && !all.some(el => isTextBox(el) && !/search/i.test(el.getAttribute('aria-label') ?? el.placeholder ?? '')))) {
+    deepBoxes = hiddenBoxes().filter(el => !all.includes(el));
+    if (deepBoxes.length) all = [...new Set([...deepBoxes, ...all])];
+    _deepMode = deepBoxes.some(el => el.getRootNode() !== document);
   }
 
   // Spreadsheet cells are plain <td>s, so they never match INTERACTIVE_SEL
@@ -885,8 +951,10 @@ function scrape() {
     _lastElements = [...fields.slice(0, 250), ...rest.slice(0, 20)];
   } else {
     // Ordinary questions fit on screen, so staying in the viewport keeps
-    // offscreen nav and footer links out of the list.
-    _lastElements = all.filter(inViewport).slice(0, 25);
+    // offscreen nav and footer links out of the list. (A box found the hard way is
+    // the answer, wherever it is.)
+    const boxSet = new Set(deepBoxes);
+    _lastElements = [...deepBoxes, ...all.filter(el => !boxSet.has(el) && inViewport(el))].slice(0, 25);
   }
 
   const parts = partTabs();
@@ -896,10 +964,17 @@ function scrape() {
     text,
     needsPicture: _lastElements.length ? pictureNeeded(root, text) : undefined,
     tables: dataTables() || undefined,
-    elements: _lastElements.map(describeEl),
+    elements: _lastElements.map((el, i) => {
+      const d = describeEl(el);
+      // A box with nothing of its own to call it by is the blank, in the order they come
+      // (not whatever text happens to sit before it, which is the question's heading)
+      if (deepBoxes.includes(el) && !accessibleText(el).trim()) d.text = deepBoxes.length > 1 ? `blank ${deepBoxes.indexOf(el) + 1}` : 'the blank';
+      return d;
+    }),
     isWorksheet,
     isDrag,
     ...(drops ? { dragZones: drops.text, dragLeft: drops.left } : {}),
+    ...(_lastElements.length ? {} : { empty: emptyProbe() }),
     // A question in parts: which there are, and which is on screen
     parts: parts.length > 1 ? parts.map(p => ({ text: p.text, current: p.current })) : undefined
   };
@@ -1016,7 +1091,7 @@ function centreOf(el) {
 // times along. The list the model chose from is left as it was.
 function liveElement(i) {
   const el = _lastElements[i];
-  if (!el || document.contains(el)) return el;
+  if (!el || el.isConnected) return el;
   const want = _lastDesc[i];
   if (!want) return null;
   const sig = d => `${d.tag}|${d.text}|${d.type ?? ''}|${d.name ?? ''}`;
@@ -1174,9 +1249,11 @@ function setFieldValue(el, value) {
     return true;
   }
 
-  if (el.isContentEditable) {
+  // (a role="textbox" or a contenteditable in a form the browser doesn't call editable
+  // is still typed into as text: it has no value to set)
+  if (el.isContentEditable || (tag !== 'input' && tag !== 'textarea')) {
     el.textContent = value;
-    el.dispatchEvent(new InputEvent('input', { bubbles: true, data: value }));
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, data: value }));
     return true;
   }
 
@@ -1190,9 +1267,9 @@ function setFieldValue(el, value) {
   const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
   if (nativeSetter) nativeSetter.call(el, value); else el.value = value;
 
-  el.dispatchEvent(new InputEvent('input', { bubbles: true, data: value }));
-  el.dispatchEvent(new Event('change', { bubbles: true }));
-  el.dispatchEvent(new FocusEvent('blur', { bubbles: false }));
+  el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, data: value }));
+  el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+  el.dispatchEvent(new FocusEvent('blur', { bubbles: false, composed: true }));
   // A box that refused the value is a miss, not a success
   return !(value !== '' && el.value === '');
 }
@@ -1609,7 +1686,7 @@ function buttonScore(el, kind) {
 // greyed-out one instead — to know a Next is there but waiting for something.
 function smartFind(kind, { disabled = false } = {}) {
   let best = null, top = 0;
-  for (const el of document.querySelectorAll(BUTTON_SEL)) {
+  for (const el of qsa(BUTTON_SEL)) {
     if (el.closest('#__cap-host, #__cap-marks') || !isRendered(el)) continue;
     if (isDisabled(el) !== disabled) continue;
     const sc = buttonScore(el, kind);
@@ -1629,7 +1706,7 @@ function connectState() {
     next: !!smartFind('next'),
     nextWaiting: !!smartFind('next', { disabled: true }),
     // What can be pressed, so a failure says what was there
-    buttons: Array.from(document.querySelectorAll(BUTTON_SEL))
+    buttons: qsa(BUTTON_SEL)
       .filter(el => isRendered(el) && !el.closest('#__cap-host, #__cap-marks'))
       .map(labelOf).filter(Boolean).slice(0, 14)
   };
@@ -1652,7 +1729,12 @@ function connectResult() {
 
   const choices = Array.from(document.querySelectorAll('input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]'))
     .filter(isRendered)
-    .map(el => ({ label: accessibleText(el).trim(), on: el.checked === true || el.getAttribute('aria-checked') === 'true' }))
+    .map(el => {
+      const label = accessibleText(el).trim();
+      // A graded choice can carry a pill of its own ("correct" / "incorrect") that the
+      // page's text reads as part of it: matched both ways, as it is and without
+      return { label, bare: label.replace(/\s*\b(incorrect|correct)$/i, '').trim(), on: el.checked === true || el.getAttribute('aria-checked') === 'true' };
+    })
     .filter(c => c.label);
 
   // The lines under a "Correct Answer" heading
@@ -1681,9 +1763,9 @@ function connectResult() {
     const x = squash(line), y = squash(label);
     return y.length >= 6 && (x.includes(y) || (y.includes(x) && x.length >= y.length * 0.6));
   };
-  let correct = choices.filter(c => lines.some(l => sameText(l, c.label))).map(c => c.label);
+  let correct = choices.filter(c => lines.some(l => sameText(l, c.label) || sameText(l, c.bare))).map(c => c.label);
   if (!correct.length) {
-    const hit = choices.filter(c => lines.some(l => near(l, c.label))).map(c => c.label);
+    const hit = choices.filter(c => lines.some(l => near(l, c.label) || near(l, c.bare))).map(c => c.label);
     correct = hit.filter(a => !hit.some(b => b !== a && squash(b).includes(squash(a))));
   }
   return {
@@ -3277,7 +3359,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         // Only usable buttons are matched. Taking the first match and then
         // checking it gave up whenever that one was greyed out — a question's
         // own disabled "Next" (on its last Required tab) hid the real one.
-        const all = Array.from(document.querySelectorAll('button, [role="button"], a')).filter(usable);
+        const all = qsa('button, [role="button"], a').filter(usable);
         for (const c of candidates) {
           let el = null;
           if (c.smart) el = smartFind(c.smart);
