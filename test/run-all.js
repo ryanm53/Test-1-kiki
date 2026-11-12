@@ -38,6 +38,7 @@ const SUITES = [
   ['test-simnet-log3.js', 'SIMnet, third log: the selected cell, array formulas, function names'],
   ['test-cost.js',       'Cost: recorded and shown; caching; Enter without a call; cheapest mode off by default'],
   ['test-matching.js',   'Connect matching question: wrong frame, newer drag libraries, page details'],
+  ['test-outside-info.js', 'A question that sends you to a website: said plainly after one try'],
   ['test-blanks.js',     'Fill-in-the-blank boxes the usual scan misses: shadow roots, see-through, role=textbox; an empty list kept in the log'],
   ['test-graded-pills.js', 'Graded multiple-select choices with pills are remembered; header buttons are not clicked as answers'],
   ['test-drag-state.js', 'Drag questions: where each card is, every card placed, the right answer kept as words'],

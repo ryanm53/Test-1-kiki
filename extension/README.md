@@ -297,6 +297,21 @@ change between sites.
   can't be clicked from memory (`recalled` stays false). `connectResult` takes the
   box to mean a wrong answer when no "Your Answer" pill is shown (`GRADED` no
   longer takes the box's own "Correct Answer" heading for the pill).
+- **Dropdown cells and their lists** — a worksheet cell whose editor is a list of names
+  (`typeIntoCell`) used to type the model's name and, if it wasn't one of the entries, leave the cell
+  empty or holding whatever Enter took. Now each way of typing reads the list it opened
+  (`LIST_OPTIONS`, up to 120 entries; `seen`); a name the list has only in another form (every
+  word of the shorter in the longer and most of the longer, clearly nearer than any other:
+  "Long-term liabilities" for "Long-term liability", `closestEntry`) is typed and picked as the
+  entry's own, as a last resort after the other ways; a name that is only *like* one
+  ("Long-term debt") is not guessed at. What the cells have shown is kept for the run
+  (`knownEntries`, a union, 120 at most): the cells after use it (`known`), the model is told it on
+  every later call ("The dropdown cells on this page offered these entries…"), and the note for a
+  retry names the whole list rather than twelve of it.
+- **Questions that send you to a website** — `OUTSIDE_INFO` (go to / visit / search for … website,
+  annual report, SEC, SASB…) on a page the model has given up on: `noAnswer` with `outside`, the
+  bar says the question sends you to a website and to fill it in and press play, and the
+  screenshot try and the stronger model are skipped (neither can find it).
 - **Boxes the scan can't see** — a real Connect log had eight fill-in-the-blank questions fail
   the same way: the question in the page's text, `Elements: (none found)`, the model guessing
   `[0]`. When nothing on the page can be answered (or the page says "fill in the blank" and the

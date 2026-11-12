@@ -3037,6 +3037,13 @@ function bgSend(msg, cb) {
           return;
         }
 
+        if (result.noAnswer && result.outside) {
+          // The question sends the student to a website for its figures
+          paused = true;
+          fail("This question sends you to a website for its answer, which Page Agent can't open. Look it up yourself and fill it in, then press play to go on.");
+          return;
+        }
+
         if (result.noAnswer) {
           // Nothing clickable — likely a question type we can't do yet.
           paused = true;
@@ -3200,7 +3207,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === 'LIST_OPTIONS') {
-    sendResponse({ options: listedOptions().map(o => (o.innerText ?? o.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 30) });
+    sendResponse({ options: listedOptions().map(o => (o.innerText ?? o.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 120) });
     return false;
   }
 

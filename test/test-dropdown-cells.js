@@ -128,6 +128,23 @@ const run = async (mode, reply, opts) => {
     check('  the retry is told what the list showed, and uses it', seenOffer && p.requests.length === 2 && s.values().join() === RIGHT.join(), `${p.requests.length} calls, ${s.values().join(' | ')}`);
   }
 
+  // ── A name nearly the list's own is picked; one that is only like it is not ─
+  {
+    const near = [...RIGHT]; near[2] = 'Long-term liabilities';
+    const { s, p, final } = await run('race', fillAll(near));
+    check('a name the list has in another form ("liabilities") is picked in its own form', s.values().join() === RIGHT.join(), s.values().join(' | '));
+    check('  with no second call to the model', p.requests.length === 1 && !p.isError(), `${p.requests.length} calls / ${final}`);
+  }
+  {
+    // "Long-term debt" is not "Long-term liability": the model is told what the list has, and the next call has all of it
+    const wrongFirst = [...RIGHT]; wrongFirst[2] = 'Long-term debt';
+    let second = '';
+    const reply = b => { const t = bodyText(b); if (/the list for cell/.test(t)) second = t; return fillAll(/the list for cell/.test(t) ? RIGHT : wrongFirst)(b); };
+    const { s } = await run('race', reply);
+    check('a name that is only like one on the list is left to the model, with the whole list', s.values().join() === RIGHT.join() && /Long-term liability/.test(second), s.values().join(' | '));
+    check('  and what the list offered is on the page text of that call', /The dropdown cells on this page offered these entries/.test(second) && /Long-term liability/.test(second.split('offered these entries')[1] ?? ''), second.slice(second.indexOf('Page text'), second.indexOf('Page text') + 500));
+  }
+
   // ── A cell that takes nothing at all is reported, not called filled ──────
   {
     const { s, p, final } = await run('deaf', fillAll(RIGHT));

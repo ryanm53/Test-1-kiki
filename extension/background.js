@@ -87,6 +87,12 @@ function pickModel(baseModel, pageData, autoUpgrade, stronger = false) {
   return stronger ? (UPGRADE_TO[baseModel] ?? baseModel) : baseModel;
 }
 
+// A question that sends the student to a website for its figures ("Go to the SASB website and
+// search for Columbia Sportswear..."): nothing on the page holds the answer, so when the model
+// gives up on one it is said so plainly, without the screenshot and the stronger model, which
+// cannot find it either
+const OUTSIDE_INFO = /\b(go to|visit|navigate to|search for|look up|look at)\b[^.\n]{0,100}\b(web ?site|web ?page|annual report|10-K|SEC|EDGAR|SASB|corporate responsibility|sustainability report)\b/i;
+
 // A multiple-choice page answered with a click that picks no choice at all
 const isChoice = e => e?.tag === 'input' && /^(radio|checkbox)$/.test(e.type ?? '');
 function missedTheChoices(action, elements) {
@@ -866,11 +872,38 @@ function cellHolds(shown, want) {
   return letters(shown) === letters(want);
 }
 
-async function typeIntoCell(tabId, frameId, index, value) {
-  const want = String(value ?? '');
+// An entry of a list, by its words: plurals and the little words aside. Used only as the
+// last resort for a name the list doesn't have — and then only for one that is nearly it
+// (every word of the shorter in the longer, and most of the longer), and clearly nearer
+// than any other entry: "Long-term debt" is not "Long-term liability", but
+// "Additional Paid-in Capital" is "Additional paid-in capital (common)".
+const entryWords = t => String(t ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ')
+  .filter(w => w && !/^(the|of|and|a|an|to|for)$/.test(w)).map(w => w.replace(/ies$/, 'y').replace(/s$/, ''));
+const entryKey = t => String(t ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+function closestEntry(entries, want) {
+  const a = new Set(entryWords(want));
+  if (!a.size) return null;
+  let best = null, top = 0, second = 0;
+  for (const e of entries) {
+    const b = new Set(entryWords(e));
+    if (!b.size) continue;
+    const both = [...a].filter(w => b.has(w)).length;
+    const score = both === Math.min(a.size, b.size) ? both / Math.max(a.size, b.size) : 0;
+    if (score > top) { second = top; top = score; best = e; } else if (score > second) second = score;
+  }
+  return top >= 0.75 && top > second ? best : null;
+}
+
+async function typeIntoCell(tabId, frameId, index, value, known = []) {
+  let want = String(value ?? '');
   const wordy = /[A-Za-z]/.test(want);          // a name from a list, not an amount
   const read = async () => (await sendToTab(tabId, { type: 'READ_CELL', index }, frameId).catch(() => null))?.text ?? null;
   const focus = async () => sendToTab(tabId, { type: 'FOCUS_CELL', index }, frameId);
+  const listNow = async () => (await sendToTab(tabId, { type: 'LIST_OPTIONS' }, frameId).catch(() => null))?.options ?? [];
+  let seen = [];     // the longest list its editor showed, for the next cell and for the model
+
+  // A name the list is known to have in another form (from an earlier cell): that form
+  if (wordy && known.length && !known.some(k => entryKey(k) === entryKey(want))) want = closestEntry(known, want) ?? want;
 
   // Ways of getting a choice into a cell, each read back before the next is tried:
   // typed and given time for its list to open; typed slowly and the entry clicked in
@@ -889,18 +922,35 @@ async function typeIntoCell(tabId, frameId, index, value) {
     await typeText(tabId, want, way.pace);
     // A list of names opens a moment after the letters; Enter before it does nothing
     await new Promise(r => setTimeout(r, way.settle));
+    if (wordy) { const listed = await listNow(); if (listed.length > seen.length) seen = listed; }
     const picked = way.pick
       ? (await sendToTab(tabId, { type: 'CLICK_OPTION', text: want }, frameId).catch(() => null))?.success
       : false;
     if (!picked) await pressKey(tabId, 'enter');
     await new Promise(r => setTimeout(r, 160));
-    if (cellHolds(await read(), want)) return { success: true };
+    if (cellHolds(await read(), want)) return { success: true, ...(seen.length ? { options: seen } : {}) };
+  }
+
+  // The list has no entry by that name, but one that is nearly it: that one, picked
+  const near = wordy && seen.length && !seen.some(o => entryKey(o) === entryKey(want)) ? closestEntry(seen, want) : null;
+  if (near) {
+    await pressKey(tabId, 'escape').catch(() => {});
+    const focused = await focus();
+    if (focused?.success) {
+      await attachDebugger(tabId);
+      await typeText(tabId, near, 60);
+      await new Promise(r => setTimeout(r, 600));
+      const picked = (await sendToTab(tabId, { type: 'CLICK_OPTION', text: near }, frameId).catch(() => null))?.success;
+      if (!picked) await pressKey(tabId, 'enter');
+      await new Promise(r => setTimeout(r, 160));
+      if (cellHolds(await read(), near)) return { success: true, options: seen };
+    }
   }
 
   // Nothing worked. Say what is in the cell and what the list offers, so a wrong label
   // can be seen to be one — then close the editor rather than leave it half-open
   const shown = await read();
-  const offered = (await sendToTab(tabId, { type: 'LIST_OPTIONS' }, frameId).catch(() => null))?.options ?? [];
+  const offered = seen.length ? seen : await listNow();
   await pressKey(tabId, 'escape').catch(() => {});
   return {
     success: false, options: offered,
@@ -1520,6 +1570,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   let loose = null;        // the same for a question that isn't ticking choices: what Connect showed as right is kept as words
   let recallNote = '';     // ...and given to the model when that question comes round again
   let dragNudges = 0;      // "done" said with cards still in the pool, this run
+  let knownEntries = [];   // what a worksheet's dropdown cells offered, as one of them showed it: for the cells after
   let recalled = false;    // the answer came from the memory, not the model
 
   // Resolve once per run: every scrape, click and fill must hit the same frame
@@ -1649,6 +1700,8 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
 
         // A drag question: the lists the cards can go into, and what each holds now
         if (pageData.dragZones) pageText = `${pageData.dragZones}\n\n${pageText}`;
+        // A dropdown cell has shown its list: the rest are filled from it
+        if (knownEntries.length) pageText = `The dropdown cells on this page offered these entries — a dropdown is filled with the exact words of one of them: ${knownEntries.slice(0, 80).join(' | ')}\n\n${pageText}`;
 
         // (only in the cheapest mode: by default what the model reads is left as it is)
         if (pageData.isSimnet && cheapFirst) pageText = tidySimnetText(pageText);
@@ -1781,6 +1834,8 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
             // On Auto, the cheap model saying "none" on a question it could
             // see is usually it giving up, not the page having no question.
             // One more look, from the stronger model, before stopping.
+            // The answer is on a website the question names: nothing more to try here
+            if (OUTSIDE_INFO.test(pageText)) return { success: true, action, noAnswer: true, outside: true, usedModel };
             // The text alone gave nothing: look at the page itself before
             // changing model, which costs far more
             if (!shotTried && !pageData.isSimnet && !picture) { shotTried = true; attempt--; continue; }
@@ -1818,11 +1873,12 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
             // Typing a long worksheet cell by cell can outlast the control
             // bar's silence timer on its own, so keep telling it we're alive.
             reportProgress(tabId, step + 1, budget);
-            const r = await typeIntoCell(tabId, frameId, f.index, f.value);
+            const r = await typeIntoCell(tabId, frameId, f.index, f.value, knownEntries);
+            if (r.options?.length) knownEntries = [...new Set([...knownEntries, ...r.options])].slice(0, 120);
             if (!r.success) {
               missed.push(r.error?.startsWith('[') ? r.error : `[${f.index}]`);
               // What the list really offers goes into what the retry is told, so a wrong word can be corrected
-              if (r.options?.length) history.push(`the list for cell [${f.index}] showed: ${r.options.slice(0, 12).join(' | ')} (it may show only the entries that match what was typed) — use the exact words of one of these`);
+              if (r.options?.length) history.push(`the list for cell [${f.index}] showed: ${r.options.slice(0, 80).join(' | ')} (it may show only the entries that match what was typed) — use the exact words of one of these`);
             }
           }
           if (missed.length === action.fills.length) {

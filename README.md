@@ -225,6 +225,12 @@ You almost certainly pasted the key **ID** instead of the key. See the warning i
 **"Rate limit hit"**
 You've sent requests faster than your account allows. It counts down and retries by itself — just let it sit. New accounts have lower limits that rise over time.
 
+**A dropdown in a worksheet is left empty** (the name typed isn't on the list)
+Page Agent reads the list each dropdown opens and picks the entry whose name is the nearest to what it meant when that is clear ("Long-term liabilities" for "Long-term liability"), and tells the model what the cells offered so the cells after it, and the retry, use the list's own words. A name that is only something like an entry is not guessed at: the model is shown the whole list and asked again.
+
+**"This question sends you to a website for its answer"**
+Some Connect questions say "Go to the … website and search for …" and ask for figures from a report. Nothing on the page has them, and Page Agent can't open the website, so it stops after one try rather than spending more calls on it. Look it up, fill it in, and press play to carry on.
+
 **A fill-in-the-blank question says "Couldn't find an answer here" or "Couldn't see anything to click"**
 The box to type in is built in a way the page scan didn't expect. Page Agent now looks inside shadow roots, at see-through boxes and at other kinds of editable box before giving up. If it still can't, turn on the **Answer log** under More, press play on that question once, and send the log: the entry for it records what the page is made of (the counts of buttons, inputs and shadow roots, and the first boxes with their sizes), which is what a fix needs. **Copy page details** under More → Troubleshooting says the same.
 
