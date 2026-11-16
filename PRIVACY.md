@@ -11,7 +11,7 @@ These are kept in Chrome's storage for the extension, in your browser only:
 - **The last request sent to Claude**, so you can copy it under Troubleshooting.
 - **Right answers from Connect**, unless you switch it off under More → Right answers. When Connect marks an answer wrong and shows the right one, Page Agent keeps a fingerprint of the question, the first few words of it, and the text of the right choices (for a question answered by dragging cards or picking from dropdowns, the lines the page shows under "Correct Answer", up to 800 characters), so it can answer the same question again, or tell the model what the right answer was when it does. Where it does, that text is sent to Anthropic's API with the question, like the rest of the page. It stays in your browser and is never sent anywhere; Clear deletes it.
 - **A running cost total**: how many calls to Claude were made and what Anthropic reported they cost, by model, shown under More → Cost. It holds numbers only, no questions or answers, and Reset clears it.
-- **The answer log**, only if you switch it on. It records the questions answered and how the page looked afterwards. It never leaves your browser unless you press Download and share the file yourself, and Clear deletes it.
+- **The answer log**, only if you switch it on. It records the questions answered and how the page looked afterwards. When Page Agent can't find anything on a page to act on, the entry also records how the page is built (how many buttons, boxes and frames it has, and short pieces of the page's own HTML for its boxes), so the problem can be fixed from the log. It never leaves your browser unless you press Download and share the file yourself, and Clear deletes it.
 
 ## What is sent, and where
 
@@ -45,4 +45,4 @@ Remove the extension from Chrome, and everything it stored is deleted with it. O
 
 Questions or problems: <https://github.com/ryanm53/Test-1-kiki/issues>
 
-*Last updated: October 28, 2026*
+*Last updated: November 16, 2026*

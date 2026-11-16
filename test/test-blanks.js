@@ -90,6 +90,75 @@ const indexOf = (body, re) => Number(new RegExp(`\\[(\\d+)\\][^\\n]*${re}`, 'i')
     check('  and an empty list says what the page is made of', e.empty && e.empty.frame === 'top' && typeof e.empty.buttons === 'number' && Array.isArray(e.empty.boxes), JSON.stringify(e.empty));
   }
 
+  // ── The frame the question is read from: only one that is drawn ─────────
+  // (what the log showed: Connect's eBook reader, in a frame that isn't displayed, has a
+  // search box and buttons of its own and outscored a page with one blank and no choices;
+  // scripts/real-chrome-blank.js has that page for real)
+  {
+    const page = `<body><div role="main">${QUESTION}<p><input id="b" type="text" aria-label="Blank 1 of 1"> investors are wealthy.</p><button>Read About the Concept</button></div></body>`;
+    const frames = hidden => [
+      { frameId: 0, result: { shown: true, fields: 1, choices: 0, drags: 0, buttons: 3, gridFields: 0, things: 5 } },
+      // the reader and its contents list: more boxes and far more things, and not drawn
+      { frameId: 7, result: hidden ? { shown: false, fields: 0, choices: 0, drags: 0, buttons: 0, gridFields: 0, things: 0 } : { shown: true, fields: 3, choices: 0, drags: 0, buttons: 10, gridFields: 0, things: 16 } },
+      { frameId: 9, result: hidden ? { shown: false, fields: 0, choices: 0, drags: 0, buttons: 0, gridFields: 0, things: 0 } : { shown: true, fields: 1, choices: 0, drags: 0, buttons: 0, gridFields: 0, things: 81 } }
+    ];
+    const start = hidden => {
+      const p = boot(page, { installLayout: flat, url: CONNECT, storage: oneQuestion, reply: (b, n) => n === 1 ? as(b, { action: 'fill', fills: [{ index: indexOf(b, 'Blank'), value: 'angel' }] }) : as(b, { action: 'none' }) });
+      p.bg.chrome.scripting.executeScript = async ({ func }) => /gridFields/.test(String(func)) ? frames(hidden) : [{ frameId: 0, result: {} }];
+      const real = p.bg.chrome.tabs.sendMessage, asked = [];
+      p.bg.chrome.tabs.sendMessage = (tabId, msg, opts, cb) => {
+        if (opts?.frameId === 7 || opts?.frameId === 9) { asked.push(`${opts.frameId}:${msg.type}`); setTimeout(() => cb(msg.type === 'SCRAPE' ? { text: 'ContentsTable of Contents', elements: [] } : { success: true }), 0); return; }
+        return real(tabId, msg, opts, cb);
+      };
+      return { p, asked };
+    };
+    // as the probe reports them: not drawn, so never chosen and never read
+    const a = start(true);
+    a.p.pressPlay();
+    const final = await settle(a.p, 30000);
+    check('frames that are not drawn are never the question\'s: the blank on the page is typed into', a.p.w.document.getElementById('b').value === 'angel' && !a.p.isError(), `${a.p.w.document.getElementById('b').value} / ${final}`);
+    check('  and nothing is read from them', !a.asked.some(x => /SCRAPE/.test(x)), a.asked.join());
+    check('  nor their text put in front of the model', !/ContentsTable/.test(bodyText(a.p.requests[0])));
+
+    // drawn, outscoring the page, and holding nothing to act on: the others in turn, best first
+    const b = start(false);
+    b.p.pressPlay();
+    const final2 = await settle(b.p, 30000);
+    check('a frame chosen that turns out empty: the rest are tried in turn until one has the question', b.p.w.document.getElementById('b').value === 'angel' && !b.p.isError(), `${b.p.w.document.getElementById('b').value} / ${final2}`);
+    check('  the likeliest first', b.asked.filter(x => /SCRAPE/.test(x)).join() === '7:SCRAPE', b.asked.join());
+  }
+
+  // ── A blank answered wrong is remembered, by the page's words ────────────
+  {
+    const blankPage = sentence => `<body><div role="main">${QUESTION}<p><input id="b" type="text" aria-label="Blank 1 of 1"> ${sentence}</p><div id="slot"></div>
+      <button aria-label="High Confidence">High</button><button class="next-button">Next Question</button></div></body>`;
+    const ANGEL = 'investors are wealthy individuals in the business community willing to risk investment funds on a promising business venture.';
+    const fill = word => (b, n) => n === 1 ? as(b, { action: 'fill', fills: [{ index: indexOf(b, 'Blank 1 of 1'), value: word }] }) : as(b, { action: 'none' });
+    const first = boot(blankPage(ANGEL), { installLayout: flat, url: CONNECT, storage: { lastPresetIndex: 0, autoContinue: false, keepLog: true }, reply: fill('Venture') });
+    const d = first.w.document;
+    // the rating grades it; Next moves on
+    d.querySelector('[aria-label="High Confidence"]').addEventListener('click', () => {
+      d.getElementById('slot').innerHTML = '<div>Your Answer <span>incorrect</span></div><div><h4>Correct Answer</h4><p>Angel</p></div>';
+    });
+    d.querySelector('.next-button').addEventListener('click', () => { d.getElementById('slot').innerHTML = ''; });
+    first.pressPlay();
+    const final = await settle(first, 60000);
+    await until(() => first.store.answerBook && Object.keys(first.store.answerBook).length > 0, 8000).catch(() => {});
+    const entry = Object.values(first.store.answerBook ?? {})[0];
+    check('a blank answered wrong: what Connect showed as right is kept', /Angel/.test(entry?.n ?? ''), `${JSON.stringify(first.store.answerBook)} / ${final}`);
+
+    const again = boot(blankPage(ANGEL), { installLayout: flat, url: CONNECT, storage: { ...oneQuestion, answerBook: first.store.answerBook }, reply: fill('Angel') });
+    again.pressPlay();
+    await settle(again, 30000);
+    check('  the next time that blank comes up, the model is told the right word', /came up before/.test(bodyText(again.requests[0])) && /Angel/.test(bodyText(again.requests[0]).split('came up before')[1] ?? ''), bodyText(again.requests[0]).slice(0, 200));
+
+    // every blank is called "Blank 1 of 1": another sentence is another question
+    const other = boot(blankPage('A corporation is owned by its shareholders, who elect the board.'), { installLayout: flat, url: CONNECT, storage: { ...oneQuestion, answerBook: first.store.answerBook }, reply: fill('x') });
+    other.pressPlay();
+    await settle(other, 30000);
+    check('  a blank in another sentence gets no such note', !/came up before/.test(bodyText(other.requests[0])));
+  }
+
   // ── An empty list is kept, with the page's structure, in the answer log ──
   {
     const p = boot('<body><div role="main"><p>Fill in the blank question. A thing is its ___.</p></div></body>',

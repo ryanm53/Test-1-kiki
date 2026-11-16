@@ -1,7 +1,10 @@
-// Real Chromium, real extension: Connect fill-in-the-blank questions where the blank is
-// somewhere the page scan used to miss — in a shadow root (with the confidence rating
-// and Next in there beside it), or a see-through box. A real log had eight of these
-// fail, the page's text holding the question and nothing listed to type into.
+// Real Chromium, real extension: Connect fill-in-the-blank questions. A real log had
+// eight of these fail, the page's text holding the question and nothing listed to type
+// into. The cause, as that log shows it: the eBook reader sits in a frame behind the
+// question, not displayed, with a search box and buttons of its own, and outscored the
+// page (one blank, no choices) when the frame to read was chosen — `hiddenReader` below
+// is that page. The other two are blanks the scan itself used to miss: in a shadow root
+// (with the confidence rating and Next in there beside it), and a see-through box.
 // The page is served as learning.mheducation.com so the extension treats it as Connect;
 // the AI is a stand-in inside the service worker.
 //
@@ -14,7 +17,24 @@ catch (_) { console.error('playwright-core is missing: npm install --no-save pla
 const http = require('http'), fs = require('fs'), path = require('path');
 const EXT = path.resolve(process.argv[2] || path.join(__dirname, '..', 'extension'));
 
+// The eBook reader, and its contents list: frames that are there and not displayed
+const READER = `<!doctype html><html><body><div>Contents<a href="#toc">Table of Contents</a><button>Go to current location</button>
+<input type="text" aria-label="Search contents"><input type="text" aria-label="Page"><input type="search" aria-label="Search">
+${Array.from({ length: 12 }, (_, i) => `<button>Chapter ${i + 1}</button>`).join('')}<span>149 of 488</span><button>AI Reader</button></div>
+<script>(function (apiKey) { window.__reader = apiKey; })('d873ab3e');</script></body></html>`;
+const TOC = `<!doctype html><html><body>${Array.from({ length: 80 }, (_, i) => `<a href="#s${i}">Section ${i}</a>`).join('')}<input type="text" aria-label="Find"></body></html>`;
+
 const PAGES = {
+  hiddenReader: `<!doctype html><html><body><header><button>Exit Assignment</button><button>Progress information</button><button>Time Check</button></header>
+<div role="main"><h2>Fill in the Blank Question</h2><p>Fill in the blank question.</p>
+<p><input id="b" type="text" aria-label="Blank 1 of 1"> investors are wealthy individuals in the business community willing to risk investment funds on a promising business venture.</p>
+<button aria-label="High Confidence">High Confidence</button><button class="next-button">Next Question</button></div>
+<iframe src="/reader" style="display:none"></iframe><div style="display:none"><iframe src="/toc"></iframe></div>
+<script>
+window.__events = []; window.__value = null;
+document.getElementById('b').addEventListener('input', e => { window.__value = e.target.value; });
+document.querySelectorAll('button').forEach(b => b.addEventListener('click', () => window.__events.push(b.textContent.trim())));
+</script></body></html>`,
   shadow: `<!doctype html><html><body><div role="main"><h2>Fill in the Blank Question</h2><p>Fill in the blank question.</p><avalon-blank id="host"></avalon-blank></div>
 <script>
 window.__events = []; window.__value = null;
@@ -35,7 +55,10 @@ document.querySelectorAll('button').forEach(b => b.addEventListener('click', () 
 let bad = 0;
 const check = (name, ok, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : '  <- ' + d}`); if (!ok) bad++; };
 let which = 'shadow';
-const server = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(PAGES[which]); });
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+  res.end(req.url.startsWith('/reader') ? READER : req.url.startsWith('/toc') ? TOC : PAGES[which]);
+});
 (async () => {
   await new Promise(r => server.listen(0, r));
   const port = server.address().port;
@@ -57,7 +80,7 @@ const server = http.createServer((req, res) => { res.writeHead(200, { 'content-t
       return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(action) }], stop_reason: 'end_turn' }), { status: 200 });
     };
   });
-  for (const name of ['shadow', 'seeThrough']) {
+  for (const name of ['hiddenReader', 'shadow', 'seeThrough']) {
     which = name;
     const page = await ctx.newPage();
     const errs = []; page.on('pageerror', e => errs.push(e.message));
@@ -69,7 +92,7 @@ const server = http.createServer((req, res) => { res.writeHead(200, { 'content-t
     await page.waitForTimeout(500);
     const value = await page.evaluate(() => window.__value), events = await page.evaluate(() => window.__events);
     const status = await page.locator('#__cap-host >> #statusText').textContent();
-    const label = name === 'shadow' ? 'a blank in a shadow root' : 'a see-through blank';
+    const label = name === 'hiddenReader' ? 'a blank on a page with the eBook reader in a hidden frame' : name === 'shadow' ? 'a blank in a shadow root' : 'a see-through blank';
     check(`${label}: typed into, in a real browser`, value === 'angel', `${JSON.stringify(value)} / ${status}`);
     check(`  the confidence rating and Next pressed after it`, events.join() === 'High Confidence,Next Question', `${events} / ${status}`);
     check('  no error in the bar, no page errors', !/rror|stuck|Could not|Couldn/.test(status) && errs.length === 0, `${status} ${errs}`);

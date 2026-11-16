@@ -249,7 +249,7 @@ change between sites.
   isn't on the page`: the list was empty. `findQuestionFrame` now counts drag
   handles (`drags`) and buttons as well as inputs, so a stray frame with one hidden
   input can't outscore the page; and when the chosen frame's list comes back empty
-  `busiestFrame` swaps in the frame with the most things in it. `DRAG_SEL` knows
+  the other frames are tried in turn, likeliest first (`otherFrames`). `DRAG_SEL` knows
   react-beautiful-dnd (`data-rbd-…`), hello-pangea (`data-rfd-…`) and dnd-kit
   (`aria-roledescription="draggable"`), and lists such handles whether or not they
   say `role="button"`. An empty list with nothing to act on now ends the run with
@@ -297,6 +297,27 @@ change between sites.
   can't be clicked from memory (`recalled` stays false). `connectResult` takes the
   box to mean a wrong answer when no "Your Answer" pill is shown (`GRADED` no
   longer takes the box's own "Correct Answer" heading for the pill).
+- **Which frame the question is read from** — the cause of the fill-in-the-blank failures, as
+  the log showed once read closely: the prompt's text was the page's clean question followed
+  by a run-together "ContentsTable of Contents…Chapter 1Chapter 2…149 of 488AI Reader" and a
+  script's source — `innerText` of a body that isn't rendered is its `textContent` — that is,
+  the text of a second frame, not displayed: Connect's eBook reader, kept behind the question
+  with a search box and buttons of its own. A fill-in-the-blank has one box and no choices,
+  so the reader outscored the page in `findQuestionFrame` on every one, the list was read
+  from a frame with nothing visible in it, and the fallback (the single busiest frame) landed
+  on another hidden frame. `frameProbe` now reports a frame with no size, or whose body has
+  no box, as not shown, and `rankFrames` leaves those out altogether; a frame that is chosen
+  and turns out empty is followed by the rest in score order until one has something
+  (`otherFrames`). `scripts/real-chrome-blank.js` has that page (the reader and a contents
+  list in `display:none` frames): 1.0.17 fails on it with the log's own prompt, word for
+  word in kind, and this passes. Also from the review that went with it: a question with one
+  blank is remembered (`looseQuestionId` used to want two boxes; with no question of its own
+  it is known by the page's lines, sorted, so choices in another order are the same page);
+  Connect's own matching question says where a card is in the card's label ("position 1 of 2
+  list choices…", "…drop zone has choice…"), which now counts the cards left (`dragLeft`) and
+  marks the page a drag; `GRADED` takes "Correct Answer" for the heading only when it is on
+  one line (a question that begins "Answer…" after a "correct" pill is a verdict); a typed
+  answer is followed by a `keyup`; `_deepMode` follows each scan.
 - **Dropdown cells and their lists** — a worksheet cell whose editor is a list of names
   (`typeIntoCell`) used to type the model's name and, if it wasn't one of the entries, leave the cell
   empty or holding whatever Enter took. Now each way of typing reads the list it opened

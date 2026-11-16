@@ -1033,59 +1033,64 @@ async function sendToTab(tabId, msg, frameId = 0) {
 // worksheet is served from a separate origin — so the frame holding the
 // question isn't always the top one. Score each frame by whether it actually
 // contains something answerable, rather than just navigation chrome.
-async function findQuestionFrame(tabId) {
+//
+// Only a frame that is drawn counts. Connect keeps its eBook reader in a frame behind
+// the question, not displayed, with a search box and buttons of its own; a fill-in-the-
+// blank question has one box and no choices, so the reader outscored the page on
+// every one of them in a real log (eight questions, eight failures): the list was read
+// from a frame with nothing visible in it and came back empty. A frame with no size,
+// or whose body has no box, is one nobody can see, whatever is in it.
+function frameProbe() {
+  const shown = window === window.top
+    || (window.innerWidth >= 4 && window.innerHeight >= 4 && !!document.body && document.body.getClientRects().length > 0);
+  if (!shown) return { shown: false, fields: 0, choices: 0, drags: 0, buttons: 0, gridFields: 0, things: 0 };
+  const n = sel => document.querySelectorAll(sel).length;
+  // A blank can be a box of another kind (role="textbox", contenteditable)
+  const fields = n('input:not([type="hidden"]), textarea, select, [role="textbox"], [contenteditable]:not([contenteditable="false"])');
+  const choices = n('[role="radio"], [role="checkbox"], input[type="radio"], input[type="checkbox"]');
+  const gridFields = [...document.querySelectorAll('input:not([type="hidden"]), textarea, select')]
+    .filter(el => el.closest('table, [role="table"], [role="grid"]')).length;
+  // Spreadsheet widgets answer into focusable <td>s, not inputs
+  const cells = n('td[tabindex]:not([tabindex="-1"]):not(.td-readOnly), td.responseCell:not(.td-readOnly)');
+  // A matching question has no inputs at all: cards to drag and buttons are what it has
+  const drags = n('[data-rbd-drag-handle-draggable-id], [data-react-beautiful-dnd-drag-handle], [data-rfd-drag-handle-draggable-id], [data-rfd-draggable-id], [aria-roledescription="draggable"], [draggable="true"]');
+  const buttons = Math.min(10, n('button, [role="button"]'));
+  // Everything there is to act on, to choose between frames that score alike
+  const things = n('button, [role="button"], a[href], input:not([type="hidden"]), select, textarea, [draggable="true"], [role="listitem"], [role="radio"], [role="checkbox"], [data-rbd-drag-handle-draggable-id], [data-rfd-drag-handle-draggable-id], [aria-roledescription="draggable"]');
+  return { shown: true, fields, choices, drags, buttons, gridFields: gridFields + cells, things };
+}
+
+// Every frame that is drawn, the likeliest to hold the question first
+async function rankFrames(tabId) {
   let probes;
   try {
-    probes = await chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      func: () => {
-        const n = sel => document.querySelectorAll(sel).length;
-        const fields = n('input:not([type="hidden"]), textarea, select');
-        const choices = n('[role="radio"], [role="checkbox"], input[type="radio"], input[type="checkbox"]');
-        const gridFields = [...document.querySelectorAll('input:not([type="hidden"]), textarea, select')]
-          .filter(el => el.closest('table, [role="table"], [role="grid"]')).length;
-        // Spreadsheet widgets answer into focusable <td>s, not inputs
-        const cells = n('td[tabindex]:not([tabindex="-1"]):not(.td-readOnly), td.responseCell:not(.td-readOnly)');
-        // A matching question has no inputs at all: cards to drag and buttons are what it has
-        const drags = n('[data-rbd-drag-handle-draggable-id], [data-react-beautiful-dnd-drag-handle], [data-rfd-drag-handle-draggable-id], [data-rfd-draggable-id], [aria-roledescription="draggable"], [draggable="true"]');
-        const buttons = Math.min(10, n('button, [role="button"]'));
-        return { fields, choices, drags, buttons, gridFields: gridFields + cells };
-      }
-    });
+    probes = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: frameProbe });
   } catch (_) {
-    return 0; // can't enumerate (restricted page) — fall back to the top frame
+    return [{ frameId: 0, score: 0, things: 0 }]; // can't enumerate (restricted page) — the top frame
   }
-
-  let best = { frameId: 0, score: -1 };
+  const ranked = [];
   for (const p of probes) {
     const r = p.result;
-    if (!r) continue;
+    if (!r || r.shown === false) continue;
     // A worksheet grid is the strongest signal; then any answerable input.
     // The top frame gets a nudge so it still wins a genuine tie.
     let score = (r.gridFields >= 4 ? 1000 : 0) + r.fields * 10 + r.choices * 10 + (r.drags ?? 0) * 10 + (r.buttons ?? 0) * 2;
     if (p.frameId === 0) score += 1;
-    if (score > best.score) best = { frameId: p.frameId, score };
+    ranked.push({ frameId: p.frameId, score, things: r.things ?? 0 });
   }
-  return best.frameId;
+  ranked.sort((a, b) => b.score - a.score || b.things - a.things || a.frameId - b.frameId);
+  return ranked.length ? ranked : [{ frameId: 0, score: 0, things: 0 }];
+}
+
+async function findQuestionFrame(tabId) {
+  return (await rankFrames(tabId))[0].frameId;
 }
 
 // When the frame chosen turns out to hold nothing to act on (a stray frame with
 // one hidden input outscored the page with a matching question, which has no
-// inputs), the frame with the most things in it
-async function busiestFrame(tabId, except) {
-  let probes;
-  try {
-    probes = await chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      func: () => document.querySelectorAll('button, [role="button"], a[href], input:not([type="hidden"]), select, textarea, [draggable="true"], [role="listitem"], [role="radio"], [role="checkbox"], [data-rbd-drag-handle-draggable-id], [data-rfd-drag-handle-draggable-id], [aria-roledescription="draggable"]').length
-    });
-  } catch (_) { return null; }
-  let best = null;
-  for (const p of probes) {
-    if (p.frameId === except || !(p.result > 0)) continue;
-    if (!best || p.result > best.n) best = { frameId: p.frameId, n: p.result };
-  }
-  return best?.frameId ?? null;
+// inputs), the others in turn, likeliest first: the first with something in it is used
+async function otherFrames(tabId, except) {
+  return (await rankFrames(tabId)).map(f => f.frameId).filter(id => id !== except).slice(0, 4);
 }
 
 // What is on the page, structurally, in every frame — for when something can't be
@@ -1121,8 +1126,6 @@ function probeStructure() {
       draggableAttr: document.querySelectorAll('[draggable="true"]').length, tabindex: document.querySelectorAll('[tabindex]').length,
       listitems: document.querySelectorAll('[role="listitem"]').length
     },
-    // For a cell whose editor is a dropdown: the cell, whatever has the focus, and any
-    // list that is open (press Copy page details while a cell is being edited)
     // Whether anything here is drawn at all, and the boxes to type into, shadow roots included
     drawn: { inner: `${window.innerWidth}x${window.innerHeight}`, scrollY: Math.round(window.scrollY), body: getComputedStyle(document.body).visibility, landmarks: document.querySelectorAll('[role="main"], main, article, form').length },
     boxes: (function deep(root, out) {
@@ -1134,6 +1137,8 @@ function probeStructure() {
       return { html: trim(el.outerHTML, 220), size: `${Math.round(r.width)}x${Math.round(r.height)}`, display: cs.display, opacity: cs.opacity, shadow: el.getRootNode() !== document };
     }),
     blankLike: Array.from(document.querySelectorAll('[class*="blank" i], [id*="blank" i], [class*="fitb" i], [data-automation-id*="blank" i], [data-automation-id*="fill" i], [aria-label*="blank" i]')).slice(0, 6).map(el => trim(el.outerHTML, 220)),
+    // For a cell whose editor is a dropdown: the cell, whatever has the focus, and any
+    // list that is open (press Copy page details while a cell is being edited)
     focus: document.activeElement && document.activeElement !== document.body ? trim(document.activeElement.outerHTML, 260) : null,
     cells: Array.from(document.querySelectorAll('td[tabindex], td.responseCell')).slice(0, 3).map(td => trim(td.outerHTML, 240)),
     lists: Array.from(document.querySelectorAll('[role="listbox"], [role="menu"], .ui-autocomplete, .ui-menu, .dropdown-menu, [class*="autocomplete"], [class*="suggest"], [class*="dropdown"] ul'))
@@ -1493,14 +1498,19 @@ function recallAction(entry, elements) {
 // answer can be handed to the model the next time it comes up. It is the same
 // question when its words (where it has any) and the labels of what is to be
 // filled or moved are, whatever order they come in and whatever is in them now.
-function looseQuestionId(elements) {
-  const parts = elements.filter(e => e.place || e.sheet || e.options || e.tag === 'select' || e.tag === 'input' || e.tag === 'textarea');
-  if (parts.length < 2) return null;
+function looseQuestionId(elements, text = '') {
+  const parts = elements.filter(e => e.place || e.sheet || e.options || e.tag === 'select' || e.tag === 'textarea'
+    || (e.tag === 'input' && !/^(button|submit)$/.test(e.type ?? '')));
+  if (!parts.length) return null;
   const qs = [...new Set(parts.map(e => e.question).filter(Boolean))];
   const labels = parts.map(e => choiceKey(e.text)).filter(Boolean).sort();
-  if (labels.length < 2) return null;
-  const words = qs.sort().map(q => choiceKey(q)).join('\u0002').slice(0, 600);
-  return { key: 'n' + fingerprint(words + '\u0001' + labels.join('\u0001')), question: qs[0] ?? labels[0] };
+  // A fill-in-the-blank has one box and no question of its own: the page's words are
+  // what tell it from the next one ("Blank 1 of 1" is every blank's name). Line by
+  // line and sorted, so that choices or cards shown in another order are the same page.
+  const lines = [...new Set(String(text).split('\n').map(choiceKey).filter(Boolean))].sort();
+  const words = qs.length ? qs.sort().map(q => choiceKey(q)).join('\u0002').slice(0, 600) : lines.join('\u0002').slice(0, 4000);
+  if (!words && labels.length < 2) return null;
+  return { key: 'n' + fingerprint(words + '\u0001' + labels.join('\u0001')), question: qs[0] ?? lines.find(l => l.length > 30) ?? labels[0] ?? '' };
 }
 
 // What the model is told on a question Connect once marked wrong
@@ -1644,10 +1654,9 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         }
         // Nothing to act on in the frame chosen: look for the one that has something
         if (!pageData.elements?.length) {
-          const other = await busiestFrame(tabId, frameId);
-          if (other !== null) {
+          for (const other of await otherFrames(tabId, frameId)) {
             const there = await sendToTab(tabId, { type: 'SCRAPE', firstLook: step === 0 && attempt === 0 }, other).catch(() => null);
-            if (there?.elements?.length) { frameId = other; pageData = there; }
+            if (there?.elements?.length) { frameId = other; pageData = there; break; }
           }
         }
 
@@ -1719,7 +1728,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         let action, request, picture = null;
         if (useBook && !qid && completed === 0) qid = questionId(pageData.elements);
         if (useBook && !qid && !loose && completed === 0) {
-          loose = looseQuestionId(pageData.elements);
+          loose = looseQuestionId(pageData.elements, pageData.text);
           const seen = loose ? await bookEntry(loose.key) : null;
           if (seen?.n) recallNote = rememberedNote(seen.n.split('\n'));
         }
@@ -1844,8 +1853,8 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
           }
           // A drag question called done with cards still in the pool and a box empty
           // is not: say so, twice at most
-          if (pageData.isDrag && pageData.dragLeft > 0 && ++dragNudges <= 2) {
-            history.push(`said it was done, but ${pageData.dragLeft} card${pageData.dragLeft > 1 ? 's are' : ' is'} still in the pool while a box is empty, so it is NOT done — move the next card`);
+          if (pageData.dragLeft > 0 && ++dragNudges <= 2) {
+            history.push(`said it was done, but ${pageData.dragLeft} card${pageData.dragLeft > 1 ? 's are' : ' is'} still to be placed, so it is NOT done — move the next card`);
             stepDone = true;
             break;
           }

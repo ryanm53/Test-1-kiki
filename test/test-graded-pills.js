@@ -83,6 +83,17 @@ const moveOn = d => { d.getElementById('slot').innerHTML = ''; d.querySelectorAl
       !clicks.includes('Progress information') && ticked.join() === 'true,true,false,false,false', `${clicks} ${ticked} / ${final}`);
   }
 
+  // ── The pill, and what is not the pill ────────────────────────────────────
+  {
+    // (the page's text as a browser gives it, line by line: the test pages here have no lines)
+    const src = require('fs').readFileSync(require('path').join(process.env.EXT_DIR || require('path').join(__dirname, '..', 'extension'), 'content.js'), 'utf8');
+    const GRADED = new Function(`return ${/const GRADED = (\/.*\/i);/.exec(src)[1]}`)();
+    const verdict = t => (GRADED.exec(t)?.[2] ?? 'none').toLowerCase();
+    check('"Your Answer incorrect" is a wrong answer', verdict('Answer Mode\nMultiple Choice Question\nYour Answer incorrect\n\nThe number of shares') === 'incorrect');
+    check('"Your Answer correct" before a question that begins "Answer…" is a right one', verdict('Your Answer correct\n\nAnswer the following about bonds.') === 'correct');
+    check('the heading "Correct Answer" under "Your Answer" is not the pill', verdict('Your Answer\nCorrect Answer\nCurrent liability: within one year') === 'none');
+  }
+
   console.log(failed ? `\n${failed} failed` : '\nAll graded-pill checks passed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.log('CRASHED:', e.stack); process.exit(1); });

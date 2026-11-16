@@ -133,7 +133,7 @@ const model = (b, n) => {
     const d = p.w.document;
     check('"done" with a card still in the pool: told it is not done, and goes on to place it',
       nudged && d.getElementById('pool').textContent.trim() === '' && d.getElementById('z2').textContent.trim() === MORE, `${nudged} pool=${d.getElementById('pool').textContent.trim()} / ${final}`);
-    check('  and the note names the number of cards left', p.requests.some(r => /1 card is still in the pool/.test(bodyText(r))));
+    check('  and the note names the number of cards left', p.requests.some(r => /1 card is still to be placed/.test(bodyText(r))));
 
     // ...but not forever
     const q = boot(PAGE, { installLayout: flat, url: CONNECT, storage: oneQuestion, reply: (b, n) => n === 1 ? model(b, n) : as(b, { action: 'none' }) });
@@ -153,7 +153,8 @@ const model = (b, n) => {
     const storage = { lastPresetIndex: 0, autoContinue: false, keepLog: true };
 
     // First time: no note. Marked wrong; the box is kept
-    const first = boot(html.replace('<div id="graded">', '<div id="graded" hidden>'), { installLayout: flat, url: CONNECT, storage, reply: model });
+    const asked = html.replace('<div id="graded">', '<div id="graded" hidden>');
+    const first = boot(asked, { installLayout: flat, url: CONNECT, storage, reply: model });
     keyboard(first);
     // the graded view appears once an answer is given
     const reveal = () => first.w.document.getElementById('graded')?.removeAttribute('hidden');
@@ -167,7 +168,7 @@ const model = (b, n) => {
       entries.length === 1 && /Current liability: Normally payable within one year/.test(entries[0].n ?? '') && /Long-term liability/.test(entries[0].n ?? ''), `${JSON.stringify(first.store.answerBook)} / ${firstFinal} / ${JSON.stringify(first.store.answerLog?.[0]?.verdicts)}`);
 
     // The same question again, with that in the book: the model is told
-    const again = boot(PAGE, { installLayout: flat, url: CONNECT, storage: { ...oneQuestion, answerBook: first.store.answerBook }, reply: model });
+    const again = boot(asked, { installLayout: flat, url: CONNECT, storage: { ...oneQuestion, answerBook: first.store.answerBook }, reply: model });
     keyboard(again);
     again.pressPlay();
     await settle(again, 60000);
@@ -177,17 +178,47 @@ const model = (b, n) => {
     check('  on every call of the run', again.requests.every(r => /came up before/.test(bodyText(r))));
 
     // A different arrangement of cards is a different question
-    const other = boot(PAGE.replace(MORE, 'Something else entirely'), { installLayout: flat, url: CONNECT, storage: { ...oneQuestion, answerBook: first.store.answerBook }, reply: 'x' });
+    const other = boot(asked.replace(MORE, 'Something else entirely'), { installLayout: flat, url: CONNECT, storage: { ...oneQuestion, answerBook: first.store.answerBook }, reply: 'x' });
     other.pressPlay();
     await settle(other, 20000);
     check('a question with other cards gets no such note', !other.requests.some(r => /came up before/.test(bodyText(r))));
 
     // Turned off, nothing is kept or told
-    const off = boot(PAGE, { installLayout: flat, url: CONNECT, storage: { ...oneQuestion, rememberAnswers: false, answerBook: first.store.answerBook }, reply: model });
+    const off = boot(asked, { installLayout: flat, url: CONNECT, storage: { ...oneQuestion, rememberAnswers: false, answerBook: first.store.answerBook }, reply: model });
     keyboard(off);
     off.pressPlay();
     await settle(off, 60000);
     check('with Remember them off, no note', !off.requests.some(r => /came up before/.test(bodyText(r))));
+  }
+
+  // ── Connect's own matching question: the card's label says where it is ───
+  // (as a real log has it: "position 1 of 2 list choices. Choice, Common stock", and
+  // once placed "Contributed capital drop zone has choice Common stock. Item dropped.")
+  {
+    const page = `<body><div role="main"><h2>Matching Question</h2><p>Match the source of capital with the account in which it is recognized.</p>
+      <p>Earned capital</p><p>matches</p><p>Contributed capital</p><p>matches</p>
+      <div id="c1" draggable="true" tabindex="0" aria-label="position 1 of 2 list choices. Choice, Common stock">Common stock</div>
+      <div id="c2" draggable="true" tabindex="0" aria-label="position 2 of 2 list choices. Choice, Retained earnings">Retained earnings</div>
+      <button aria-label="High Confidence">High</button></div></body>`;
+    const p = boot(page, { installLayout: flat, url: CONNECT, storage: oneQuestion, reply: 'x' });
+    const r = await p.scrape();
+    check('Connect\'s matching question is seen as one, with two cards still to place', r.isDrag === true && r.dragLeft === 2 && /A matching question/.test(r.dragZones ?? ''), `${r.isDrag} ${r.dragLeft} ${r.dragZones}`);
+
+    // one card placed, and the model says it is done: it is told one is left
+    const q = boot(page, { installLayout: flat, url: CONNECT, storage: oneQuestion,
+      reply: (b, n) => n === 1 ? as(b, { action: 'dragMove', index: Number(/\[(\d+)\][^\n]*Choice, Common stock/.exec(bodyText(b))?.[1]), dir: 'right', steps: 1 }) : as(b, { action: 'none' }) });
+    const d = q.w.document;
+    q.bg.chrome.debugger.sendCommand = async (target, method, params) => {
+      // the first drop puts Common stock in its box, as the page then says
+      if (method === 'Input.dispatchKeyEvent' && params.type !== 'keyUp' && /^Arrow/.test(params.key ?? '')) {
+        d.getElementById('c1').setAttribute('aria-label', 'Contributed capital drop zone has choice Common stock. Item dropped.');
+        d.getElementById('c2').setAttribute('aria-label', 'position 1 of 1 list choices. Choice, Retained earnings');
+      }
+    };
+    q.pressPlay();
+    await settle(q, 60000);
+    check('  "done" with a card still listed is not accepted', q.requests.some(x => /1 card is still to be placed/.test(bodyText(x))), `${q.requests.length} calls`);
+    check('  and the page text says how to read the cards', /A matching question\. A card still to be placed reads/.test(bodyText(q.requests[0])));
   }
 
   console.log(failed ? `\n${failed} failed` : '\nAll drag-state checks passed');

@@ -713,8 +713,8 @@ function scrape() {
   if (!all.some(answerable) || (wantsBlank && !all.some(el => isTextBox(el) && !/search/i.test(el.getAttribute('aria-label') ?? el.placeholder ?? '')))) {
     deepBoxes = hiddenBoxes().filter(el => !all.includes(el));
     if (deepBoxes.length) all = [...new Set([...deepBoxes, ...all])];
-    _deepMode = deepBoxes.some(el => el.getRootNode() !== document);
   }
+  _deepMode = deepBoxes.some(el => el.getRootNode() !== document);
 
   // Spreadsheet cells are plain <td>s, so they never match INTERACTIVE_SEL
   const sheetCells = Array.from(document.querySelectorAll('td')).filter(
@@ -959,21 +959,33 @@ function scrape() {
 
   const parts = partTabs();
   const text = textOf(root).slice(0, 5000);
+  const elements = _lastElements.map(el => {
+    const d = describeEl(el);
+    // A box with nothing of its own to call it by is the blank, in the order they come
+    // (not whatever text happens to sit before it, which is the question's heading)
+    if (deepBoxes.includes(el) && !accessibleText(el).trim()) d.text = deepBoxes.length > 1 ? `blank ${deepBoxes.indexOf(el) + 1}` : 'the blank';
+    return d;
+  });
+  // Connect's own matching question says where each card is in the card's label (a real
+  // log: "position 1 of 2 list choices. Choice, Common stock", and once placed
+  // "Contributed capital drop zone has choice Common stock"): how many are still to
+  // place, so "done" with some left is not taken at its word
+  const listed = elements.filter(e => /^position \d+ of \d+ list choices\b/i.test(e.text ?? '')).length;
+  const matching = listed > 0 || elements.some(e => /\bdrop zone has choice\b/i.test(e.text ?? ''));
   const drops = isDrag ? dragSummary() : null;
+  const cards = drops ? { dragZones: drops.text, dragLeft: drops.left }
+    : matching ? {
+      dragZones: 'A matching question. A card still to be placed reads "position N of M list choices"; a placed one reads "<area> drop zone has choice <card>". Every card has to be placed in the area it belongs to. If a card reads the same after a move, that direction does not work from where it is — try another direction or another number of steps.',
+      dragLeft: listed
+    } : {};
   return {
     text,
     needsPicture: _lastElements.length ? pictureNeeded(root, text) : undefined,
     tables: dataTables() || undefined,
-    elements: _lastElements.map((el, i) => {
-      const d = describeEl(el);
-      // A box with nothing of its own to call it by is the blank, in the order they come
-      // (not whatever text happens to sit before it, which is the question's heading)
-      if (deepBoxes.includes(el) && !accessibleText(el).trim()) d.text = deepBoxes.length > 1 ? `blank ${deepBoxes.indexOf(el) + 1}` : 'the blank';
-      return d;
-    }),
+    elements,
     isWorksheet,
-    isDrag,
-    ...(drops ? { dragZones: drops.text, dragLeft: drops.left } : {}),
+    isDrag: isDrag || matching,
+    ...cards,
     ...(_lastElements.length ? {} : { empty: emptyProbe() }),
     // A question in parts: which there are, and which is on screen
     parts: parts.length > 1 ? parts.map(p => ({ text: p.text, current: p.current })) : undefined
@@ -1268,6 +1280,8 @@ function setFieldValue(el, value) {
   if (nativeSetter) nativeSetter.call(el, value); else el.value = value;
 
   el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, data: value }));
+  // (for a page that takes its answer on a key going up rather than on input)
+  el.dispatchEvent(new KeyboardEvent('keyup', { key: value.slice(-1), bubbles: true, composed: true }));
   el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
   el.dispatchEvent(new FocusEvent('blur', { bubbles: false, composed: true }));
   // A box that refused the value is a miss, not a success
@@ -1715,7 +1729,7 @@ function connectState() {
 const sameText = (a, b) => squash(a) === squash(b);
 // Connect's "Your Answer <pill>" line: the pill says correct or incorrect
 // ("Correct Answer", the heading of the box that follows, is not the pill)
-const GRADED = /Your Answer\s*([a-z ]*?)\s*(incorrect|correct)\b(?!\s*answer)/i;
+const GRADED = /Your Answer\s*([a-z ]*?)\s*(incorrect|correct)\b(?![ \t]+answer)/i;
 
 // Connect's verdict on the answer just given, with what the right one was. The
 // page says "Your Answer" with a pill reading correct or incorrect; a wrong
