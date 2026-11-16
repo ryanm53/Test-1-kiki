@@ -297,6 +297,15 @@ change between sites.
   can't be clicked from memory (`recalled` stays false). `connectResult` takes the
   box to mean a wrong answer when no "Your Answer" pill is shown (`GRADED` no
   longer takes the box's own "Correct Answer" heading for the pill).
+- **Saying a drag answer** — whether a key moves a card between boxes depends on how the page
+  is built, so dragging is the one thing that can't always be done. `tellDrag` asks for the
+  answer in words (`TELL_DRAG`: `{"action":"none","text":"card → area; …"}`, on the stronger
+  model on Auto) and returns it as the bar's note ("Drag these yourself, then press play: …",
+  `finished`). It is used when the same move is made three times to no effect, when a step
+  is stuck, and when the run ends with cards unplaced (`dragLeft > 0` on a last look) —
+  rather than rating and handing in a half-done answer — and at once when **Just tell me the
+  answer** (`tellDrags`, off) is on. A drag page with every card placed when play is pressed
+  (`dragDone`: every labelled box filled and none left over; never a single list to reorder) asks nothing and goes on to the rating and Next.
 - **Which frame the question is read from** — the cause of the fill-in-the-blank failures, as
   the log showed once read closely: the prompt's text was the page's clean question followed
   by a run-together "ContentsTable of Contents…Chapter 1Chapter 2…149 of 488AI Reader" and a

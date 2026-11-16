@@ -139,8 +139,9 @@ const model = (b, n) => {
     const q = boot(PAGE, { installLayout: flat, url: CONNECT, storage: oneQuestion, reply: (b, n) => n === 1 ? model(b, n) : as(b, { action: 'none' }) });
     keyboard(q);
     q.pressPlay();
-    await settle(q, 60000);
-    check('  a model that keeps saying done is believed after two nudges', q.requests.length === 4, `${q.requests.length} calls`);
+    const stuck = await settle(q, 60000);
+    // (two nudges, then it is asked for the answer in words; with none to give, the bar says a card is left)
+    check('  a model that keeps saying done is not believed: after two nudges the bar says a card is left', q.requests.length === 5 && q.isError() && /Couldn't place every card \(1 left\)/.test(stuck), `${q.requests.length} calls / ${stuck}`);
   }
 
   // ── The right answer, kept as words, for a question that isn't ticking choices ──
@@ -219,6 +220,40 @@ const model = (b, n) => {
     await settle(q, 60000);
     check('  "done" with a card still listed is not accepted', q.requests.some(x => /1 card is still to be placed/.test(bodyText(x))), `${q.requests.length} calls`);
     check('  and the page text says how to read the cards', /A matching question\. A card still to be placed reads/.test(bodyText(q.requests[0])));
+  }
+
+  // ── When the cards can't be placed, the answer is said in the bar ─────────
+  {
+    const page = (placed = false) => `<body><div role="main"><h2>Matching Question</h2><p>Match the source of capital with the account in which it is recognized.</p>
+      <p>Earned capital</p><p>matches</p><p>Contributed capital</p><p>matches</p>
+      <div draggable="true" tabindex="0" aria-label="${placed ? 'Contributed capital drop zone has choice Common stock' : 'position 1 of 2 list choices. Choice, Common stock'}">Common stock</div>
+      <div draggable="true" tabindex="0" aria-label="${placed ? 'Earned capital drop zone has choice Retained earnings' : 'position 2 of 2 list choices. Choice, Retained earnings'}">Retained earnings</div>
+      <button aria-label="High Confidence">High</button></div></body>`;
+    const ANSWER = 'Common stock → Contributed capital; Retained earnings → Earned capital';
+    const reply = b => /Do NOT move anything/.test(bodyText(b)) ? as(b, { action: 'none', text: ANSWER })
+      : as(b, { action: 'dragMove', index: Number(/\[(\d+)\][^\n]*Choice, Common stock/.exec(bodyText(b))?.[1]), dir: 'right', steps: 1 });
+
+    // keys that move nothing: after the same move three times, it says the answer
+    const p = boot(page(), { installLayout: flat, url: CONNECT, storage: oneQuestion, reply });
+    p.pressPlay();
+    const final = await settle(p, 60000);
+    check('cards that will not move: the answer is said in the bar, for the student to drag', /Drag these yourself, then press play: Common stock → Contributed capital; Retained earnings → Earned capital/.test(final) && !p.isError(), final);
+
+    // asked to be told: said at once, nothing moved
+    const t = boot(page(), { installLayout: flat, url: CONNECT, storage: { ...oneQuestion, tellDrags: true }, reply });
+    t.pressPlay();
+    const told = await settle(t, 60000);
+    check('with "Just tell me the answer" on: said straight away, in one call, no keys pressed',
+      /Drag these yourself/.test(told) && t.requests.length === 1 && t.debuggerCalls.length === 0, `${t.requests.length} calls, ${t.debuggerCalls.length} keys / ${told}`);
+
+    // the student has placed them and presses play: nothing is asked, and it goes on
+    const done = boot(page(true), { installLayout: flat, url: CONNECT, storage: { ...oneQuestion, tellDrags: true }, reply });
+    done.pressPlay();
+    const after = await settle(done, 60000);
+    check('every card placed when play is pressed: no call, no complaint', done.requests.length === 0 && !done.isError(), `${done.requests.length} calls / ${after}`);
+
+    const sw = t.shadow().getElementById('tellSw');
+    check('the switch is in the settings, on as saved', !!sw && sw.getAttribute('aria-checked') === 'true');
   }
 
   console.log(failed ? `\n${failed} failed` : '\nAll drag-state checks passed');

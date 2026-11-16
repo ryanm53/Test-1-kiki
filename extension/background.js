@@ -93,6 +93,11 @@ function pickModel(baseModel, pageData, autoUpgrade, stronger = false) {
 // cannot find it either
 const OUTSIDE_INFO = /\b(go to|visit|navigate to|search for|look up|look at)\b[^.\n]{0,100}\b(web ?site|web ?page|annual report|10-K|SEC|EDGAR|SASB|corporate responsibility|sustainability report)\b/i;
 
+// Dragging is the one thing that can't always be done for the student: whether a key moves a
+// card between boxes depends on how the page is built. So when the cards can't all be
+// placed (or the student would rather place them), the answer is said in the bar instead.
+const TELL_DRAG = `This is a drag-and-drop question. Do NOT move anything. Work out where every card belongs and reply {"action":"none","text":"<card> → <area>; <card> → <area>"} naming every card and the area it goes in (for putting things in order: the cards in their right order), in as few words as tell them apart.`;
+
 // A multiple-choice page answered with a click that picks no choice at all
 const isChoice = e => e?.tag === 'input' && /^(radio|checkbox)$/.test(e.type ?? '');
 function missedTheChoices(action, elements) {
@@ -1572,7 +1577,7 @@ const tidySimnetText = t => String(t)
   .replace(/\nFile\nHome\n[\s\S]*?\n100%\n/, '\n')
   .replace(/\n\d{1,2}:\d{2} (?:AM|PM)\n\d{1,2}\/\d{1,2}\/\d{4}\n/, '\n');
 
-async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true, log = null, host = '', remember = false, cheapFirst = false, hardOnSonnet = false) {
+async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAULT_MODEL, autoUpgrade = true, log = null, host = '', remember = false, cheapFirst = false, hardOnSonnet = false, tellDrags = false) {
   let usedModel = baseModel;   // reported back so the UI can show an upgrade
   const isConnect = /(^|\.)mheducation\.com$/.test(host);
   const useBook = remember && isConnect;   // the answer memory: Connect shows the right answer, so only there
@@ -1581,6 +1586,20 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   let recallNote = '';     // ...and given to the model when that question comes round again
   let dragNudges = 0;      // "done" said with cards still in the pool, this run
   let knownEntries = [];   // what a worksheet's dropdown cells offered, as one of them showed it: for the cells after
+  let lastDrag = null;     // a drag question as last read, for saying its answer when the cards can't all be placed
+  // The answer to a drag question, in words, for the bar — or null if the model has none
+  const tellDrag = async () => {
+    if (!lastDrag) return null;
+    try {
+      const model = autoUpgrade ? (UPGRADE_TO[baseModel] ?? baseModel) : baseModel;
+      const { action, request } = await callClaude(apiKey, notes, lastDrag.pageText, lastDrag.pageData.elements, model, false, false, [], false, '', null, TELL_DRAG, null, true);
+      log?.steps.push({ round: 1, step: 0, attempt: 1, model: request.model, kind: 'saying the drag answer', prompt: request.prompt, usage: request.usage, action, answer: action.text ?? '' });
+      const said = String(action.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 500);
+      if (!said) return null;
+      usedModel = model;
+      return { success: true, usedModel, finished: `Drag these yourself, then press play: ${said}` };
+    } catch (_) { return null; }
+  };
   let recalled = false;    // the answer came from the memory, not the model
 
   // Resolve once per run: every scrape, click and fill must hit the same frame
@@ -1724,6 +1743,15 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         // whichever model the page calls for: the cheap one for an ordinary
         // question, the stronger one for a table or a worksheet, which is where
         // reading the picture matters and the extra cost is worth it.
+        if (pageData.isDrag) lastDrag = { pageData, pageText };
+        // Asked to be told rather than have the cards moved: said, and left to the student
+        if (tellDrags && pageData.isDrag && completed === 0 && !pageData.dragDone) {
+          const told = await tellDrag();
+          if (told) return told;
+        }
+        // Every card already placed (by the student, after being told where): nothing to ask
+        if (pageData.isDrag && pageData.dragDone && completed === 0 && step === 0 && !isSimnet) { finished = true; stepDone = true; break; }
+
         // A question seen before, with its right answer kept: no need to ask
         let action, request, picture = null;
         if (useBook && !qid && completed === 0) qid = questionId(pageData.elements);
@@ -1937,6 +1965,8 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
           // spend the rest of the budget and the API calls on a loop.
           const n = history.length;
           if (n >= 3 && history[n - 1] === history[n - 2] && history[n - 2] === history[n - 3]) {
+            const told = action.action === 'dragMove' ? await tellDrag() : null;
+            if (told) return told;
             return {
               success: false,
               usedModel,
@@ -1970,6 +2000,8 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
     }
 
     if (!stepDone) {
+      const told = await tellDrag();
+      if (told) return told;
       return { success: false, usedModel, error: `Stuck on step ${step + 1}. Last error: ${lastError}` };
     }
 
@@ -1997,6 +2029,16 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
     if (finished) break;
   }
 
+  // A drag question left with cards unplaced (out of steps, or "done" said too soon): the
+  // answer is said rather than a half-done one rated and handed in
+  if (!isSimnet && lastDrag) {
+    const now = await sendToTab(tabId, { type: 'SCRAPE', peek: true }, frameId).catch(() => null);
+    if (now?.dragLeft > 0) {
+      const told = await tellDrag();
+      if (told) return told;
+      return { success: false, usedModel, error: `Couldn't place every card (${now.dragLeft} left). Drag the rest yourself, then press play.` };
+    }
+  }
   if (!isSimnet) break rounds;
 
   // Finished by the model's account: give SIMnet a moment to grade it. Out
@@ -2397,8 +2439,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type !== 'RUN_GOAL') return;
 
   (async () => {
-    const { apiKey: rawKey, model: savedModel, autoUpgrade, keepLog, rememberAnswers, cheapFormulas, hardOnSonnet } =
-      await chrome.storage.local.get(['apiKey', 'model', 'autoUpgrade', 'keepLog', 'rememberAnswers', 'cheapFormulas', 'hardOnSonnet']).catch(() => ({}));
+    const { apiKey: rawKey, model: savedModel, autoUpgrade, keepLog, rememberAnswers, cheapFormulas, hardOnSonnet, tellDrags } =
+      await chrome.storage.local.get(['apiKey', 'model', 'autoUpgrade', 'keepLog', 'rememberAnswers', 'cheapFormulas', 'hardOnSonnet', 'tellDrags']).catch(() => ({}));
     const baseModel = resolveModel(savedModel);
     const apiKey = cleanKey(rawKey);
     if (!apiKey) {
@@ -2419,7 +2461,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     let result;
     try {
       result = await runGoal(apiKey, msg.notes ?? '', tabId, msg.postClicks ?? [], baseModel, autoUpgrade !== false, log,
-        hostOf(sender.url ?? sender.tab?.url), rememberAnswers !== false, cheapFormulas === true, hardOnSonnet === true);
+        hostOf(sender.url ?? sender.tab?.url), rememberAnswers !== false, cheapFormulas === true, hardOnSonnet === true, tellDrags === true);
     } catch (e) {
       // Anything unexpected still has to come back as an answer. Without this
       // the reply never arrives and the widget sits on "Answering…" forever.

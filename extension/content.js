@@ -533,7 +533,11 @@ function dragSummary() {
   });
   const left = lay.labelled && lay.zones.some((z, i) => lay.labels[i] && !cardsIn(z).length)
     ? lay.zones.reduce((n, z, i) => n + (lay.labels[i] ? 0 : cardsIn(z).length), 0) : 0;
+  // Every card in a labelled box, none left over: the question is answered as it stands
+  // (a single list to put in order is never "done" by this test)
+  const done = lay.labelled && left === 0 && lay.zones.every((z, i) => lay.labels[i] ? cardsIn(z).length > 0 : cardsIn(z).length === 0);
   return {
+    done,
     text: `Drop areas, in page order: ${said.join('; ')}. Each card below says which area it is in and its place there. Put every card in the area it belongs to; a card left in the pool is unanswered. If a card is in the same place after a move, that direction does not work from where it is — try another direction or another number of steps.`,
     left
   };
@@ -973,10 +977,11 @@ function scrape() {
   const listed = elements.filter(e => /^position \d+ of \d+ list choices\b/i.test(e.text ?? '')).length;
   const matching = listed > 0 || elements.some(e => /\bdrop zone has choice\b/i.test(e.text ?? ''));
   const drops = isDrag ? dragSummary() : null;
-  const cards = drops ? { dragZones: drops.text, dragLeft: drops.left }
+  const cards = drops ? { dragZones: drops.text, dragLeft: drops.left, ...(drops.done ? { dragDone: true } : {}) }
     : matching ? {
       dragZones: 'A matching question. A card still to be placed reads "position N of M list choices"; a placed one reads "<area> drop zone has choice <card>". Every card has to be placed in the area it belongs to. If a card reads the same after a move, that direction does not work from where it is — try another direction or another number of steps.',
-      dragLeft: listed
+      dragLeft: listed,
+      ...(listed === 0 ? { dragDone: true } : {})
     } : {};
   return {
     text,
@@ -2251,6 +2256,15 @@ function bgSend(msg, cb) {
         </div>
         <div class="row-hint">On McGraw Hill Connect, when an answer is marked wrong the page shows the right one. Page Agent keeps it, in this browser only, and gives it the next time that question comes up, with no call to Claude.</div>
 
+        <div class="label">Drag and drop</div>
+        <div class="group">
+          <div class="row">
+            <span class="row-label">Just tell me the answer</span>
+            <div class="switch" id="tellSw" role="switch" aria-checked="false" tabindex="0"></div>
+          </div>
+        </div>
+        <div class="row-hint">Page Agent drags the cards itself, and if it can't place them all it says where each one goes, here in the bar, for you to drag. Turn this on to have it say the answer straight away and leave the dragging to you. Press play when you've placed them and it carries on.</div>
+
         <div class="label">Cost</div>
         <div class="group">
           <div class="row">
@@ -2316,7 +2330,7 @@ function bgSend(msg, cb) {
   const flagBtn = $('flag'), logSw = $('logSw'), logRow = $('logRow'), logCount = $('logCount');
   const logDownloadBtn = $('logDownload'), logClearBtn = $('logClear');
   const bookSw = $('bookSw'), bookRow = $('bookRow'), bookCount = $('bookCount'), bookClearBtn = $('bookClear');
-  const spendText = $('spendText'), spendDetail = $('spendDetail'), spendResetBtn = $('spendReset'), cheapSw = $('cheapSw'), hardSw = $('hardSw');
+  const spendText = $('spendText'), spendDetail = $('spendDetail'), spendResetBtn = $('spendReset'), cheapSw = $('cheapSw'), hardSw = $('hardSw'), tellSw = $('tellSw');
   const checkPageBtn = $('checkPage'), checkResult = $('checkResult');
   const root = $('root'), hideBtn = $('hide'), toast = $('toast');
 
@@ -2509,7 +2523,7 @@ function bgSend(msg, cb) {
 
   // ── Persistence ────────────────────────────────────────────────────────────
   store.get(
-    ['mode', 'lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'model', 'barPos', 'keepLog', 'barHidden', 'rememberAnswers', 'cheapFormulas', 'hardOnSonnet'],
+    ['mode', 'lastPresetIndex', 'notes', 'autoContinue', 'autoUpgrade', 'apiKey', 'model', 'barPos', 'keepLog', 'barHidden', 'rememberAnswers', 'cheapFormulas', 'hardOnSonnet', 'tellDrags'],
     s => {
       setHidden(s.barHidden === true, false);
 
@@ -2550,6 +2564,9 @@ function bgSend(msg, cb) {
       cheapFormulas = s.cheapFormulas === true;
       cheapSw.classList.toggle('on', cheapFormulas);
       cheapSw.setAttribute('aria-checked', String(cheapFormulas));
+
+      tellSw.classList.toggle('on', s.tellDrags === true);
+      tellSw.setAttribute('aria-checked', String(s.tellDrags === true));
 
       hardOnSonnet = s.hardOnSonnet === true;
       hardSw.classList.toggle('on', hardOnSonnet);
@@ -2677,6 +2694,11 @@ function bgSend(msg, cb) {
     hardSw.setAttribute('aria-checked', String(on));
     store.set({ hardOnSonnet: on });
   }
+  const setTell = on => { tellSw.classList.toggle('on', on); tellSw.setAttribute('aria-checked', String(on)); store.set({ tellDrags: on }); };
+  tellSw.addEventListener('click', () => setTell(tellSw.getAttribute('aria-checked') !== 'true'));
+  tellSw.addEventListener('keydown', e => {
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setTell(tellSw.getAttribute('aria-checked') !== 'true'); }
+  });
   hardSw.addEventListener('click', () => setHard(!hardOnSonnet));
   hardSw.addEventListener('keydown', e => {
     if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setHard(!hardOnSonnet); }
