@@ -103,6 +103,13 @@ const TELL_DRAG = `This is a drag-and-drop question. Do NOT move anything. Work 
 // answered Required 1, then left Required 2 and 3 empty and went on as if done)
 const FROM_MEMORY = 'This question points to an outside source (a website or a company\'s report) that you cannot open. Answer from what you know of it: give your best figures for well-known companies, and for a written answer, write it. Never leave a box empty.';
 
+// Whether a part of a question has been left wholly blank: it has boxes to fill (typed
+// boxes, dropdowns, worksheet cells) and not one of them holds anything. Some empty is
+// ordinary — a statement table leaves most of its cells unused — so only all of them counts.
+const isBox = e => e.tag === 'textarea' || e.tag === 'select' || !!e.options || (!!e.sheet && !e.cell)
+  || (e.tag === 'input' && !/^(radio|checkbox|button|submit|hidden)$/.test(e.type ?? ''));
+const allBlank = elements => { const boxes = (elements ?? []).filter(isBox); return boxes.length > 0 && boxes.every(e => !e.value); };
+
 // A multiple-choice page answered with a click that picks no choice at all
 const isChoice = e => e?.tag === 'input' && /^(radio|checkbox)$/.test(e.type ?? '');
 function missedTheChoices(action, elements) {
@@ -1591,7 +1598,6 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   let recallNote = '';     // ...and given to the model when that question comes round again
   let dragNudges = 0;      // "done" said with cards still in the pool, this run
   let blankNudges = 0;     // "done" said with boxes still empty, in a question in parts
-  let blankHere = false;   // the part on screen was given up on with boxes empty
   let lastText = '';
   const blankLeft = [];    // ...and the parts it happened to, to be said at the end
   let knownEntries = [];   // what a worksheet's dropdown cells offered, as one of them showed it: for the cells after
@@ -1898,18 +1904,11 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
           }
           // A part of a question called done with its boxes still empty is not: asked once more,
           // and then left to be said at the end, not rated and gone on from as if answered
-          if (parts) {
-            const empty = pageData.elements.filter(e => !e.value && (e.tag === 'textarea' || e.tag === 'select' || e.options
-              || (e.tag === 'input' && !/^(radio|checkbox|button|submit|hidden)$/.test(e.type ?? '')))).length;
-            if (empty > 0) {
-              if (++blankNudges <= 1) {
-                history.push(`said it was done, but ${empty} box${empty > 1 ? 'es are' : ' is'} still empty, so it is NOT done — fill every box, with your best answer if you must`);
-                budget++;   // the step it needs to do it
-                stepDone = true;
-                break;
-              }
-              blankHere = true;
-            }
+          if (parts && allBlank(pageData.elements) && ++blankNudges <= 1) {
+            history.push('said it was done, but every box here is still empty, so it is NOT done — fill them in, with your best answer if you must');
+            budget++;   // the step it needs to do it
+            stepDone = true;
+            break;
           }
           finished = true;
           saidDone = true;
@@ -2035,8 +2034,12 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
     if (parts && (finished || step === budget - 1)) {
       const here = parts.find(p => p.current)?.text ?? (doneParts.length ? null : parts[0].text);
       if (here && !doneParts.includes(here)) doneParts.push(here);
-      if (blankHere && here) blankLeft.push(here);
-      blankHere = false; blankNudges = 0;
+      // Leaving a part with every box empty (given up on, or a fill that never took): kept, to be said
+      if (here) {
+        const now = await sendToTab(tabId, { type: 'SCRAPE', peek: true }, frameId).catch(() => null);
+        if (allBlank(now?.elements) && !blankLeft.includes(here)) blankLeft.push(here);
+      }
+      blankNudges = 0;
       const next = parts.find(p => !doneParts.includes(p.text));
       if (next && cancelledRuns.has(tabId)) {
         cancelledRuns.delete(tabId);

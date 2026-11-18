@@ -957,8 +957,10 @@ function scrape() {
     // Ordinary questions fit on screen, so staying in the viewport keeps
     // offscreen nav and footer links out of the list. (A box found the hard way is
     // the answer, wherever it is.)
-    const boxSet = new Set(deepBoxes);
-    _lastElements = [...deepBoxes, ...all.filter(el => !boxSet.has(el) && inViewport(el))].slice(0, 25);
+    // And a worksheet cell or two, too few to make the page a worksheet (one box for a
+    // written answer under a Required tab), is still where the answer goes: listed first
+    const boxSet = new Set([...deepBoxes, ...sheetCells]);
+    _lastElements = [...deepBoxes, ...sheetCells, ...all.filter(el => !boxSet.has(el) && inViewport(el))].slice(0, 25);
   }
 
   const parts = partTabs();
@@ -1268,11 +1270,14 @@ function setFieldValue(el, value) {
 
   // (a role="textbox" or a contenteditable in a form the browser doesn't call editable
   // is still typed into as text: it has no value to set)
-  if (el.isContentEditable || (tag !== 'input' && tag !== 'textarea')) {
+  if (el.isContentEditable || el.hasAttribute('contenteditable') || /^(textbox|searchbox|spinbutton)$/.test(el.getAttribute('role') ?? '')) {
     el.textContent = value;
     el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, data: value }));
     return true;
   }
+
+  // Anything else (a link, a button, a tab) is not a box: typing into it would only rename it
+  if (tag !== 'input' && tag !== 'textarea') return false;
 
   // A number box silently blanks anything that isn't a plain number, so
   // "7,200", "$7,200" or an accountant's "(7,200)" is cleaned up first

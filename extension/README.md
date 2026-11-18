@@ -303,7 +303,14 @@ change between sites.
   it knows (`FROM_MEMORY`: best figures for well-known companies, write the explanation, never an
   empty box); a part called done with boxes empty is asked once more (`blankNudges`); parts still
   blank are collected (`blankLeft`) and said at the end with the page left unrated and Next not
-  pressed. `scripts`: `test/test-blank-parts.js`.
+  pressed (`test/test-blank-parts.js`). Checked against the real page's kind of box in 1.0.21:
+  its boxes are worksheet cells (`td.responseCell`), which the first version's count of empty
+  boxes left out, so it would not have fired there. `isBox` takes them in; a part is blank only
+  when it has boxes and *none* holds anything (`allBlank`: a statement leaves most cells unused),
+  judged on a fresh look when the part is left, whatever the model said. And a worksheet cell
+  or two — too few to make the page a worksheet, like Required 3's one cell for a written
+  answer — was never listed at all: such cells now head the ordinary list. `setFieldValue`
+  no longer writes text into anything that isn't a box (a `fill` aimed at a tab renamed it).
 - **Saying a drag answer** — whether a key moves a card between boxes depends on how the page
   is built, so dragging is the one thing that can't always be done. `tellDrag` asks for the
   answer in words (`TELL_DRAG`: `{"action":"none","text":"card → area; …"}`, on the stronger
