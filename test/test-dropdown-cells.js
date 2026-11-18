@@ -49,6 +49,16 @@ function sheet(p, mode, { numbers = false } = {}) {
   };
   const open = () => {
     close();
+    if (p.plainList) {
+      // as a spreadsheet widget draws it: a floating table of entries, all of them, with
+      // nothing to say it is a list, picked on the mouse going down
+      const box = d.createElement('div');
+      box.style.position = 'absolute';
+      box.innerHTML = `<table><tbody>${OPTIONS.map(o => `<tr><td>${o}</td></tr>`).join('')}</tbody></table>`;
+      box.querySelectorAll('td').forEach(td => td.addEventListener('mousedown', () => { st.clicked++; commit(td.textContent); }));
+      d.body.appendChild(box); st.popup = box;
+      return;
+    }
     const ul = d.createElement('ul');
     ul.className = 'ui-autocomplete';
     OPTIONS.filter(o => o.toLowerCase().startsWith(st.text.toLowerCase().slice(0, 1))).forEach(o => {
@@ -86,6 +96,7 @@ const fillAll = values => b => {
 };
 const run = async (mode, reply, opts) => {
   const p = boot(page(opts?.numbers), { installLayout: flat, url: CONNECT, storage: { lastPresetIndex: 1, autoContinue: false }, reply });
+  p.plainList = !!opts?.plainList;
   const s = sheet(p, mode, opts);
   p.pressPlay();
   const final = await settle(p, 120000);
@@ -143,6 +154,15 @@ const run = async (mode, reply, opts) => {
     const { s } = await run('race', reply);
     check('a name that is only like one on the list is left to the model, with the whole list', s.values().join() === RIGHT.join() && /Long-term liability/.test(second), s.values().join(' | '));
     check('  and what the list offered is on the page text of that call', /The dropdown cells on this page offered these entries/.test(second) && /Long-term liability/.test(second.split('offered these entries')[1] ?? ''), second.slice(second.indexOf('Page text'), second.indexOf('Page text') + 500));
+  }
+
+  // ── A list with nothing to say it is one (a floating table of entries) ───
+  {
+    const { s, p, final } = await run('clickonly', fillAll(RIGHT), { plainList: true });
+    check('a list drawn as a bare floating table: the entry is found and picked', s.values().join() === RIGHT.join() && s.st.clicked === 4 && !p.isError(), `${s.values().join(' | ')} / clicked ${s.st.clicked} / ${final}`);
+    const near = [...RIGHT]; near[3] = 'Disclosure notes only';
+    const r = await run('clickonly', fillAll(near), { plainList: true });
+    check('  and a name it has in another form is picked from it too', r.s.values().join() === RIGHT.join() && r.p.requests.length === 1, `${r.s.values().join(' | ')} / ${r.p.requests.length} calls`);
   }
 
   // ── A cell that takes nothing at all is reported, not called filled ──────

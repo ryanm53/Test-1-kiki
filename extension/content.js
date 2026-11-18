@@ -1062,9 +1062,35 @@ function editingNow() {
 // page's own bullet points are not choices.)
 const LIST_BOX = '[role="listbox"], [role="menu"], .ui-autocomplete, .ui-menu, .dropdown-menu, datalist, select, [class*="autocomplete"], [class*="suggest"], [class*="dropdown"], [class*="option-list"]';
 function listedOptions() {
-  return Array.from(document.querySelectorAll('[role="option"], [role="menuitem"], .ui-menu-item, li, option'))
+  const marked = Array.from(document.querySelectorAll('[role="option"], [role="menuitem"], .ui-menu-item, li, option'))
     .filter(o => !o.closest('#__cap-host, #__cap-marks') && isRendered(o)
       && (o.matches('[role="option"], [role="menuitem"], .ui-menu-item') || o.closest(LIST_BOX)));
+  return marked.length ? marked : popupEntries();
+}
+
+// A list that says nothing of being one: spreadsheet widgets float a little table (or a
+// stack of divs) of entries by the cell being edited, with no role and no class to go by.
+// While something is being typed into, the floating box with the most short entries in
+// it is that list. Never the sheet itself, which is a table of cells too.
+function popupEntries() {
+  const a = document.activeElement;
+  if (!a || !(a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable || a.matches?.('td'))) return [];
+  let best = [];
+  for (const box of document.querySelectorAll('div, ul, ol, table')) {
+    if (box.closest('#__cap-host, #__cap-marks') || box.querySelector('td.responseCell, td[tabindex], input, textarea')) continue;
+    const pos = getComputedStyle(box).position;
+    if ((pos !== 'absolute' && pos !== 'fixed') || !isRendered(box)) continue;
+    const seen = new Set();
+    const entries = Array.from(box.querySelectorAll('td, li, div, span, a')).filter(e => {
+      if (e.childElementCount || !isRendered(e)) return false;
+      const t = (e.innerText ?? e.textContent ?? '').replace(/\s+/g, ' ').trim();
+      if (!t || t.length > 80 || seen.has(t)) return false;
+      seen.add(t);
+      return true;
+    });
+    if (entries.length >= 2 && entries.length > best.length) best = entries;
+  }
+  return best;
 }
 
 // Whether a ribbon toggle is on, a tab chosen, a menu open, a control usable —

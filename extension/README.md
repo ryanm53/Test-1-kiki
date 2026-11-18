@@ -297,6 +297,14 @@ change between sites.
   can't be clicked from memory (`recalled` stays false). `connectResult` takes the
   box to mean a wrong answer when no "Your Answer" pill is shown (`GRADED` no
   longer takes the box's own "Correct Answer" heading for the pill).
+- **Lists that don't say they are lists** — a worksheet cell's dropdown was only recognised by a
+  role or a class (`[role="option"]`, `.ui-menu-item`, `li` in a list box). Spreadsheet widgets
+  float a bare table or stack of divs by the cell instead, and then nothing was read from it or
+  clicked in it: the name was typed, Enter pressed, and the cell took it or didn't.
+  `popupEntries` (the fallback of `listedOptions`): while something is being typed into, the
+  absolutely-positioned box with the most short, childless entries in it — never one holding
+  cells or inputs — is the list. Not seen on the real page; `Copy page details` now includes
+  `floating` boxes, taken while a dropdown is open, for when it still sticks.
 - **Parts left blank** — a question in tabs that points to a website (EDGAR: ROE and ROA for two
   companies) had Required 1 answered, 2 and 3 given up on with their boxes empty, and the run
   went on as if done. The model is now told, on a page `OUTSIDE_INFO` matches, to answer from what

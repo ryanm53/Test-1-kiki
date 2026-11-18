@@ -1160,6 +1160,8 @@ function probeStructure() {
     cells: Array.from(document.querySelectorAll('td[tabindex], td.responseCell')).slice(0, 3).map(td => trim(td.outerHTML, 240)),
     lists: Array.from(document.querySelectorAll('[role="listbox"], [role="menu"], .ui-autocomplete, .ui-menu, .dropdown-menu, [class*="autocomplete"], [class*="suggest"], [class*="dropdown"] ul'))
       .filter(l => l.getClientRects().length).slice(0, 3).map(l => trim(l.outerHTML, 320)),
+    // Boxes floating over the page (a dropdown's list drawn with no role or class to go by)
+    floating: Array.from(document.querySelectorAll('div, ul, table')).filter(b => !b.closest('#__cap-host') && /absolute|fixed/.test(getComputedStyle(b).position) && b.getClientRects().length && b.innerText?.trim()).slice(0, 4).map(b => trim(b.outerHTML, 300)),
     dragLike: seen.map(el => ({
       tag: el.tagName.toLowerCase(), attrs: attrs(el), text: trim(el.innerText, 60),
       size: `${Math.round(el.getBoundingClientRect().width)}x${Math.round(el.getBoundingClientRect().height)}`,
