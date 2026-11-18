@@ -98,6 +98,11 @@ const OUTSIDE_INFO = /\b(go to|visit|navigate to|search for|look up|look at)\b[^
 // placed (or the student would rather place them), the answer is said in the bar instead.
 const TELL_DRAG = `This is a drag-and-drop question. Do NOT move anything. Work out where every card belongs and reply {"action":"none","text":"<card> → <area>; <card> → <area>"} naming every card and the area it goes in (for putting things in order: the cards in their right order), in as few words as tell them apart.`;
 
+// A question that names a company's reported figures and a website to find them on: the
+// model knows the well-known ones, and a best figure is better than a blank (a real run
+// answered Required 1, then left Required 2 and 3 empty and went on as if done)
+const FROM_MEMORY = 'This question points to an outside source (a website or a company\'s report) that you cannot open. Answer from what you know of it: give your best figures for well-known companies, and for a written answer, write it. Never leave a box empty.';
+
 // A multiple-choice page answered with a click that picks no choice at all
 const isChoice = e => e?.tag === 'input' && /^(radio|checkbox)$/.test(e.type ?? '');
 function missedTheChoices(action, elements) {
@@ -1585,6 +1590,10 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   let loose = null;        // the same for a question that isn't ticking choices: what Connect showed as right is kept as words
   let recallNote = '';     // ...and given to the model when that question comes round again
   let dragNudges = 0;      // "done" said with cards still in the pool, this run
+  let blankNudges = 0;     // "done" said with boxes still empty, in a question in parts
+  let blankHere = false;   // the part on screen was given up on with boxes empty
+  let lastText = '';
+  const blankLeft = [];    // ...and the parts it happened to, to be said at the end
   let knownEntries = [];   // what a worksheet's dropdown cells offered, as one of them showed it: for the cells after
   let lastDrag = null;     // a drag question as last read, for saying its answer when the cards can't all be placed
   // The answer to a drag question, in words, for the bar — or null if the model has none
@@ -1727,6 +1736,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
         }
 
         // A drag question: the lists the cards can go into, and what each holds now
+        lastText = pageText;
         if (pageData.dragZones) pageText = `${pageData.dragZones}\n\n${pageText}`;
         // A dropdown cell has shown its list: the rest are filled from it
         if (knownEntries.length) pageText = `The dropdown cells on this page offered these entries — a dropdown is filled with the exact words of one of them: ${knownEntries.slice(0, 80).join(' | ')}\n\n${pageText}`;
@@ -1788,7 +1798,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
           // A worksheet can think for longer than the bar's silence
           // timer, which would call the run dead mid-answer
           const stopBeat = heartbeat(tabId, step + 1, budget);
-          ({ action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint, picture, recallNote, only, hardPage)
+          ({ action, request } = await callClaude(apiKey, notes, pageText, pageData.elements, usedModel, !!pageData.isWorksheet, !!pageData.isSimnet, history, !!pageData.isCanvas, retryHint, picture, [recallNote, OUTSIDE_INFO.test(pageText) ? FROM_MEMORY : ''].filter(Boolean).join('\n\n'), only, hardPage)
             .finally(stopBeat));
           // Anything but typing, from a list with no ribbon in it, means it wanted the
           // ribbon: ask again with all of it
@@ -1885,6 +1895,21 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
             history.push(`said it was done, but ${pageData.dragLeft} card${pageData.dragLeft > 1 ? 's are' : ' is'} still to be placed, so it is NOT done — move the next card`);
             stepDone = true;
             break;
+          }
+          // A part of a question called done with its boxes still empty is not: asked once more,
+          // and then left to be said at the end, not rated and gone on from as if answered
+          if (parts) {
+            const empty = pageData.elements.filter(e => !e.value && (e.tag === 'textarea' || e.tag === 'select' || e.options
+              || (e.tag === 'input' && !/^(radio|checkbox|button|submit|hidden)$/.test(e.type ?? '')))).length;
+            if (empty > 0) {
+              if (++blankNudges <= 1) {
+                history.push(`said it was done, but ${empty} box${empty > 1 ? 'es are' : ' is'} still empty, so it is NOT done — fill every box, with your best answer if you must`);
+                budget++;   // the step it needs to do it
+                stepDone = true;
+                break;
+              }
+              blankHere = true;
+            }
           }
           finished = true;
           saidDone = true;
@@ -2010,6 +2035,8 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
     if (parts && (finished || step === budget - 1)) {
       const here = parts.find(p => p.current)?.text ?? (doneParts.length ? null : parts[0].text);
       if (here && !doneParts.includes(here)) doneParts.push(here);
+      if (blankHere && here) blankLeft.push(here);
+      blankHere = false; blankNudges = 0;
       const next = parts.find(p => !doneParts.includes(p.text));
       if (next && cancelledRuns.has(tabId)) {
         cancelledRuns.delete(tabId);
@@ -2027,6 +2054,11 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
       }
     }
     if (finished) break;
+  }
+
+  // Parts given up on with boxes empty: said, not rated and moved on from
+  if (blankLeft.length) {
+    return { success: false, usedModel, error: `Couldn't fill in ${blankLeft.join(' and ')} (${OUTSIDE_INFO.test(lastText) ? 'the question needs figures from a website' : 'no answer came back'}). They're blank: fill them in yourself, then press play.` };
   }
 
   // A drag question left with cards unplaced (out of steps, or "done" said too soon): the

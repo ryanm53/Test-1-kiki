@@ -297,6 +297,13 @@ change between sites.
   can't be clicked from memory (`recalled` stays false). `connectResult` takes the
   box to mean a wrong answer when no "Your Answer" pill is shown (`GRADED` no
   longer takes the box's own "Correct Answer" heading for the pill).
+- **Parts left blank** — a question in tabs that points to a website (EDGAR: ROE and ROA for two
+  companies) had Required 1 answered, 2 and 3 given up on with their boxes empty, and the run
+  went on as if done. The model is now told, on a page `OUTSIDE_INFO` matches, to answer from what
+  it knows (`FROM_MEMORY`: best figures for well-known companies, write the explanation, never an
+  empty box); a part called done with boxes empty is asked once more (`blankNudges`); parts still
+  blank are collected (`blankLeft`) and said at the end with the page left unrated and Next not
+  pressed. `scripts`: `test/test-blank-parts.js`.
 - **Saying a drag answer** — whether a key moves a card between boxes depends on how the page
   is built, so dragging is the one thing that can't always be done. `tellDrag` asks for the
   answer in words (`TELL_DRAG`: `{"action":"none","text":"card → area; …"}`, on the stronger
