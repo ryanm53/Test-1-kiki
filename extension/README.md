@@ -297,6 +297,17 @@ change between sites.
   can't be clicked from memory (`recalled` stays false). `connectResult` takes the
   box to mean a wrong answer when no "Your Answer" pill is shown (`GRADED` no
   longer takes the box's own "Correct Answer" heading for the pill).
+- **Dropdown cells, from the real page** — `Copy page details` on a real Connect worksheet (the
+  accounting tool, `jSheet`, in a frame of its own) gave the cell as it is: `<td class="dropDownList
+  col-row-element responseCell" dropdownid="4" dropdowntype="dropDown" tabindex="11">`, with no
+  list anywhere in the page until the cell is being edited. `describeEl` now marks such a cell
+  (`dropdownId`), and before the model is asked `learnCellList` opens one cell for each list id
+  (click; if no list, a letter typed and taken back), reads its entries (`LIST_OPTIONS`), and
+  closes it with Escape, clearing anything left in a cell that was empty. The cells are then
+  shown with `options=[…]` like any dropdown, so the model picks from the real entries, and
+  `typeIntoCell` aims at that cell's own list. Up to six lists a run, once each (`cellLists`).
+  How this editor opens its list has still not been seen: if `options` don't appear in a prompt
+  (the log has it), page details taken with the list open are what is needed.
 - **Lists that don't say they are lists** — a worksheet cell's dropdown was only recognised by a
   role or a class (`[role="option"]`, `.ui-menu-item`, `li` in a list box). Spreadsheet widgets
   float a bare table or stack of divs by the cell instead, and then nothing was read from it or

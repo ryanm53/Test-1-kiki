@@ -575,6 +575,9 @@ function describeEl(el) {
     question: question || null,
     ...(place ? { place } : {}),
     sheet: isSheetCell(el) || undefined,
+    // Connect's worksheet marks a cell that is answered from a list (page details from a real
+    // one: <td class="dropDownList … responseCell" dropdownid="4" dropdowntype="dropDown">)
+    ...(el.tagName === 'TD' && (el.classList.contains('dropDownList') || el.hasAttribute('dropdownid')) ? { dropdownId: el.getAttribute('dropdownid') || 'list' } : {}),
     cell: cellAddress(el) || undefined,
     // Only meaningful for spreadsheet cells. Scoped to them deliberately:
     // plenty of ordinary elements carry an "active" or "is-selected" class for

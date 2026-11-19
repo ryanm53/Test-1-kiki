@@ -975,6 +975,41 @@ async function typeIntoCell(tabId, frameId, index, value, known = []) {
   };
 }
 
+// What a dropdown cell offers, read before the model is asked: the cell is opened, its list
+// read, and the cell closed again with nothing entered. Connect's worksheet says which cells
+// are dropdowns (describeEl's dropdownId) but keeps their entries out of the page until one
+// is being edited, so the model used to name an answer blind and the list had it or didn't.
+async function learnCellList(tabId, frameId, index) {
+  const read = async () => (await sendToTab(tabId, { type: 'READ_CELL', index }, frameId).catch(() => null))?.text ?? null;
+  const listNow = async () => (await sendToTab(tabId, { type: 'LIST_OPTIONS' }, frameId).catch(() => null))?.options ?? [];
+  const before = await read();
+  const focused = await sendToTab(tabId, { type: 'FOCUS_CELL', index }, frameId).catch(() => null);
+  if (!focused?.success) return [];
+  await attachDebugger(tabId);
+  await new Promise(r => setTimeout(r, 250));
+  let got = await listNow();                       // some open on the click alone
+  if (!got.length) {
+    // ...the rest on a key: a letter, taken back, leaves the whole list showing
+    await typeText(tabId, 'a', 25);
+    await new Promise(r => setTimeout(r, 450));
+    const narrowed = await listNow();
+    await pressKey(tabId, 'backspace');
+    await new Promise(r => setTimeout(r, 450));
+    got = await listNow();
+    if (got.length < narrowed.length) got = narrowed;
+  }
+  await pressKey(tabId, 'escape').catch(() => {});
+  await new Promise(r => setTimeout(r, 150));
+  // Nothing may be left behind in a cell that was empty
+  const after = await read();
+  if (before === '' && after) {
+    await sendToTab(tabId, { type: 'FOCUS_CELL', index }, frameId).catch(() => null);
+    await pressKey(tabId, 'backspace').catch(() => {});
+    await pressKey(tabId, 'escape').catch(() => {});
+  }
+  return got;
+}
+
 // rbd keyboard drag: Space lifts, arrows move, Space drops.
 async function trustedKeyDrag(tabId, dir, steps) {
   await attachDebugger(tabId);
@@ -1603,6 +1638,7 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
   let lastText = '';
   const blankLeft = [];    // ...and the parts it happened to, to be said at the end
   let knownEntries = [];   // what a worksheet's dropdown cells offered, as one of them showed it: for the cells after
+  const cellLists = {};    // a dropdown cell's entries, by the list's id, read once a run
   let lastDrag = null;     // a drag question as last read, for saying its answer when the cards can't all be placed
   // The answer to a drag question, in words, for the bar — or null if the model has none
   const tellDrag = async () => {
@@ -1694,6 +1730,16 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
             const there = await sendToTab(tabId, { type: 'SCRAPE', firstLook: step === 0 && attempt === 0 }, other).catch(() => null);
             if (there?.elements?.length) { frameId = other; pageData = there; break; }
           }
+        }
+
+        // Dropdown cells: their lists are read first (once for each list), and shown with the cells
+        if (!pageData.isSimnet && pageData.elements?.some(e => e.dropdownId)) {
+          for (const [i, e] of pageData.elements.entries()) {
+            if (!e.dropdownId || e.dropdownId in cellLists || Object.keys(cellLists).length >= 6) continue;
+            reportProgress(tabId, step + 1, budget);
+            cellLists[e.dropdownId] = await learnCellList(tabId, frameId, i).catch(() => []);
+          }
+          for (const e of pageData.elements) if (e.dropdownId && cellLists[e.dropdownId]?.length) e.options = cellLists[e.dropdownId];
         }
 
         // Nothing to act on anywhere: what the page is made of goes into the answer log, so
@@ -1936,7 +1982,8 @@ async function runGoal(apiKey, notes, tabId, postClicks = [], baseModel = DEFAUL
             // Typing a long worksheet cell by cell can outlast the control
             // bar's silence timer on its own, so keep telling it we're alive.
             reportProgress(tabId, step + 1, budget);
-            const r = await typeIntoCell(tabId, frameId, f.index, f.value, knownEntries);
+            const own = pageData.elements[f.index]?.options;
+            const r = await typeIntoCell(tabId, frameId, f.index, f.value, own?.length ? own : knownEntries);
             if (r.options?.length) knownEntries = [...new Set([...knownEntries, ...r.options])].slice(0, 120);
             if (!r.success) {
               missed.push(r.error?.startsWith('[') ? r.error : `[${f.index}]`);

@@ -31,9 +31,9 @@ const OPTIONS = ['Current liability', 'Long-term liability', 'Disclosure note on
 const ITEMS = ['1. Accounts payable.', '2. Sales tax collected from customers.', '3. Notes payable due in 2 years.', '4. Unused line of credit.'];
 const RIGHT = ['Current liability', 'Current liability', 'Long-term liability', 'Disclosure note only'];
 
-const page = (numbers = false) => `<body><div role="main"><p>Select the appropriate reporting method for each of the items listed below.</p>
+const page = (numbers = false, marked = false) => `<body><div role="main"><p>Select the appropriate reporting method for each of the items listed below.</p>
   <table><tr><th>Item</th><th>${numbers ? 'Amount' : 'Reporting Method'}</th></tr>
-  ${ITEMS.map((t, i) => `<tr><td>${t}</td><td class="responseCell" tabindex="0" id="c${i + 1}"></td></tr>`).join('')}</table>
+  ${ITEMS.map((t, i) => `<tr><td>${t}</td><td class="responseCell${marked ? ' dropDownList" dropdownid="4" dropdowntype="dropDown' : ''}" tabindex="0" id="c${i + 1}"></td></tr>`).join('')}</table>
   <button class="next-button">Next Question</button></div></body>`;
 
 // The editor. mode: 'race' Enter works once the list has opened; 'clickonly' Enter
@@ -83,6 +83,8 @@ function sheet(p, mode, { numbers = false } = {}) {
     } else if (params.type === 'keyDown' && params.text && params.text !== '\r') {
       st.text += params.text;
       if (!numbers) { clearTimeout(st.timer); st.timer = setTimeout(open, 250); }   // the list opens a quarter second after the last letter
+    } else if (params.type !== 'keyUp' && params.key === 'Backspace') {
+      st.text = st.text.slice(0, -1);
     } else if (params.type === 'rawKeyDown' && params.key === 'Escape') {
       st.escapes++; close(); st.text = '';
     }
@@ -95,7 +97,7 @@ const fillAll = values => b => {
   return as(b, { action: 'fill', fills: idx.map((index, i) => ({ index, value: values[i] })) });
 };
 const run = async (mode, reply, opts) => {
-  const p = boot(page(opts?.numbers), { installLayout: flat, url: CONNECT, storage: { lastPresetIndex: 1, autoContinue: false }, reply });
+  const p = boot(page(opts?.numbers, opts?.marked), { installLayout: flat, url: CONNECT, storage: { lastPresetIndex: 1, autoContinue: false }, reply });
   p.plainList = !!opts?.plainList;
   const s = sheet(p, mode, opts);
   p.pressPlay();
@@ -163,6 +165,16 @@ const run = async (mode, reply, opts) => {
     const near = [...RIGHT]; near[3] = 'Disclosure notes only';
     const r = await run('clickonly', fillAll(near), { plainList: true });
     check('  and a name it has in another form is picked from it too', r.s.values().join() === RIGHT.join() && r.p.requests.length === 1, `${r.s.values().join(' | ')} / ${r.p.requests.length} calls`);
+  }
+
+  // ── Cells the page marks as dropdowns: their list is read before the model is asked ─
+  // (a real Connect cell: <td class="dropDownList … responseCell" dropdownid="4" dropdowntype="dropDown">)
+  {
+    let first = '';
+    const { s, p, final } = await run('clickonly', b => { first = first || bodyText(b); return fillAll(RIGHT)(b); }, { plainList: true, marked: true });
+    check('a marked dropdown cell is shown to the model with its entries', /options=\[Current liability \| Long-term liability \| Disclosure note only\]/.test(first), first.split('Elements')[1]?.slice(0, 300));
+    check('  the other cells of the same list point to it', (first.match(/options=\(same as \[\d+\]\)/g) ?? []).length === 3);
+    check('  and every cell is then filled, in one call, nothing left behind by the reading', s.values().join() === RIGHT.join() && p.requests.length === 1 && !p.isError(), `${s.values().join(' | ')} / ${p.requests.length} calls / ${final}`);
   }
 
   // ── A cell that takes nothing at all is reported, not called filled ──────

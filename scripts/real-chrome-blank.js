@@ -63,7 +63,7 @@ const server = http.createServer((req, res) => {
   await new Promise(r => server.listen(0, r));
   const port = server.address().port;
   const ctx = await chromium.launchPersistentContext(fs.mkdtempSync('/tmp/pa-bl-'), {
-    executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', headless: true, viewport: { width: 1100, height: 760 },
+    executablePath: (process.env.CHROMIUM || [...require('fs').readdirSync('/opt/pw-browsers').filter(d => /^chromium-\d+$/.test(d)).map(d => `/opt/pw-browsers/${d}/chrome-linux/chrome`), '/opt/pw-browsers/chromium', '/usr/bin/chromium', '/usr/bin/google-chrome'].find(p => { try { return require('fs').statSync(p).isFile(); } catch (_) { return false; } })), headless: true, viewport: { width: 1100, height: 760 },
     args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, '--no-proxy-server', '--host-resolver-rules=MAP *.mheducation.com 127.0.0.1']
   });
   let [sw] = ctx.serviceWorkers(); if (!sw) sw = await ctx.waitForEvent('serviceworker');
